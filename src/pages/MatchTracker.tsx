@@ -2353,7 +2353,7 @@ export default function MatchTracker() {
       />
       <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-[100vw]"
-        style={{ height: 'calc(var(--vh, 1vh) * 100)' }}
+        style={{ height: 'calc(var(--vh, 1vh) * 100)', maxHeight: '-webkit-fill-available' }}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -4542,20 +4542,20 @@ export default function MatchTracker() {
                       <div className="flex flex-col gap-1">
                         <div className="flex gap-1 justify-center">
                           <button
-                            onClick={() => handleAction(ActionType.YELLOW_CARD, staff.id)}
+                            onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards && staff.stats.yellowCards < 2) handleAction(ActionType.YELLOW_CARD, staff.id); }}
                             disabled={staff.stats.redCards > 0 || staff.stats.yellowCards >= 2}
-                            className="flex-1 h-4 bg-yellow-400 rounded-sm border border-black/20 hover:scale-110 active:scale-95 transition-all disabled:opacity-20"
+                            className="flex-1 h-7 bg-yellow-400 rounded-sm border border-black/20 active:scale-95 transition-all disabled:opacity-20 touch-none"
                           />
                           <button
-                            onClick={() => handleAction(ActionType.RED_CARD, staff.id)}
+                            onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards) handleAction(ActionType.RED_CARD, staff.id); }}
                             disabled={staff.stats.redCards > 0}
-                            className="flex-1 h-4 bg-red-600 rounded-sm border border-black/20 hover:scale-110 active:scale-95 transition-all disabled:opacity-20"
+                            className="flex-1 h-7 bg-red-600 rounded-sm border border-black/20 active:scale-95 transition-all disabled:opacity-20 touch-none"
                           />
                         </div>
 
                         {staff.role === Role.COACH && (
                           <button
-                            onClick={() => handleAction(ActionType.TIMEOUT, staff.id)}
+                            onPointerDown={(e) => { e.preventDefault(); handleAction(ActionType.TIMEOUT, staff.id); }}
                             disabled={
                               (matchData.period !== Period.FIRST && matchData.period !== Period.SECOND) ||
                               (staff.isOpponent ? 

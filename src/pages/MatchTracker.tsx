@@ -2327,8 +2327,8 @@ export default function MatchTracker() {
         reportType={reportType}
       />
       <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-[100vw]"
-        style={{ height: '100svh' } as React.CSSProperties}
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen"
+        style={{ height: '100%', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>

@@ -1140,33 +1140,8 @@ export default function MatchTracker() {
   }, [activeTab, editingPlayerId]);
 
   useEffect(() => {
-    const resetHeight = () => {
-      // Force recalculation of available height
-      const vh = window.innerHeight * 0.01;
-      document.documentElement.style.setProperty('--vh', `${vh}px`);
-    };
-
-    const handleBlur = (e: FocusEvent) => {
-      const target = e.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
-        // Small delay to ensure the keyboard has started closing
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          resetHeight();
-        }, 100);
-      }
-    };
-
-    window.addEventListener('blur', handleBlur, true);
-    window.addEventListener('resize', resetHeight);
-    window.addEventListener('touchend', resetHeight);
-    resetHeight();
-
-    return () => {
-      window.removeEventListener('blur', handleBlur, true);
-      window.removeEventListener('resize', resetHeight);
-      window.removeEventListener('touchend', resetHeight);
-    };
+    // Prevent scroll restoration on iOS
+    window.scrollTo(0, 0);
   }, []);
 
   const lastTickRef = useRef<number>(0);
@@ -2353,7 +2328,7 @@ export default function MatchTracker() {
       />
       <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-[100vw]"
-        style={{ height: 'calc(var(--vh, 1vh) * 100)', maxHeight: '-webkit-fill-available' }}
+        style={{ height: '100svh' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>

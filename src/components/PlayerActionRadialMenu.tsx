@@ -44,7 +44,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
 
   const actions = isGoalkeeper ? goalkeeperActions : playerActions;
 
-  const radius = 95; // Increased slightly for more space
+  const radius = typeof window !== "undefined" && window.innerWidth < 400 ? 78 : 92;
 
   const interventions = player.stats.saves + player.stats.conceded;
   const savePercentage = interventions > 0 ? Math.round((player.stats.saves / interventions) * 100) : 0;
@@ -76,18 +76,19 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
         onClick={onClose}
         className="fixed inset-0 z-[300] bg-slate-950/90 backdrop-blur-[12px]"
       />
-      <div className="fixed inset-0 z-[310] flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-[310] flex items-center justify-center pointer-events-none overflow-hidden">
         <motion.div
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0, opacity: 0 }}
           className="relative w-1 h-1 flex items-center justify-center"
+          style={{ touchAction: 'none' }}
         >
           {selectingZone ? (
             <motion.div 
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="absolute bg-slate-900 border-2 border-white/20 p-6 rounded-[40px] shadow-2xl pointer-events-auto min-w-[340px] flex flex-col items-center"
+              className="absolute bg-slate-900 border-2 border-white/20 p-6 rounded-[40px] shadow-2xl pointer-events-auto w-[88vw] max-w-[340px] flex flex-col items-center"
             >
               {selectionStep === 'shot' ? (
                 <>
@@ -222,7 +223,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
               })}
 
               {/* Cards toggle at bottom - More prominent */}
-              <div className="absolute top-[140px] flex gap-4 pointer-events-auto">
+              <div className="absolute flex gap-4 pointer-events-auto" style={{ top: "clamp(110px, 18vh, 145px)" }}>
                  <button 
                     onClick={() => { onAction(ActionType.YELLOW_CARD, player.id); onClose(); }}
                     className="w-10 h-14 bg-yellow-400 rounded-lg border-4 border-white shadow-2xl active:scale-95 transition-transform hover:scale-110"

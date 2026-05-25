@@ -9,6 +9,12 @@
     box-sizing: border-box;
   }
 
+  html {
+    overflow: hidden;
+    height: 100%;
+    width: 100%;
+  }
+
   body {
     margin: 0;
     padding: 0;
@@ -17,11 +23,8 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
-    position: fixed;
-    width: 100%;
     height: 100%;
-    max-width: 100vw;
-    max-height: 100vh;
+    width: 100%;
     touch-action: manipulation;
   }
 
@@ -29,9 +32,6 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
-    position: fixed;
-    top: 0;
-    left: 0;
   }
 
   input[type="number"]::-webkit-inner-spin-button,
@@ -82,9 +82,5 @@
 @media (max-width: 1024px) {
   .custom-scrollbar::-webkit-scrollbar {
     width: 0px;
-  }
-  
-  body {
-    overflow-x: hidden;
   }
 }

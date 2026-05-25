@@ -2715,7 +2715,7 @@ export default function MatchTracker() {
           {/* MAIN SCORE AND CLOCK ROW */}
           <div className="flex items-center justify-between px-4 pb-1">
             {/* LOCAL GOALS */}
-            <div className="flex-1 flex justify-start">
+            <div className="flex-1 flex flex-col items-start justify-center">
               <motion.span 
                 key={goals}
                 initial={{ scale: 1.5, color: '#fff' }}
@@ -2724,6 +2724,16 @@ export default function MatchTracker() {
               >
                 {goals}
               </motion.span>
+              {(localStaffYellows > 0 || localStaffReds > 0) && (
+                <div className="flex gap-1 mt-1.5 ml-1">
+                  {Array.from({ length: localStaffYellows }).map((_, i) => (
+                    <div key={`ly-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_8px_rgba(250,204,21,0.5)] border border-black/20" />
+                  ))}
+                  {Array.from({ length: localStaffReds }).map((_, i) => (
+                    <div key={`lr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_8px_rgba(239,68,68,0.5)] border border-black/20" />
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* INTEGRATED CLOCK AND CONTROLS (Reduced size) */}
@@ -2798,7 +2808,7 @@ export default function MatchTracker() {
             </div>
 
             {/* RIVAL GOALS */}
-            <div className="flex-1 flex justify-end">
+            <div className="flex-1 flex flex-col items-end justify-center">
               <motion.span 
                 key={opponentGoals}
                 initial={{ scale: 1.5, color: '#fff' }}
@@ -2807,6 +2817,16 @@ export default function MatchTracker() {
               >
                 {opponentGoals}
               </motion.span>
+              {(rivalStaffYellows > 0 || rivalStaffReds > 0) && (
+                <div className="flex gap-1 mt-1.5 mr-1">
+                  {Array.from({ length: rivalStaffYellows }).map((_, i) => (
+                    <div key={`ry-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_8px_rgba(250,204,21,0.5)] border border-black/20" />
+                  ))}
+                  {Array.from({ length: rivalStaffReds }).map((_, i) => (
+                    <div key={`rr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_8px_rgba(239,68,68,0.5)] border border-black/20" />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -4519,12 +4539,12 @@ export default function MatchTracker() {
                           <button
                             onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards && staff.stats.yellowCards < 2) handleAction(ActionType.YELLOW_CARD, staff.id); }}
                             disabled={staff.stats.redCards > 0 || staff.stats.yellowCards >= 2}
-                            className="flex-1 h-7 bg-yellow-400 rounded-sm border border-black/20 active:scale-95 transition-all disabled:opacity-20 touch-none"
+                            className="flex-1 h-8 bg-yellow-400 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
                           />
                           <button
                             onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards) handleAction(ActionType.RED_CARD, staff.id); }}
                             disabled={staff.stats.redCards > 0}
-                            className="flex-1 h-7 bg-red-600 rounded-sm border border-black/20 active:scale-95 transition-all disabled:opacity-20 touch-none"
+                            className="flex-1 h-8 bg-red-600 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
                           />
                         </div>
 

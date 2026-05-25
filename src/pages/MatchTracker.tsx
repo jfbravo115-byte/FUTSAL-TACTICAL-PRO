@@ -2327,8 +2327,8 @@ export default function MatchTracker() {
         reportType={reportType}
       />
       <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen"
-        style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-[100vw]"
+        style={{ height: '100svh' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -4522,7 +4522,7 @@ export default function MatchTracker() {
               )}
 
               {/* LEFT SIDEBAR: STAFF CONTROLS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
+              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0">
                 <div className="flex flex-col items-center gap-1 mb-2">
                   <Users size={14} className="text-slate-500" />
                   <span className="text-[7px] font-black text-slate-500 uppercase text-center leading-none">STAFF</span>
@@ -4677,7 +4677,7 @@ export default function MatchTracker() {
               </div>
 
               {/* RIGHT SIDEBAR: QUICK ACTIONS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
+              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0">
 
                 {/* Match Actions */}
                 <button

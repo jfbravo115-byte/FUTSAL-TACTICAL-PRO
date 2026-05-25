@@ -1,39 +1,38 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
-    --vh: 1vh;
-  }
-
   * {
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  html, body {
-    margin: 0;
-    padding: 0;
+  html {
     overflow: hidden;
-    width: 100%;
-    height: 100%;
-    height: 100svh;
     overscroll-behavior: none;
-    -webkit-overflow-scrolling: touch;
+    height: 100%;
+    height: -webkit-fill-available;
+    background: #0A0B0E;
   }
 
   body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    height: 100%;
+    height: -webkit-fill-available;
     background: #0A0B0E;
     color: #e2e8f0;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
 
   #root {
-    width: 100%;
     height: 100%;
-    height: 100svh;
+    height: -webkit-fill-available;
     overflow: hidden;
-    overscroll-behavior: none;
+    display: flex;
+    flex-direction: column;
   }
 
   input[type="number"]::-webkit-inner-spin-button,
@@ -51,38 +50,18 @@
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
+  .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .no-scrollbar {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 }
 
 @media (max-width: 1024px) {
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 0px;
-  }
+  .custom-scrollbar::-webkit-scrollbar { width: 0px; }
 }

@@ -2327,8 +2327,8 @@ export default function MatchTracker() {
         reportType={reportType}
       />
       <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-[100vw]"
-        style={{ height: '100svh' } as React.CSSProperties}
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen"
+        style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -2615,14 +2615,15 @@ export default function MatchTracker() {
                     <div className={`w-1.5 h-2.5 rounded-sm ${matchData.timeoutsUsed.team.period2 ? 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P2" />
                   </div>
                   {(localStaffYellows > 0 || localStaffReds > 0) && (
-                    <div className="flex gap-[2px] ml-1.5 items-center bg-white/5 px-1 py-0.5 rounded border border-white/10">
-                      <Users size={8} className="text-slate-400 mr-0.5" />
-                      {Array.from({ length: localStaffYellows }).map((_, i) => (
-                        <div key={`y-${i}`} className="w-1.5 h-2.5 bg-yellow-400 rounded-sm border border-black/20" title="Tarjeta Amarilla CT" />
+                    <div className="flex flex-wrap gap-[2px] ml-1 items-center max-w-[32px] overflow-hidden">
+                      {Array.from({ length: Math.min(localStaffYellows, 2) }).map((_, i) => (
+                        <div key={`y-${i}`} className="w-1.5 h-2.5 bg-yellow-400 rounded-[1px] shrink-0" />
                       ))}
-                      {Array.from({ length: localStaffReds }).map((_, i) => (
-                        <div key={`r-${i}`} className="w-1.5 h-2.5 bg-red-600 rounded-sm border border-black/20" title="Tarjeta Roja CT" />
+                      {localStaffYellows > 2 && <span className="text-[6px] font-black text-yellow-400 leading-none">+{localStaffYellows - 2}</span>}
+                      {Array.from({ length: Math.min(localStaffReds, 2) }).map((_, i) => (
+                        <div key={`r-${i}`} className="w-1.5 h-2.5 bg-red-600 rounded-[1px] shrink-0" />
                       ))}
+                      {localStaffReds > 2 && <span className="text-[6px] font-black text-red-500 leading-none">+{localStaffReds - 2}</span>}
                     </div>
                   )}
                 </div>
@@ -2665,14 +2666,15 @@ export default function MatchTracker() {
                 )}
                  <div className="flex items-center justify-end gap-1">
                    {(rivalStaffYellows > 0 || rivalStaffReds > 0) && (
-                     <div className="flex gap-[2px] mr-1.5 items-center bg-white/5 px-1 py-0.5 rounded border border-white/10">
-                       {Array.from({ length: rivalStaffReds }).map((_, i) => (
-                         <div key={`r-${i}`} className="w-1.5 h-2.5 bg-red-600 rounded-sm border border-black/20" title="Tarjeta Roja CT" />
+                     <div className="flex flex-wrap gap-[2px] mr-1 items-center max-w-[32px] overflow-hidden justify-end">
+                       {Array.from({ length: Math.min(rivalStaffReds, 2) }).map((_, i) => (
+                         <div key={`r-${i}`} className="w-1.5 h-2.5 bg-red-600 rounded-[1px] shrink-0" />
                        ))}
-                       {Array.from({ length: rivalStaffYellows }).map((_, i) => (
-                         <div key={`y-${i}`} className="w-1.5 h-2.5 bg-yellow-400 rounded-sm border border-black/20" title="Tarjeta Amarilla CT" />
+                       {rivalStaffReds > 2 && <span className="text-[6px] font-black text-red-500 leading-none">+{rivalStaffReds - 2}</span>}
+                       {Array.from({ length: Math.min(rivalStaffYellows, 2) }).map((_, i) => (
+                         <div key={`y-${i}`} className="w-1.5 h-2.5 bg-yellow-400 rounded-[1px] shrink-0" />
                        ))}
-                       <Users size={8} className="text-slate-400 ml-0.5" />
+                       {rivalStaffYellows > 2 && <span className="text-[6px] font-black text-yellow-400 leading-none">+{rivalStaffYellows - 2}</span>}
                      </div>
                    )}
                    <div className="flex gap-[2px] mr-1.5 items-center">
@@ -2713,9 +2715,9 @@ export default function MatchTracker() {
           </div>
 
           {/* MAIN SCORE AND CLOCK ROW */}
-          <div className="flex items-center justify-between px-4 pb-1">
+          <div className="flex items-center justify-between px-4 pb-1 overflow-hidden">
             {/* LOCAL GOALS */}
-            <div className="flex-1 flex flex-col items-start justify-center">
+            <div className="flex-1 flex flex-col items-start justify-center min-w-0 overflow-hidden">
               <motion.span 
                 key={goals}
                 initial={{ scale: 1.5, color: '#fff' }}
@@ -2725,13 +2727,19 @@ export default function MatchTracker() {
                 {goals}
               </motion.span>
               {(localStaffYellows > 0 || localStaffReds > 0) && (
-                <div className="flex gap-1 mt-1.5 ml-1">
-                  {Array.from({ length: localStaffYellows }).map((_, i) => (
-                    <div key={`ly-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_8px_rgba(250,204,21,0.5)] border border-black/20" />
+                <div className="flex flex-wrap gap-1 mt-1 ml-0.5 max-w-[52px]">
+                  {Array.from({ length: Math.min(localStaffYellows, 3) }).map((_, i) => (
+                    <div key={`ly-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_6px_rgba(250,204,21,0.4)] border border-black/20 shrink-0" />
                   ))}
-                  {Array.from({ length: localStaffReds }).map((_, i) => (
-                    <div key={`lr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_8px_rgba(239,68,68,0.5)] border border-black/20" />
+                  {localStaffYellows > 3 && (
+                    <span className="text-[8px] font-black text-yellow-400 self-center leading-none">+{localStaffYellows - 3}</span>
+                  )}
+                  {Array.from({ length: Math.min(localStaffReds, 3) }).map((_, i) => (
+                    <div key={`lr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_6px_rgba(239,68,68,0.4)] border border-black/20 shrink-0" />
                   ))}
+                  {localStaffReds > 3 && (
+                    <span className="text-[8px] font-black text-red-400 self-center leading-none">+{localStaffReds - 3}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -2808,7 +2816,7 @@ export default function MatchTracker() {
             </div>
 
             {/* RIVAL GOALS */}
-            <div className="flex-1 flex flex-col items-end justify-center">
+            <div className="flex-1 flex flex-col items-end justify-center min-w-0 overflow-hidden">
               <motion.span 
                 key={opponentGoals}
                 initial={{ scale: 1.5, color: '#fff' }}
@@ -2818,12 +2826,18 @@ export default function MatchTracker() {
                 {opponentGoals}
               </motion.span>
               {(rivalStaffYellows > 0 || rivalStaffReds > 0) && (
-                <div className="flex gap-1 mt-1.5 mr-1">
-                  {Array.from({ length: rivalStaffYellows }).map((_, i) => (
-                    <div key={`ry-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_8px_rgba(250,204,21,0.5)] border border-black/20" />
+                <div className="flex flex-wrap gap-1 mt-1 mr-0.5 max-w-[52px] justify-end">
+                  {rivalStaffYellows > 3 && (
+                    <span className="text-[8px] font-black text-yellow-400 self-center leading-none">+{rivalStaffYellows - 3}</span>
+                  )}
+                  {Array.from({ length: Math.min(rivalStaffYellows, 3) }).map((_, i) => (
+                    <div key={`ry-${i}`} className="w-3 h-5 bg-yellow-400 rounded-[3px] shadow-[0_0_6px_rgba(250,204,21,0.4)] border border-black/20 shrink-0" />
                   ))}
-                  {Array.from({ length: rivalStaffReds }).map((_, i) => (
-                    <div key={`rr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_8px_rgba(239,68,68,0.5)] border border-black/20" />
+                  {rivalStaffReds > 3 && (
+                    <span className="text-[8px] font-black text-red-400 self-center leading-none">+{rivalStaffReds - 3}</span>
+                  )}
+                  {Array.from({ length: Math.min(rivalStaffReds, 3) }).map((_, i) => (
+                    <div key={`rr-${i}`} className="w-3 h-5 bg-red-600 rounded-[3px] shadow-[0_0_6px_rgba(239,68,68,0.4)] border border-black/20 shrink-0" />
                   ))}
                 </div>
               )}
@@ -4522,7 +4536,7 @@ export default function MatchTracker() {
               )}
 
               {/* LEFT SIDEBAR: STAFF CONTROLS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0">
+              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
                 <div className="flex flex-col items-center gap-1 mb-2">
                   <Users size={14} className="text-slate-500" />
                   <span className="text-[7px] font-black text-slate-500 uppercase text-center leading-none">STAFF</span>
@@ -4677,7 +4691,7 @@ export default function MatchTracker() {
               </div>
 
               {/* RIGHT SIDEBAR: QUICK ACTIONS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0">
+              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
 
                 {/* Match Actions */}
                 <button

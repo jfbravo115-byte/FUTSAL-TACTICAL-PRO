@@ -41,6 +41,7 @@ import {
   Shield,
   Sparkles,
   Edit2,
+  Pencil,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";

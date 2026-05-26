@@ -35,40 +35,83 @@ const PLAYER_COLORS = {
 type Tool = 'select' | 'draw' | 'player_local' | 'player_rival' | 'erase';
 
 function PitchSVG() {
-  const { x, y, w, h, goalW, goalD, penaltyR, centerR } = PITCH;
+  const { x, y, w, h } = PITCH;
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const goalX = x + (w - goalW) / 2;
+
+  // Futsal field measurements (proportional)
+  const goalW = w * 0.33;       // goal width ~33% of field width
+  const goalD = 10;             // goal depth (outside field)
+  const goalX = cx - goalW / 2;
+
+  // Penalty area: 6m arc radius proportional
+  const penAreaW = w * 0.7;     // penalty area width
+  const penAreaH = h * 0.14;    // penalty area depth
+  const penAreaX = cx - penAreaW / 2;
+
+  // Penalty spot
+  const penSpotY = y + h * 0.15;
+  const penSpotY2 = y + h * 0.85;
+
+  // Center circle radius
+  const centerR = w * 0.13;
+
+  // Corner arcs radius
+  const cornerR = 12;
 
   return (
-    <g opacity={0.9}>
-      {/* Grass */}
-      <rect x={x} y={y} width={w} height={h} fill="#0d2d0d" rx={4} />
-      {/* Stripes */}
-      {Array.from({ length: 8 }).map((_, i) => (
-        <rect key={i} x={x} y={y + i * (h / 8)} width={w} height={h / 16}
-          fill="rgba(255,255,255,0.025)" />
+    <g opacity={0.95}>
+      {/* Grass background */}
+      <rect x={x} y={y} width={w} height={h} fill="#0d2d0d" rx={6} />
+
+      {/* Grass stripes */}
+      {Array.from({ length: 6 }).map((_, i) => (
+        <rect key={i} x={x} y={y + i * (h / 6)} width={w} height={h / 12}
+          fill="rgba(255,255,255,0.02)" />
       ))}
-      {/* Boundary */}
-      <rect x={x} y={y} width={w} height={h} fill="none" stroke="white" strokeWidth={2} rx={4} />
-      {/* Center line */}
-      <line x1={x} y1={cy} x2={x + w} y2={cy} stroke="white" strokeWidth={1.5} />
-      {/* Center circle */}
-      <circle cx={cx} cy={cy} r={centerR} fill="none" stroke="white" strokeWidth={1.5} />
+
+      {/* ── FIELD BOUNDARY ── */}
+      <rect x={x} y={y} width={w} height={h} fill="none"
+        stroke="white" strokeWidth={2.5} rx={6} />
+
+      {/* ── CENTER LINE ── */}
+      <line x1={x} y1={cy} x2={x + w} y2={cy}
+        stroke="white" strokeWidth={1.5} />
+
+      {/* ── CENTER CIRCLE ── */}
+      <circle cx={cx} cy={cy} r={centerR}
+        fill="none" stroke="white" strokeWidth={1.5} />
       <circle cx={cx} cy={cy} r={3} fill="white" />
-      {/* Top goal */}
-      <rect x={goalX} y={y - goalD} width={goalW} height={goalD} fill="none" stroke="white" strokeWidth={1.5} />
-      {/* Bottom goal */}
-      <rect x={goalX} y={y + h} width={goalW} height={goalD} fill="none" stroke="white" strokeWidth={1.5} />
-      {/* Top penalty arc */}
-      <path d={`M ${cx - penaltyR} ${y + 15} A ${penaltyR} ${penaltyR} 0 0 1 ${cx + penaltyR} ${y + 15}`}
-        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
-      {/* Bottom penalty arc */}
-      <path d={`M ${cx - penaltyR} ${y + h - 15} A ${penaltyR} ${penaltyR} 0 0 0 ${cx + penaltyR} ${y + h - 15}`}
-        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
-      {/* Penalty spots */}
-      <circle cx={cx} cy={y + 50} r={3} fill="white" />
-      <circle cx={cx} cy={y + h - 50} r={3} fill="white" />
+
+      {/* ── CORNER ARCS ── */}
+      <path d={`M ${x + cornerR} ${y} A ${cornerR} ${cornerR} 0 0 0 ${x} ${y + cornerR}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+      <path d={`M ${x + w - cornerR} ${y} A ${cornerR} ${cornerR} 0 0 1 ${x + w} ${y + cornerR}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+      <path d={`M ${x + cornerR} ${y + h} A ${cornerR} ${cornerR} 0 0 1 ${x} ${y + h - cornerR}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+      <path d={`M ${x + w - cornerR} ${y + h} A ${cornerR} ${cornerR} 0 0 0 ${x + w} ${y + h - cornerR}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+
+      {/* ── TOP PENALTY AREA (inside field) ── */}
+      <rect x={penAreaX} y={y} width={penAreaW} height={penAreaH}
+        fill="rgba(255,255,255,0.04)" stroke="white" strokeWidth={1.5} />
+
+      {/* ── BOTTOM PENALTY AREA (inside field) ── */}
+      <rect x={penAreaX} y={y + h - penAreaH} width={penAreaW} height={penAreaH}
+        fill="rgba(255,255,255,0.04)" stroke="white" strokeWidth={1.5} />
+
+      {/* ── PENALTY SPOTS ── */}
+      <circle cx={cx} cy={penSpotY} r={3} fill="white" />
+      <circle cx={cx} cy={penSpotY2} r={3} fill="white" />
+
+      {/* ── TOP GOAL (outside field) ── */}
+      <rect x={goalX} y={y - goalD} width={goalW} height={goalD}
+        fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={2} />
+
+      {/* ── BOTTOM GOAL (outside field) ── */}
+      <rect x={goalX} y={y + h} width={goalW} height={goalD}
+        fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={2} />
     </g>
   );
 }

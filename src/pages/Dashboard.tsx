@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, limit, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import {
-  Activity, Trophy, ArrowLeft, Cpu, Users, Target, TrendingUp, LogOut
+  Activity, Trophy, ArrowLeft, Cpu, Users, Target, TrendingUp, LogOut, Trash2, CheckSquare, Square, X
 } from 'lucide-react';
 
 function getGoals(match: SavedMatch) {
@@ -35,6 +35,10 @@ export default function Dashboard() {
   const [matches, setMatches] = useState<SavedMatch[]>([]);
   const [fetching, setFetching] = useState(true);
   const navigate = useNavigate();
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!user) { setFetching(false); return; }
@@ -56,6 +60,31 @@ export default function Dashboard() {
     };
     fetchMatches();
   }, [user]);
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      await Promise.all([...selected].map(id => deleteDoc(doc(db, 'partidos', id))));
+      setMatches(prev => prev.filter(m => !selected.has(m.id)));
+      setSelected(new Set());
+      setSelectMode(false);
+      setConfirmDelete(false);
+    } catch (err) {
+      console.error(err);
+      alert('Error al eliminar los partidos');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-screen bg-[#0A0B0E]">
@@ -83,15 +112,19 @@ export default function Dashboard() {
             </div>
           </div>
           {user && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
-                <div className="w-6 h-6 rounded-full bg-lime-400/20 flex items-center justify-center">
-                  <Users size={12} className="text-lime-400" />
-                </div>
-                <span className="text-xs font-black text-white truncate max-w-[120px]">
-                  {user.displayName || user.email}
-                </span>
-              </div>
+            <div className="flex items-center gap-2">
+              {matches.length > 0 && (
+                <button
+                  onClick={() => { setSelectMode(s => !s); setSelected(new Set()); setConfirmDelete(false); }}
+                  className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase transition-all ${
+                    selectMode
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      : 'bg-white/5 text-slate-400 border border-white/10 hover:text-white'
+                  }`}
+                >
+                  {selectMode ? <X size={14} /> : <CheckSquare size={14} />}
+                </button>
+              )}
               <button
                 onClick={logout}
                 className="p-2 hover:bg-white/10 rounded-xl transition-all text-slate-500 hover:text-red-400"
@@ -103,6 +136,44 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {selectMode && (
+        <div className="sticky top-[57px] z-40 bg-slate-900/95 backdrop-blur-xl border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+          <span className="text-sm font-black text-white">
+            {selected.size} seleccionado{selected.size !== 1 ? 's' : ''}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (selected.size === matches.length) {
+                  setSelected(new Set());
+                } else {
+                  setSelected(new Set(matches.map(m => m.id)));
+                }
+              }}
+              className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[11px] font-black text-slate-400 hover:text-white transition-all"
+            >
+              {selected.size === matches.length ? 'Deselec. todo' : 'Selec. todo'}
+            </button>
+            {selected.size > 0 && !confirmDelete && (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="px-3 py-1.5 bg-red-500/20 border border-red-500/30 rounded-lg text-[11px] font-black text-red-400 flex items-center gap-1.5 hover:bg-red-500/30 transition-all"
+              >
+                <Trash2 size={12} /> Eliminar ({selected.size})
+              </button>
+            )}
+            {confirmDelete && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                className="px-3 py-1.5 bg-red-600 rounded-lg text-[11px] font-black text-white flex items-center gap-1.5 active:scale-95 transition-all disabled:opacity-50"
+              >
+                {deleting ? '...' : <><Trash2 size={12} /> ¿Confirmar?</>}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-8 pb-16">
         {!user ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -201,13 +272,27 @@ export default function Dashboard() {
                     return (
                       <div
                         key={m.id}
-                        className="border border-slate-800 rounded-2xl bg-slate-900/40 p-5 flex flex-col hover:border-slate-700 transition-all hover:bg-slate-900/60"
+                        onClick={() => selectMode && toggleSelect(m.id)}
+                        className={`border rounded-2xl bg-slate-900/40 p-5 flex flex-col transition-all ${
+                          selectMode
+                            ? selected.has(m.id)
+                              ? 'border-red-500 bg-red-500/10 cursor-pointer'
+                              : 'border-slate-700 cursor-pointer hover:border-slate-600'
+                            : 'border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                        }`}
                       >
                         <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h3 className="font-black text-base text-white">{m.teamName || 'Mi Equipo'}</h3>
-                            <p className="text-slate-500 text-xs font-bold uppercase">vs {m.opponentName || 'Rival'}</p>
-                            <p className="text-slate-600 text-[10px] mt-1">{getMatchDate(m)}</p>
+                          <div className="flex items-start gap-2">
+                            {selectMode && (
+                              <div className={`mt-0.5 shrink-0 ${selected.has(m.id) ? 'text-red-400' : 'text-slate-600'}`}>
+                                {selected.has(m.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+                              </div>
+                            )}
+                            <div>
+                              <h3 className="font-black text-base text-white">{m.teamName || 'Mi Equipo'}</h3>
+                              <p className="text-slate-500 text-xs font-bold uppercase">vs {m.opponentName || 'Rival'}</p>
+                              <p className="text-slate-600 text-[10px] mt-1">{getMatchDate(m)}</p>
+                            </div>
                           </div>
                           <div className={`px-3 py-1.5 rounded-lg font-black text-sm ${resultColor}`}>
                             {goals} - {opGoals}
@@ -233,8 +318,10 @@ export default function Dashboard() {
                         )}
 
                         <button
-                          onClick={() => navigate(`/analysis/${m.id}`)}
-                          className="mt-auto w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-lime-400 text-slate-900 font-black text-xs hover:bg-lime-500 transition-colors"
+                          onClick={() => !selectMode && navigate(`/analysis/${m.id}`)}
+                          className={`mt-auto w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs transition-colors ${
+                            selectMode ? 'bg-slate-800 text-slate-600 cursor-default' : 'bg-lime-400 text-slate-900 hover:bg-lime-500'
+                          }`}
                         >
                           <Cpu className="w-4 h-4" />
                           VER ANÁLISIS

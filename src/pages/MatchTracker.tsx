@@ -4153,6 +4153,22 @@ export default function MatchTracker() {
                             <span className="z-10 italic font-black">TÁCTICAL PRO</span>
                             <div className="absolute inset-0 bg-blue-500/5 blur-xl -z-0"></div>
                           </button>
+
+                          <button
+                            onClick={() => navigate('/tactical-board')}
+                            className="group py-4 bg-gradient-to-br from-lime-600/15 to-emerald-600/15 border border-lime-500/20 rounded-2xl text-[9px] font-black uppercase hover:from-lime-600/25 hover:to-emerald-600/25 transition-all text-lime-400 flex flex-col items-center gap-2 shadow-inner"
+                          >
+                            <Pencil size={18} className="group-hover:scale-110 transition-transform" />
+                            <span className="font-black">PIZARRA</span>
+                          </button>
+
+                          <button
+                            onClick={() => navigate('/dashboard')}
+                            className="group py-4 bg-white/5 border border-white/10 rounded-2xl text-[9px] font-black uppercase hover:bg-white/10 transition-all text-slate-400 hover:text-white flex flex-col items-center gap-2 shadow-inner"
+                          >
+                            <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />
+                            <span className="font-black">HISTORIAL</span>
+                          </button>
                         </div>
                       </div>
 

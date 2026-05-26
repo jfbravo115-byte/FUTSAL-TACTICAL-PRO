@@ -4147,23 +4147,16 @@ export default function MatchTracker() {
 
                       <div className="pt-2">
                         <button
-                          onClick={() => handleExport("TEAM")}
-                          disabled={isExporting}
-                          className="w-full py-4 bg-gradient-to-br from-blue-600 to-blue-700 border-t border-blue-400/30 rounded-2xl flex items-center justify-center gap-3 text-white shadow-xl shadow-blue-900/40 hover:shadow-blue-900/60 transition-all active:scale-[0.98] disabled:opacity-50 group"
+                          onClick={() => { setIsSidebarOpen(false); navigate('/dashboard'); }}
+                          className="w-full py-4 bg-gradient-to-br from-lime-500 to-lime-600 border-t border-lime-400/30 rounded-2xl flex items-center justify-center gap-3 text-slate-900 shadow-xl shadow-lime-900/40 hover:shadow-lime-900/60 transition-all active:scale-[0.98] group"
                         >
-                          {isExporting ? (
-                            <RotateCcw size={18} className="animate-spin" />
-                          ) : (
-                            <Zap size={18} className="group-hover:animate-pulse" />
-                          )}
+                          <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />
                           <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                            {isExporting
-                              ? "Procesando Analítica..."
-                              : "Exportar Informe Integral PDF"}
+                            HISTORIAL
                           </span>
                         </button>
                         <p className="text-[7px] text-slate-500 uppercase font-bold text-center mt-3 tracking-[0.1em]">
-                          Formato profesional optimizado para impresión A4 y tablets
+                          Partidos guardados y análisis TACTICAL PRO
                         </p>
                       </div>
                     </div>

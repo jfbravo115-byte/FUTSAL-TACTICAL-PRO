@@ -39,79 +39,97 @@ function PitchSVG() {
   const cx = x + w / 2;
   const cy = y + h / 2;
 
-  // Futsal field measurements (proportional)
-  const goalW = w * 0.33;       // goal width ~33% of field width
-  const goalD = 10;             // goal depth (outside field)
+  // ── FUTSAL PITCH MARKINGS (reglamento FIFA/RFEF) ──────────────
+  // Pista: 40x20m → ratio 2:1 (nuestro SVG: w=280, h=460 ≈ ratio 0.6)
+  // Escalamos todo proporcionalmente
+
+  // Portería: 3m ancho × 2m alto → ancho = w * 3/20
+  const goalW = w * 0.50;
+  const goalD = h * 0.022;
   const goalX = cx - goalW / 2;
 
-  // Penalty area: 6m arc radius proportional
-  const penAreaW = w * 0.7;     // penalty area width
-  const penAreaH = h * 0.14;    // penalty area depth
-  const penAreaX = cx - penAreaW / 2;
+  // Área penal (semicírculo): radio 6m → r = h * 6/40
+  const penRadius = h * 0.17;
 
-  // Penalty spot
-  const penSpotY = y + h * 0.15;
-  const penSpotY2 = y + h * 0.85;
+  // Punto de penalti: 6m desde línea de fondo → y = y + h*6/40
+  const penSpotOffset = h * 0.12;
 
-  // Center circle radius
-  const centerR = w * 0.13;
+  // Segundo punto de penalti (doble penalti): 10m → y = y + h*10/40
+  const pen2SpotOffset = h * 0.20;
 
-  // Corner arcs radius
-  const cornerR = 12;
+  // Círculo central: radio 3m → r = h * 3/40
+  const centerR = h * 0.08;
 
   return (
     <g opacity={0.95}>
-      {/* Grass background */}
-      <rect x={x} y={y} width={w} height={h} fill="#0d2d0d" rx={6} />
+      {/* Césped */}
+      <rect x={x} y={y} width={w} height={h} fill="#0d2d0d" rx={4} />
 
-      {/* Grass stripes */}
+      {/* Franjas de césped */}
       {Array.from({ length: 6 }).map((_, i) => (
         <rect key={i} x={x} y={y + i * (h / 6)} width={w} height={h / 12}
-          fill="rgba(255,255,255,0.02)" />
+          fill="rgba(255,255,255,0.018)" />
       ))}
 
-      {/* ── FIELD BOUNDARY ── */}
-      <rect x={x} y={y} width={w} height={h} fill="none"
-        stroke="white" strokeWidth={2.5} rx={6} />
+      {/* ── LÍMITES DE LA PISTA ── */}
+      <rect x={x} y={y} width={w} height={h}
+        fill="none" stroke="white" strokeWidth={2.5} />
 
-      {/* ── CENTER LINE ── */}
+      {/* ── LÍNEA CENTRAL ── */}
       <line x1={x} y1={cy} x2={x + w} y2={cy}
         stroke="white" strokeWidth={1.5} />
 
-      {/* ── CENTER CIRCLE ── */}
+      {/* ── CÍRCULO CENTRAL ── */}
       <circle cx={cx} cy={cy} r={centerR}
         fill="none" stroke="white" strokeWidth={1.5} />
-      <circle cx={cx} cy={cy} r={3} fill="white" />
+      <circle cx={cx} cy={cy} r={2.5} fill="white" />
 
-      {/* ── CORNER ARCS ── */}
-      <path d={`M ${x + cornerR} ${y} A ${cornerR} ${cornerR} 0 0 0 ${x} ${y + cornerR}`}
-        fill="none" stroke="white" strokeWidth={1.5} />
-      <path d={`M ${x + w - cornerR} ${y} A ${cornerR} ${cornerR} 0 0 1 ${x + w} ${y + cornerR}`}
-        fill="none" stroke="white" strokeWidth={1.5} />
-      <path d={`M ${x + cornerR} ${y + h} A ${cornerR} ${cornerR} 0 0 1 ${x} ${y + h - cornerR}`}
-        fill="none" stroke="white" strokeWidth={1.5} />
-      <path d={`M ${x + w - cornerR} ${y + h} A ${cornerR} ${cornerR} 0 0 0 ${x + w} ${y + h - cornerR}`}
-        fill="none" stroke="white" strokeWidth={1.5} />
+      {/* ── ÁREA PENAL SUPERIOR (semicírculo dentro de la pista) ── */}
+      <path
+        d={`M ${cx - penRadius} ${y} A ${penRadius} ${penRadius} 0 0 1 ${cx + penRadius} ${y}`}
+        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
 
-      {/* ── TOP PENALTY AREA (inside field) ── */}
-      <rect x={penAreaX} y={y} width={penAreaW} height={penAreaH}
-        fill="rgba(255,255,255,0.04)" stroke="white" strokeWidth={1.5} />
+      {/* ── ÁREA PENAL INFERIOR (semicírculo dentro de la pista) ── */}
+      <path
+        d={`M ${cx - penRadius} ${y + h} A ${penRadius} ${penRadius} 0 0 0 ${cx + penRadius} ${y + h}`}
+        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
 
-      {/* ── BOTTOM PENALTY AREA (inside field) ── */}
-      <rect x={penAreaX} y={y + h - penAreaH} width={penAreaW} height={penAreaH}
-        fill="rgba(255,255,255,0.04)" stroke="white" strokeWidth={1.5} />
+      {/* ── PUNTO DE PENALTI SUPERIOR ── */}
+      <circle cx={cx} cy={y + penSpotOffset} r={2.5} fill="white" />
 
-      {/* ── PENALTY SPOTS ── */}
-      <circle cx={cx} cy={penSpotY} r={3} fill="white" />
-      <circle cx={cx} cy={penSpotY2} r={3} fill="white" />
+      {/* ── PUNTO DE PENALTI INFERIOR ── */}
+      <circle cx={cx} cy={y + h - penSpotOffset} r={2.5} fill="white" />
 
-      {/* ── TOP GOAL (outside field) ── */}
+      {/* ── SEGUNDO PUNTO DE PENALTI SUPERIOR ── */}
+      <circle cx={cx} cy={y + pen2SpotOffset} r={2} fill="white" opacity={0.6} />
+
+      {/* ── SEGUNDO PUNTO DE PENALTI INFERIOR ── */}
+      <circle cx={cx} cy={y + h - pen2SpotOffset} r={2} fill="white" opacity={0.6} />
+
+      {/* ── PORTERÍA SUPERIOR (fuera de la pista) ── */}
       <rect x={goalX} y={y - goalD} width={goalW} height={goalD}
-        fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={2} />
+        fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth={2} />
 
-      {/* ── BOTTOM GOAL (outside field) ── */}
+      {/* ── PORTERÍA INFERIOR (fuera de la pista) ── */}
       <rect x={goalX} y={y + h} width={goalW} height={goalD}
-        fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={2} />
+        fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth={2} />
+
+      {/* ── ARCOS DE ESQUINA ── */}
+      {[
+        { sx: x, sy: y, sweep: 1 },
+        { sx: x + w, sy: y, sweep: 0 },
+        { sx: x, sy: y + h, sweep: 0 },
+        { sx: x + w, sy: y + h, sweep: 1 },
+      ].map(({ sx, sy, sweep }, i) => {
+        const r = 10;
+        const dx = sx === x ? r : -r;
+        const dy = sy === y ? r : -r;
+        return (
+          <path key={i}
+            d={`M ${sx + dx} ${sy} A ${r} ${r} 0 0 ${sweep} ${sx} ${sy + dy}`}
+            fill="none" stroke="white" strokeWidth={1.5} />
+        );
+      })}
     </g>
   );
 }

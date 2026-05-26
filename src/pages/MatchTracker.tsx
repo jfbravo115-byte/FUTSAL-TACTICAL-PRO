@@ -2472,6 +2472,17 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => { setIsSidebarOpen(false); navigate('/tactical-board'); }}
+                  className="w-full p-5 bg-gradient-to-br from-lime-500/10 to-emerald-500/10 rounded-xl border border-lime-500/20 hover:border-lime-500/40 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
+                >
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-black text-white">PIZARRA</span>
+                    <span className="text-[10px] text-lime-400 font-black tracking-widest">TÁCTICA INTERACTIVA</span>
+                  </div>
+                  <Pencil size={24} className="text-lime-600 group-hover:text-lime-400 transition-colors" />
+                </button>
+
+                <button
                   onClick={() => { setIsSidebarOpen(false); navigate('/dashboard'); }}
                   className="w-full p-5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
                 >

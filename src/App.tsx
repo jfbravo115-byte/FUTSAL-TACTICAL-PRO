@@ -4,7 +4,7 @@ import { AuthProvider } from './lib/AuthContext';
 import MatchTracker from './pages/MatchTracker';
 import Dashboard from './pages/Dashboard';
 import MatchAnalysis from './pages/MatchAnalysis';
-import TacticalBoard from './pages/TacticalBoard';
+import TacticalBoard from './TacticalBoard';
 
 export default function App() {
   return (

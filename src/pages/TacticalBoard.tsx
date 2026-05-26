@@ -39,101 +39,100 @@ function PitchSVG() {
   const cx = x + w / 2;
   const cy = y + h / 2;
 
-  // ── FUTSAL PITCH MARKINGS (reglamento FIFA/RFEF) ──────────────
-  // Pista: 40x20m → ratio 2:1 (nuestro SVG: w=280, h=460 ≈ ratio 0.6)
-  // Escalamos todo proporcionalmente
+  // Pista fútbol sala: 40m × 20m en vertical (h=largo, w=ancho)
+  // Escala: 1m = h/40
+  const m = h / 40;
 
-  // Portería: 3m ancho × 2m alto → ancho = w * 3/20
-  const goalW = w * 0.50;
-  const goalD = h * 0.022;
-  const goalX = cx - goalW / 2;
+  // Portería: 3m ancho
+  const gW = w * 0.38;
+  const gX = cx - gW / 2;
+  const gD = 10;
 
-  // Área penal (semicírculo): radio 6m → r = h * 6/40
-  const penRadius = h * 0.17;
+  // Semicírculo área: radio 6m
+  const penR = 6 * m;
 
-  // Punto de penalti: 6m desde línea de fondo → y = y + h*6/40
-  const penSpotOffset = h * 0.12;
+  // Puntos de penalti
+  const penY1 = y + 6 * m;
+  const penY2 = y + h - 6 * m;
+  const pen2Y1 = y + 10 * m;
+  const pen2Y2 = y + h - 10 * m;
 
-  // Segundo punto de penalti (doble penalti): 10m → y = y + h*10/40
-  const pen2SpotOffset = h * 0.20;
+  // Círculo central: radio 3m
+  const cR = 3 * m;
 
-  // Círculo central: radio 3m → r = h * 3/40
-  const centerR = h * 0.08;
+  // Arco esquina: 25cm
+  const cArc = m * 1;
 
   return (
-    <g opacity={0.95}>
-      {/* Césped */}
-      <rect x={x} y={y} width={w} height={h} fill="#0d2d0d" rx={4} />
+    <g>
+      <defs>
+        <clipPath id="pitchClip">
+          <rect x={x} y={y} width={w} height={h} />
+        </clipPath>
+      </defs>
 
-      {/* Franjas de césped */}
-      {Array.from({ length: 6 }).map((_, i) => (
-        <rect key={i} x={x} y={y + i * (h / 6)} width={w} height={h / 12}
-          fill="rgba(255,255,255,0.018)" />
-      ))}
+      {/* Fondo azul pista */}
+      <rect x={x} y={y} width={w} height={h} fill="#1a6b9a" rx={6} />
 
-      {/* ── LÍMITES DE LA PISTA ── */}
+      {/* Degradado sutil */}
+      <rect x={x} y={y} width={w} height={h / 2}
+        fill="rgba(255,255,255,0.04)" rx={6} />
+
+      {/* Límite */}
       <rect x={x} y={y} width={w} height={h}
-        fill="none" stroke="white" strokeWidth={2.5} />
+        fill="none" stroke="white" strokeWidth={3} rx={6} />
 
-      {/* ── LÍNEA CENTRAL ── */}
+      {/* Línea central */}
       <line x1={x} y1={cy} x2={x + w} y2={cy}
-        stroke="white" strokeWidth={1.5} />
+        stroke="white" strokeWidth={2} />
 
-      {/* ── CÍRCULO CENTRAL ── */}
-      <circle cx={cx} cy={cy} r={centerR}
+      {/* Círculo central */}
+      <circle cx={cx} cy={cy} r={cR}
+        fill="none" stroke="white" strokeWidth={2} />
+      <circle cx={cx} cy={cy} r={3} fill="white" />
+
+      {/* Semicírculo área superior */}
+      <path
+        d={`M ${cx - penR} ${y} A ${penR} ${penR} 0 0 1 ${cx + penR} ${y}`}
+        fill="rgba(255,255,255,0.07)" stroke="white" strokeWidth={2}
+        clipPath="url(#pitchClip)" />
+
+      {/* Semicírculo área inferior */}
+      <path
+        d={`M ${cx - penR} ${y + h} A ${penR} ${penR} 0 0 0 ${cx + penR} ${y + h}`}
+        fill="rgba(255,255,255,0.07)" stroke="white" strokeWidth={2}
+        clipPath="url(#pitchClip)" />
+
+      {/* Punto penalti superior */}
+      <circle cx={cx} cy={penY1} r={3} fill="white" />
+      {/* Punto penalti inferior */}
+      <circle cx={cx} cy={penY2} r={3} fill="white" />
+
+      {/* 2º punto superior */}
+      <circle cx={cx} cy={pen2Y1} r={2.5} fill="white" opacity={0.6} />
+      {/* 2º punto inferior */}
+      <circle cx={cx} cy={pen2Y2} r={2.5} fill="white" opacity={0.6} />
+
+      {/* Arcos esquina */}
+      <path d={`M ${x} ${y + cArc} A ${cArc} ${cArc} 0 0 1 ${x + cArc} ${y}`}
         fill="none" stroke="white" strokeWidth={1.5} />
-      <circle cx={cx} cy={cy} r={2.5} fill="white" />
+      <path d={`M ${x + w} ${y + cArc} A ${cArc} ${cArc} 0 0 0 ${x + w - cArc} ${y}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+      <path d={`M ${x} ${y + h - cArc} A ${cArc} ${cArc} 0 0 0 ${x + cArc} ${y + h}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
+      <path d={`M ${x + w} ${y + h - cArc} A ${cArc} ${cArc} 0 0 1 ${x + w - cArc} ${y + h}`}
+        fill="none" stroke="white" strokeWidth={1.5} />
 
-      {/* ── ÁREA PENAL SUPERIOR (semicírculo dentro de la pista) ── */}
-      <path
-        d={`M ${cx - penRadius} ${y} A ${penRadius} ${penRadius} 0 0 1 ${cx + penRadius} ${y}`}
-        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
+      {/* Portería superior */}
+      <rect x={gX} y={y - gD} width={gW} height={gD}
+        fill="rgba(0,0,0,0.4)" stroke="white" strokeWidth={2.5} />
 
-      {/* ── ÁREA PENAL INFERIOR (semicírculo dentro de la pista) ── */}
-      <path
-        d={`M ${cx - penRadius} ${y + h} A ${penRadius} ${penRadius} 0 0 0 ${cx + penRadius} ${y + h}`}
-        fill="rgba(255,255,255,0.05)" stroke="white" strokeWidth={1.5} />
-
-      {/* ── PUNTO DE PENALTI SUPERIOR ── */}
-      <circle cx={cx} cy={y + penSpotOffset} r={2.5} fill="white" />
-
-      {/* ── PUNTO DE PENALTI INFERIOR ── */}
-      <circle cx={cx} cy={y + h - penSpotOffset} r={2.5} fill="white" />
-
-      {/* ── SEGUNDO PUNTO DE PENALTI SUPERIOR ── */}
-      <circle cx={cx} cy={y + pen2SpotOffset} r={2} fill="white" opacity={0.6} />
-
-      {/* ── SEGUNDO PUNTO DE PENALTI INFERIOR ── */}
-      <circle cx={cx} cy={y + h - pen2SpotOffset} r={2} fill="white" opacity={0.6} />
-
-      {/* ── PORTERÍA SUPERIOR (fuera de la pista) ── */}
-      <rect x={goalX} y={y - goalD} width={goalW} height={goalD}
-        fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth={2} />
-
-      {/* ── PORTERÍA INFERIOR (fuera de la pista) ── */}
-      <rect x={goalX} y={y + h} width={goalW} height={goalD}
-        fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth={2} />
-
-      {/* ── ARCOS DE ESQUINA ── */}
-      {[
-        { sx: x, sy: y, sweep: 1 },
-        { sx: x + w, sy: y, sweep: 0 },
-        { sx: x, sy: y + h, sweep: 0 },
-        { sx: x + w, sy: y + h, sweep: 1 },
-      ].map(({ sx, sy, sweep }, i) => {
-        const r = 10;
-        const dx = sx === x ? r : -r;
-        const dy = sy === y ? r : -r;
-        return (
-          <path key={i}
-            d={`M ${sx + dx} ${sy} A ${r} ${r} 0 0 ${sweep} ${sx} ${sy + dy}`}
-            fill="none" stroke="white" strokeWidth={1.5} />
-        );
-      })}
+      {/* Portería inferior */}
+      <rect x={gX} y={y + h} width={gW} height={gD}
+        fill="rgba(0,0,0,0.4)" stroke="white" strokeWidth={2.5} />
     </g>
   );
 }
-
 function arrowHead(points: { x: number; y: number }[], color: string, scale: number) {
   if (points.length < 2) return null;
   const last = points[points.length - 1];

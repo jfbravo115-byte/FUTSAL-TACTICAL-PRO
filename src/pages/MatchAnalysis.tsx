@@ -85,7 +85,7 @@ export default function MatchAnalysis() {
     }));
 
   return (
-    <div className="min-h-screen bg-[#0A0B0E] text-slate-200 font-sans">
+    <div className="bg-[#0A0B0E] text-slate-200 font-sans overflow-y-auto allow-scroll" style={{ height: "var(--app-height, 100vh)" }}>
       {/* Header */}
       <header className="border-b border-white/10 bg-[#0E1015]/95 sticky top-0 z-50 backdrop-blur-xl">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -103,7 +103,7 @@ export default function MatchAnalysis() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8 pb-16">
         {/* Score */}
         <div className="flex justify-between items-center">
           <div>

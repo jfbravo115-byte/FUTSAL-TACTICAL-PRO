@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Lock viewport height ONCE at load — prevents iOS Safari from
-// resizing the layout when toolbar appears/disappears
+// Lock viewport height ONCE at load
 const h = window.innerHeight;
 document.documentElement.style.setProperty('--app-height', `${h}px`);
 

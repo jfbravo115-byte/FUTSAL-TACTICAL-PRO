@@ -9,6 +9,7 @@ import {
 } from 'recharts';
 import { Cpu, ArrowLeft, Loader2, Trophy, Target, Zap, Shield } from 'lucide-react';
 import Markdown from 'react-markdown';
+import TacticalHeatMap from '../components/TacticalHeatMap';
 
 const formatTime = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -214,6 +215,9 @@ export default function MatchAnalysis() {
             </table>
           </div>
         )}
+
+        {/* Tactical Heat Map */}
+        <TacticalHeatMap match={match} />
 
         {/* Tactical Pro Analysis */}
         <div className="border border-lime-400/20 rounded-2xl overflow-hidden">

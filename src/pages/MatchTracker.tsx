@@ -4164,6 +4164,15 @@ export default function MatchTracker() {
                           </button>
 
                           <button
+                            onClick={() => navigate('/live-tracking')}
+                            className="group py-4 bg-gradient-to-br from-cyan-600/15 to-blue-600/15 border border-cyan-500/20 rounded-2xl text-[9px] font-black uppercase hover:from-cyan-600/25 hover:to-blue-600/25 transition-all text-cyan-400 flex flex-col items-center gap-2 shadow-inner relative overflow-hidden"
+                          >
+                            <Activity size={18} className="group-hover:scale-110 transition-transform" />
+                            <span className="font-black">TRACKING</span>
+                            <span className="text-[6px] text-cyan-600">EN VIVO</span>
+                          </button>
+
+                          <button
                             onClick={() => navigate('/dashboard')}
                             className="group py-4 bg-white/5 border border-white/10 rounded-2xl text-[9px] font-black uppercase hover:bg-white/10 transition-all text-slate-400 hover:text-white flex flex-col items-center gap-2 shadow-inner"
                           >

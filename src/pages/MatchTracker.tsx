@@ -2328,7 +2328,7 @@ export default function MatchTracker() {
         reportType={reportType}
       />
       <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen"
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
         style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
@@ -2560,7 +2560,7 @@ export default function MatchTracker() {
           {/* TOP ROW: LOGOS, NAMES, FOULS */}
           <div className="flex items-center justify-between gap-2 px-1">
             {/* LOCAL INFO */}
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="w-10 h-10 bg-blue-600/10 border border-blue-500/30 rounded-xl flex items-center justify-center font-black text-sm text-blue-400 shrink-0 shadow-lg overflow-hidden relative group">
                 {matchData.teamLogo ? <img src={matchData.teamLogo} className="w-full h-full object-contain" /> : matchData.teamName.substring(0, 1).toUpperCase()}
                 {!isDataLocked && (
@@ -2632,7 +2632,7 @@ export default function MatchTracker() {
             </div>
 
              {/* RIVAL INFO */}
-             <div className="flex items-center justify-end gap-3 min-w-0 text-right">
+             <div className="flex items-center justify-end gap-2 min-w-0 flex-1 text-right">
                <div className="flex flex-col min-w-0">
                 {isEditingOpponentName ? (
                   <div className="flex items-center justify-end gap-1">
@@ -2705,7 +2705,7 @@ export default function MatchTracker() {
           </div>
 
           {/* MAIN SCORE AND CLOCK ROW */}
-          <div className="flex items-center justify-between px-4 pb-1 overflow-hidden">
+          <div className="flex items-center justify-between px-2 pb-1 overflow-hidden">
             {/* LOCAL GOALS */}
             <div className="flex-1 flex flex-col items-start justify-center min-w-0 overflow-hidden">
               <motion.span 
@@ -4514,7 +4514,7 @@ export default function MatchTracker() {
               )}
 
               {/* LEFT SIDEBAR: STAFF CONTROLS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
+              <div className="w-12 sm:w-14 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
                 <div className="flex flex-col items-center gap-1 mb-2">
                   <Users size={14} className="text-slate-500" />
                   <span className="text-[7px] font-black text-slate-500 uppercase text-center leading-none">STAFF</span>
@@ -4675,7 +4675,7 @@ export default function MatchTracker() {
               </div>
 
               {/* RIGHT SIDEBAR: QUICK ACTIONS */}
-              <div className="w-14 sm:w-16 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
+              <div className="w-12 sm:w-14 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
 
                 {/* Match Actions */}
                 <button
@@ -4923,7 +4923,7 @@ export default function MatchTracker() {
       <style>{`
         @media (max-width: 1024px) {
           .custom-scrollbar::-webkit-scrollbar { width: 0px; }
-          body { overflow-x: hidden; }
+          body { overflow-x: hidden !important; max-width: 100vw !important; }
         }
       `}</style>
 

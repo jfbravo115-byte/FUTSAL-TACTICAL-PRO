@@ -5,6 +5,7 @@ import MatchTracker from './pages/MatchTracker';
 import Dashboard from './pages/Dashboard';
 import MatchAnalysis from './pages/MatchAnalysis';
 import TacticalBoard from './pages/TacticalBoard';
+import LiveTracking from './pages/LiveTracking';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/analysis/:matchId" element={<MatchAnalysis />} />
           <Route path="/tactical-board" element={<TacticalBoard />} />
+          <Route path="/live-tracking" element={<LiveTracking />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

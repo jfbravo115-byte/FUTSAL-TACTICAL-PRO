@@ -2569,17 +2569,17 @@ export default function MatchTracker() {
           display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#94a3b8',
         };
 
-        const Header = ({ page, total }: { page: number; total: number }) => (
+        const Header = ({ page, total, mainTeam, vsTeam, accent }: { page: number; total: number; mainTeam: string; vsTeam: string; accent: string }) => (
           <>
             <div style={headerStyle}>
               <div>
-                <div style={{ fontSize: 8, color: '#3b82f6', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>
+                <div style={{ fontSize: 8, color: accent, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>
                   Technical Department · Pro Analytics
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em' }}>
-                  {matchData.teamName}
+                  {mainTeam}
                 </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>vs {matchData.opponentName}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>vs {vsTeam}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 8, color: '#94a3b8', marginBottom: 4 }}>Resultado final</div>
@@ -2613,7 +2613,7 @@ export default function MatchTracker() {
                 if (!team) return null;
                 return (
                   <>
-                    <Header page={1} total={allTeamsForPDF.length * 3} />
+                    <Header page={1} total={allTeamsForPDF.length * 3} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -2726,7 +2726,7 @@ export default function MatchTracker() {
                 const total = allTeamsForPDF.length * 3;
                 return (
                   <>
-                    <Header page={4} total={total} />
+                    <Header page={4} total={total} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>

@@ -5067,8 +5067,8 @@ export default function MatchTracker() {
 
               {/* CENTER: PITCH VISUAL */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-                {/* PITCH VISUAL - VERTICAL ORIENTATION (Optimized height for footer buttons) */}
-                <div className={`relative w-full h-[86%] mb-auto bg-gradient-to-b ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
+                {/* PITCH VISUAL - VERTICAL ORIENTATION */}
+                <div className={`relative w-full flex-1 min-h-0 bg-gradient-to-b ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
                   {/* Grid Marks */}
                   <div className="absolute inset-0 grid grid-cols-8 grid-rows-10 opacity-5 z-0">
                     {Array.from({ length: 80 }).map((_, i) => (

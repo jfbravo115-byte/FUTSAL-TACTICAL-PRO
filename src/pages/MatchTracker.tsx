@@ -2509,12 +2509,17 @@ export default function MatchTracker() {
         ].filter(t => t.players.length > 0);
 
         const getPosLabel = (p: Player) => {
-          if (p.role === Role.GOALKEEPER) return { label: 'PR', bg: '#fef9c3', color: '#854d0e' };
+          if (p.role === Role.GOALKEEPER) return { label: 'PORT', bg: '#fef9c3', color: '#854d0e' };
+          if (p.role === Role.PIVOT) return { label: 'PIVOT', bg: '#f3e8ff', color: '#6b21a8' };
+          if (p.role === Role.DEFENSE) return { label: 'CIERRE', bg: '#dcfce7', color: '#166534' };
+          if (p.role === Role.WING) return { label: 'ALA', bg: '#dbeafe', color: '#1e40af' };
+          if (p.role === Role.COACH) return { label: 'COACH', bg: '#fef3c7', color: '#92400e' };
+          if (p.role === Role.DELEGATE) return { label: 'DELEG', bg: '#f3f4f6', color: '#374151' };
           if (p.pitchPosition !== undefined) {
             const slots = PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
             const slot = slots[p.pitchPosition];
-            if (slot?.label === 'CIE') return { label: 'C', bg: '#dcfce7', color: '#166534' };
-            if (slot?.label === 'PIV' || slot?.label === 'PIV') return { label: 'PV', bg: '#f3e8ff', color: '#6b21a8' };
+            if (slot?.label === 'CIE') return { label: 'CIERRE', bg: '#dcfce7', color: '#166534' };
+            if (slot?.label === 'PIV') return { label: 'PIVOT', bg: '#f3e8ff', color: '#6b21a8' };
             if (slot?.label === 'AI' || slot?.label === 'AD' || slot?.label === 'AL') return { label: 'ALA', bg: '#dbeafe', color: '#1e40af' };
           }
           return { label: 'ALA', bg: '#dbeafe', color: '#1e40af' };
@@ -4831,7 +4836,18 @@ export default function MatchTracker() {
                                     onChange={(e) => updatePlayer(player.id, { role: e.target.value as Role })}
                                     className="bg-black/40 border border-white/10 rounded-lg py-0 h-6 text-[8px] font-black text-slate-400 outline-none px-1"
                                   >
-                                    {Object.values(Role).map((r) => <option key={r} value={r}>{r}</option>)}
+                                    {Object.values(Role).map((r) => {
+                                      const ROLE_ES: Record<string, string> = {
+                                        GOALKEEPER: 'PORT',
+                                        PLAYER: 'ALA',
+                                        WING: 'ALA',
+                                        PIVOT: 'PIVOT',
+                                        DEFENSE: 'CIERRE',
+                                        COACH: 'COACH',
+                                        DELEGATE: 'DELEGADO',
+                                      };
+                                      return <option key={r} value={r}>{ROLE_ES[r] || r}</option>;
+                                    })}
                                   </select>
                                   <button
                                     onClick={() => toggleStarter(player.id)}
@@ -4880,7 +4896,18 @@ export default function MatchTracker() {
                                     onChange={(e) => updatePlayer(player.id, { role: e.target.value as Role })}
                                     className="bg-black/40 border border-white/10 rounded-lg py-0 h-6 text-[8px] font-black text-slate-400 outline-none px-1"
                                   >
-                                    {Object.values(Role).map((r) => <option key={r} value={r}>{r}</option>)}
+                                    {Object.values(Role).map((r) => {
+                                      const ROLE_ES: Record<string, string> = {
+                                        GOALKEEPER: 'PORT',
+                                        PLAYER: 'ALA',
+                                        WING: 'ALA',
+                                        PIVOT: 'PIVOT',
+                                        DEFENSE: 'CIERRE',
+                                        COACH: 'COACH',
+                                        DELEGATE: 'DELEGADO',
+                                      };
+                                      return <option key={r} value={r}>{ROLE_ES[r] || r}</option>;
+                                    })}
                                   </select>
                                   <button
                                     onClick={() => toggleStarter(player.id)}

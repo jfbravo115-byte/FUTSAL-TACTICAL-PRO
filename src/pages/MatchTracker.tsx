@@ -1209,6 +1209,9 @@ export default function MatchTracker() {
   const pdfPage1Ref = useRef<HTMLDivElement>(null);
   const pdfPage2Ref = useRef<HTMLDivElement>(null);
   const pdfPage3Ref = useRef<HTMLDivElement>(null);
+  const pdfPage4Ref = useRef<HTMLDivElement>(null);
+  const pdfPage5Ref = useRef<HTMLDivElement>(null);
+  const pdfPage6Ref = useRef<HTMLDivElement>(null);
   const dynamicExportRef = useRef<HTMLDivElement>(null);
 
   const [isTacticalModalOpen, setIsTacticalModalOpen] = useState(false);
@@ -1546,7 +1549,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -2603,210 +2606,227 @@ export default function MatchTracker() {
 
         return (
           <>
-            {/* PAGE 1 per team: Header + Table */}
+            {/* ── LOCAL: Page 1 (table) */}
             <div ref={pdfPage1Ref} style={pageStyle}>
-              {allTeamsForPDF.map((team, ti) => {
-                pageCounter++;
+              {(() => {
+                const team = allTeamsForPDF[0];
+                if (!team) return null;
                 return (
-                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
-                    <Header page={pageCounter} total={totalPages} />
-                    <div style={{ marginBottom: 8, ...sectionLabelStyle }}>
-                      1. estadísticas por posición — {team.name.toLowerCase()}
-                    </div>
+                  <>
+                    <Header page={1} total={allTeamsForPDF.length * 3} />
+                    <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                           <th style={{ textAlign: 'left', padding: '5px 6px', color: '#64748b', fontWeight: 700, fontSize: 9, minWidth: 100 }}>Jugador</th>
                           <th style={{ padding: '5px 5px', color: '#64748b', fontWeight: 700, fontSize: 9 }}>Pos</th>
-                          {ITEMS.map(it => (
-                            <th key={it.label} style={{ padding: '5px 4px', color: it.color, fontWeight: 700, fontSize: 9, textAlign: 'center' }}>
-                              {it.label.split(' ')[0]}
-                            </th>
-                          ))}
+                          {ITEMS.map(it => (<th key={it.label} style={{ padding: '5px 4px', color: it.color, fontWeight: 700, fontSize: 9, textAlign: 'center' }}>{it.label.split(' ')[0]}</th>))}
                         </tr>
                       </thead>
                       <tbody>
-                        {team.players.map(p => {
-                          const pos = getPosLabel(p);
-                          return (
-                            <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
-                              <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}>
-                                <span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>
-                                {p.name}
-                              </td>
-                              <td style={{ padding: '5px 4px', textAlign: 'center' }}>
-                                <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>
-                                  {pos.label}
-                                </span>
-                              </td>
-                              {ITEMS.map(it => {
-                                const v = it.fn(p);
-                                const isCard = it.label === 'Tarjetas';
-                                return (
-                                  <td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>
-                                    {isCard && v > 0
-                                      ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}`
-                                      : v}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
+                        {team.players.map(p => { const pos = getPosLabel(p); return (
+                          <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
+                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}</td>
+                            <td style={{ padding: '5px 4px', textAlign: 'center' }}><span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>{pos.label}</span></td>
+                            {ITEMS.map(it => { const v = it.fn(p); const isCard = it.label === 'Tarjetas'; return (<td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>{isCard && v > 0 ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}` : v}</td>); })}
+                          </tr>
+                        );})}
                       </tbody>
                     </table>
-                    <Footer page={pageCounter} total={totalPages} />
-                  </div>
+                    <Footer page={1} total={allTeamsForPDF.length * 3} />
+                  </>
                 );
-              })}
+              })()}
             </div>
 
-            {/* PAGE 2 per team: Bar charts */}
+            {/* ── LOCAL: Page 2 (bar charts) */}
             <div ref={pdfPage2Ref} style={pageStyle}>
-              {allTeamsForPDF.map((team, ti) => {
-                pageCounter++;
+              {(() => {
+                const team = allTeamsForPDF[0];
+                if (!team) return null;
+                const total = allTeamsForPDF.length * 3;
                 return (
-                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
+                  <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span>
-                      </div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {pageCounter}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {total}</span>
                     </div>
-
-                    {ITEMS.map(item => {
-                      const vals = team.players.map(p => item.fn(p));
-                      const maxV = Math.max(...vals, 1);
-                      const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
-                      const avgPct = Math.round((avg / maxV) * 100);
-                      return (
-                        <div key={item.label} style={{ marginBottom: 16 }}>
-                          <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>
-                            {item.label}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
-                            {team.players.map((p, i) => {
-                              const pct = maxV > 0 ? vals[i] / maxV : 0;
-                              const h = Math.max(2, Math.round(pct * 44));
-                              return (
-                                <div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                                  <div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div>
-                                  <div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} />
-                                  <div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {p.name.split(' ')[0]}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                            <span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span>
-                            <div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} />
-                            </div>
-                            <span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span>
-                          </div>
+                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
+                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
                         </div>
-                      );
-                    })}
-                    <Footer page={pageCounter} total={totalPages} />
-                  </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
+                      </div>
+                    );})}
+                    <Footer page={2} total={total} />
+                  </>
                 );
-              })}
+              })()}
             </div>
 
-            {/* PAGE 3 per team: Spider + bullet charts */}
+            {/* ── LOCAL: Page 3 (spider charts) */}
             <div ref={pdfPage3Ref} style={pageStyle}>
-              {allTeamsForPDF.map((team, ti) => {
-                pageCounter++;
+              {(() => {
+                const team = allTeamsForPDF[0];
+                if (!team) return null;
+                const total = allTeamsForPDF.length * 3;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
                 const W = 140, H = 140, cx = 70, cy = 70, R = 50;
                 const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
                 const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
-
                 return (
-                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
+                  <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico por jugador</span>
-                      </div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {pageCounter}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {total}</span>
                     </div>
-
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                       {team.players.map(p => {
                         const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
                         const dataR = normV.map(v => (v / 5) * R);
                         const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
-                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0);
-                        const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
-                        const atkPct = Math.round((atk / maxAtkV) * 100);
-                        const defPct = Math.round((def / maxDefV) * 100);
-                        const diff = atkPct - defPct;
-                        const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
-                        const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b';
-                        const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
+                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0); const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
+                        const atkPct = Math.round((atk / maxAtkV) * 100); const defPct = Math.round((def / maxDefV) * 100);
+                        const diff = atkPct - defPct; const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
+                        const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b'; const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
                         const pos = getPosLabel(p);
-
                         return (
                           <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}>
-                              <span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>
-                              {p.name.split(' ')[0]}
-                              <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>
-                                {pos.label}
-                              </span>
-                            </div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
                             <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-                              {[1,2,3,4,5].map(lv => (
-                                <polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>
-                              ))}
-                              {angles.map((a, i) => (
-                                <line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>
-                              ))}
+                              {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
+                              {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               <polygon points={dataPts} fill="rgba(59,130,246,0.1)" stroke="#3b82f6" strokeWidth="1.5"/>
-                              {angles.map((a, i) => {
-                                const px = cx + dataR[i] * Math.cos(a);
-                                const py = cy + dataR[i] * Math.sin(a);
-                                const c = SPIDER_ITEMS[i].isRed ? redGrad(normV[i]) : '#3b82f6';
-                                return <circle key={i} cx={px} cy={py} r="3" fill={c} stroke="white" strokeWidth="0.5"/>;
-                              })}
-                              {SPIDER_ITEMS.map((it, i) => {
-                                const lx = cx + (R + 11) * Math.cos(angles[i]);
-                                const ly = cy + (R + 11) * Math.sin(angles[i]);
-                                const c = it.isRed ? redGrad(normV[i]) : '#94a3b8';
-                                return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>;
-                              })}
+                              {angles.map((a, i) => { const px = cx+dataR[i]*Math.cos(a), py = cy+dataR[i]*Math.sin(a); const c = SPIDER_ITEMS[i].isRed ? redGrad(normV[i]) : '#3b82f6'; return <circle key={i} cx={px} cy={py} r="3" fill={c} stroke="white" strokeWidth="0.5"/>; })}
+                              {SPIDER_ITEMS.map((it, i) => { const lx = cx+(R+11)*Math.cos(angles[i]), ly = cy+(R+11)*Math.sin(angles[i]); const c = it.isRed ? redGrad(normV[i]) : '#94a3b8'; return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>; })}
                             </svg>
                             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {[
-                                { label: 'Ataque', pct: atkPct, color: '#ef4444' },
-                                { label: 'Defensa', pct: defPct, color: '#22c55e' },
-                              ].map(b => (
-                                <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <span style={{ fontSize: 7, color: '#94a3b8', width: 36 }}>{b.label}</span>
-                                  <div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${b.pct}%`, height: '100%', background: b.color, borderRadius: 3 }}/>
-                                  </div>
-                                  <span style={{ fontSize: 7, color: '#94a3b8', width: 22, textAlign: 'right' }}>{b.pct}%</span>
-                                </div>
-                              ))}
-                              <div style={{ marginTop: 3, padding: '2px 8px', borderRadius: 4, background: vbg, border: `0.5px solid ${vc}30`, fontSize: 8, fontWeight: 600, color: vc, textAlign: 'center' }}>
-                                {verdict}
-                              </div>
+                              {[{ label: 'Ataque', pct: atkPct, color: '#ef4444' }, { label: 'Defensa', pct: defPct, color: '#22c55e' }].map(b => (<div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ fontSize: 7, color: '#94a3b8', width: 36 }}>{b.label}</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${b.pct}%`, height: '100%', background: b.color, borderRadius: 3 }}/></div><span style={{ fontSize: 7, color: '#94a3b8', width: 22, textAlign: 'right' }}>{b.pct}%</span></div>))}
+                              <div style={{ marginTop: 3, padding: '2px 8px', borderRadius: 4, background: vbg, border: `0.5px solid ${vc}30`, fontSize: 8, fontWeight: 600, color: vc, textAlign: 'center' }}>{verdict}</div>
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                    <Footer page={pageCounter} total={totalPages} />
-                  </div>
+                    <Footer page={3} total={total} />
+                  </>
                 );
-              })}
+              })()}
+            </div>
+
+            {/* ── RIVAL: Pages 4-6 (only if rival has players) */}
+            <div ref={pdfPage4Ref} style={pageStyle}>
+              {(() => {
+                const team = allTeamsForPDF[1];
+                if (!team) return null;
+                const total = allTeamsForPDF.length * 3;
+                return (
+                  <>
+                    <Header page={4} total={total} />
+                    <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ textAlign: 'left', padding: '5px 6px', color: '#64748b', fontWeight: 700, fontSize: 9, minWidth: 100 }}>Jugador</th>
+                          <th style={{ padding: '5px 5px', color: '#64748b', fontWeight: 700, fontSize: 9 }}>Pos</th>
+                          {ITEMS.map(it => (<th key={it.label} style={{ padding: '5px 4px', color: it.color, fontWeight: 700, fontSize: 9, textAlign: 'center' }}>{it.label.split(' ')[0]}</th>))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {team.players.map(p => { const pos = getPosLabel(p); return (
+                          <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
+                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}</td>
+                            <td style={{ padding: '5px 4px', textAlign: 'center' }}><span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>{pos.label}</span></td>
+                            {ITEMS.map(it => { const v = it.fn(p); const isCard = it.label === 'Tarjetas'; return (<td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>{isCard && v > 0 ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}` : v}</td>); })}
+                          </tr>
+                        );})}
+                      </tbody>
+                    </table>
+                    <Footer page={4} total={total} />
+                  </>
+                );
+              })()}
+            </div>
+
+            <div ref={pdfPage5Ref} style={pageStyle}>
+              {(() => {
+                const team = allTeamsForPDF[1];
+                if (!team) return null;
+                const total = allTeamsForPDF.length * 3;
+                return (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {total}</span>
+                    </div>
+                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
+                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
+                      </div>
+                    );})}
+                    <Footer page={5} total={total} />
+                  </>
+                );
+              })()}
+            </div>
+
+            <div ref={pdfPage6Ref} style={pageStyle}>
+              {(() => {
+                const team = allTeamsForPDF[1];
+                if (!team) return null;
+                const total = allTeamsForPDF.length * 3;
+                const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
+                const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
+                const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
+                const W = 140, H = 140, cx = 70, cy = 70, R = 50;
+                const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
+                const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
+                return (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {total}</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                      {team.players.map(p => {
+                        const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
+                        const dataR = normV.map(v => (v / 5) * R);
+                        const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
+                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0); const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
+                        const atkPct = Math.round((atk / maxAtkV) * 100); const defPct = Math.round((def / maxDefV) * 100);
+                        const diff = atkPct - defPct; const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
+                        const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b'; const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
+                        const pos = getPosLabel(p);
+                        return (
+                          <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
+                            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+                              {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
+                              {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
+                              <polygon points={dataPts} fill="rgba(239,68,68,0.1)" stroke="#ef4444" strokeWidth="1.5"/>
+                              {angles.map((a, i) => { const px = cx+dataR[i]*Math.cos(a), py = cy+dataR[i]*Math.sin(a); const c = SPIDER_ITEMS[i].isRed ? redGrad(normV[i]) : '#ef4444'; return <circle key={i} cx={px} cy={py} r="3" fill={c} stroke="white" strokeWidth="0.5"/>; })}
+                              {SPIDER_ITEMS.map((it, i) => { const lx = cx+(R+11)*Math.cos(angles[i]), ly = cy+(R+11)*Math.sin(angles[i]); const c = it.isRed ? redGrad(normV[i]) : '#94a3b8'; return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>; })}
+                            </svg>
+                            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {[{ label: 'Ataque', pct: atkPct, color: '#ef4444' }, { label: 'Defensa', pct: defPct, color: '#22c55e' }].map(b => (<div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ fontSize: 7, color: '#94a3b8', width: 36 }}>{b.label}</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${b.pct}%`, height: '100%', background: b.color, borderRadius: 3 }}/></div><span style={{ fontSize: 7, color: '#94a3b8', width: 22, textAlign: 'right' }}>{b.pct}%</span></div>))}
+                              <div style={{ marginTop: 3, padding: '2px 8px', borderRadius: 4, background: vbg, border: `0.5px solid ${vc}30`, fontSize: 8, fontWeight: 600, color: vc, textAlign: 'center' }}>{verdict}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <Footer page={6} total={total} />
+                  </>
+                );
+              })()}
             </div>
           </>
         );
@@ -4667,20 +4687,7 @@ export default function MatchTracker() {
                         </div>
                       </div>
 
-                      <div className="pt-2">
-                        <button
-                          onClick={() => { setIsSidebarOpen(false); navigate('/dashboard'); }}
-                          className="w-full py-4 bg-gradient-to-br from-lime-500 to-lime-600 border-t border-lime-400/30 rounded-2xl flex items-center justify-center gap-3 text-slate-900 shadow-xl shadow-lime-900/40 hover:shadow-lime-900/60 transition-all active:scale-[0.98] group"
-                        >
-                          <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                            HISTORIAL
-                          </span>
-                        </button>
-                        <p className="text-[7px] text-slate-500 uppercase font-bold text-center mt-3 tracking-[0.1em]">
-                          Partidos guardados y análisis TACTICAL PRO
-                        </p>
-                      </div>
+
                     </div>
                   </section>
 
@@ -5381,8 +5388,8 @@ export default function MatchTracker() {
               size={18}
               strokeWidth={activeTab === "stats" ? 2.5 : 2}
             />
-            <span className="text-[8px] font-black uppercase tracking-tighter">
-              Estadísticas
+            <span className="text-[7px] font-black uppercase tracking-tighter">
+              Stats
             </span>
           </button>
 

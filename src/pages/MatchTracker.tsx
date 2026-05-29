@@ -858,85 +858,238 @@ const StatsExportTemplate = React.forwardRef<
           {rivalPlayers.length > 0 && renderGoalieSection(rivalPlayers, matchData.opponentName, true)}
         </div>
       ) : (
-        /* GLOBAL / POSITIONAL FIELD PLAYER VIEW */
-        <div className="flex-1 flex flex-col gap-10">
-          <div className="grid grid-cols-3 gap-4">
-             {[
-               { label: 'Goles Local', value: localPlayers.reduce((acc, p) => acc + (p.stats.goals || 0), 0), color: 'text-green-500' },
-               { label: 'Asistencias L', value: localPlayers.reduce((acc, p) => acc + (p.stats.assists || 0), 0), color: 'text-blue-500' },
-               { label: 'Remates L', value: localPlayers.reduce((acc, p) => acc + (p.stats.shots || 0), 0), color: 'text-amber-500' },
-               { label: 'Goles Rival', value: rivalPlayers.reduce((acc, p) => acc + (p.stats.goals || 0), 0), color: 'text-red-500' },
-               { label: 'Asistencias R', value: rivalPlayers.reduce((acc, p) => acc + (p.stats.assists || 0), 0), color: 'text-indigo-400' },
-               { label: 'Remates R', value: rivalPlayers.reduce((acc, p) => acc + (p.stats.shots || 0), 0), color: 'text-amber-400' },
-               { label: 'Recuperac. L', value: localPlayers.reduce((acc, p) => acc + (p.stats.steals || 0), 0), color: 'text-purple-400' },
-               { label: 'Pérdidas L', value: localPlayers.reduce((acc, p) => acc + (p.stats.losses || 0), 0), color: 'text-rose-400' },
-               { label: 'Faltas L', value: localPlayers.reduce((acc, p) => acc + (p.stats.fouls || 0), 0), color: 'text-orange-400' },
-             ].map((stat, i) => (
-               <div key={i} className="bg-white/5 border border-white/5 rounded-3xl p-4 flex flex-col items-center justify-center text-center">
-                 <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</span>
-                 <span className={`text-3xl font-black ${stat.color} tabular-nums mt-1 leading-none`}>{stat.value}</span>
-               </div>
-             ))}
-          </div>
+        /* GLOBAL TEAM VIEW — TABLA + BARRAS + ARAÑA */
+        (() => {
+          const allTeams = [
+            { players: localPlayers, teamName: matchData.teamName, accent: '#3b82f6', isOpponent: false },
+            { players: rivalPlayers, teamName: matchData.opponentName, accent: '#ef4444', isOpponent: true },
+          ].filter(t => t.players.length > 0);
 
-          {[
-            { title: `${matchData.teamName.toUpperCase()} - ESTADÍSTICAS COMPLETAS`, players: localPlayers, accent: "blue" },
-            { title: `${matchData.opponentName.toUpperCase()} - ESTADÍSTICAS COMPLETAS`, players: rivalPlayers, accent: "red" }
-          ].filter(sect => sect.players.length > 0).map((section, idx) => (
-            <div key={idx} className="bg-white/5 border border-white/5 rounded-[40px] p-8 flex flex-col">
-              <h3 className={`text-xs font-black text-white uppercase tracking-widest flex items-center gap-3 border-b border-white/10 pb-6 mb-8`}>
-                {section.accent === "blue" ? <Users size={18} className="text-blue-500" /> : <ShieldAlert size={18} className="text-red-500" />}
-                {section.title}
-              </h3>
-              <div className="flex flex-col gap-3">
-                {section.players
-                  .sort((a, b) => {
-                    const scoreA = (a.stats.goals || 0) * 5 + (a.stats.assists || 0) * 3 + (a.stats.steals || 0) * 2;
-                    const scoreB = (b.stats.goals || 0) * 5 + (b.stats.assists || 0) * 3 + (b.stats.steals || 0) * 2;
-                    return scoreB - scoreA;
-                  })
-                  .map((p) => (
-                    <div key={p.id} className="flex items-center gap-5 bg-black/40 p-3.5 rounded-[24px] border border-white/5">
-                      <div className={`w-10 h-10 ${section.accent === "blue" ? "bg-blue-600/10 text-blue-400 border-blue-500/20" : "bg-red-600/10 text-red-400 border-red-500/20"} border rounded-xl flex items-center justify-center font-black text-lg shadow-lg`}>
-                        {p.number}
-                      </div>
-                      <div className="flex-1 flex flex-col gap-2">
-                        <div className="flex justify-between items-center">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-black uppercase text-white tracking-tight leading-none">{p.name}</span>
-                            <span className="text-[8px] text-slate-500 font-bold uppercase mt-1">Tiempo: {formatPlayerTime(p.individualTimeSeconds || 0)} • +/-: {p.plusMinus || 0}</span>
-                          </div>
-                          <div className="flex gap-1.5 text-[8px] font-black uppercase">
-                            {[
-                              { label: 'G', value: p.stats.goals, color: 'text-green-500' },
-                              { label: 'A', value: p.stats.assists, color: 'text-blue-400' },
-                              { label: 'T', value: p.stats.shots, color: 'text-amber-500' },
-                              { label: 'R', value: p.stats.steals, color: 'text-purple-400' },
-                              { label: 'P', value: p.stats.losses, color: 'text-red-400' },
-                              { label: 'F', value: p.stats.fouls, color: 'text-orange-400' },
-                            ].map((s, i) => (
-                              <div key={i} className="bg-white/5 border border-white/5 px-2 py-1.5 rounded-lg flex flex-col items-center min-w-[28px]">
-                                <span className="text-[6px] text-slate-600 mb-0.5">{s.label}</span>
-                                <span className={`${s.color} text-[9px]`}>{s.value || 0}</span>
-                              </div>
-                            ))}
-                            <div className="bg-white/5 border border-white/5 px-2 py-1.5 rounded-lg flex flex-col items-center justify-center min-w-[32px]">
-                               <span className="text-[6px] text-slate-600 mb-0.5">TAR</span>
-                               <div className="flex gap-1">
-                                 {p.stats.yellowCards > 0 && <div className="w-1.5 h-2.5 bg-yellow-400 rounded-[1px]" title="Amarilla" />}
-                                 {p.stats.redCards > 0 && <div className="w-1.5 h-2.5 bg-red-500 rounded-[1px]" title="Roja" />}
-                                 {(p.stats.yellowCards === 0 && p.stats.redCards === 0) && <span className="text-slate-800 text-[9px]">-</span>}
-                               </div>
+          const ITEMS = [
+            { key: 'goals', label: 'Goles', color: '#22c55e', fn: (p: Player) => p.stats.goals || 0 },
+            { key: 'shots', label: 'Tiros tot.', color: '#f59e0b', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
+            { key: 'shotsOT', label: 'Tiros p.', color: '#fb923c', fn: (p: Player) => p.stats.shots || 0 },
+            { key: 'losses', label: 'Pérdidas', color: '#ef4444', fn: (p: Player) => p.stats.losses || 0 },
+            { key: 'recoveries', label: 'Recuperac.', color: '#a855f7', fn: (p: Player) => p.stats.steals || 0 },
+            { key: 'foulsC', label: 'Faltas com.', color: '#f97316', fn: (p: Player) => p.stats.fouls || 0 },
+            { key: 'foulsR', label: 'Faltas rec.', color: '#64748b', fn: (p: Player) => p.stats.errors || 0 },
+            { key: 'cards', label: 'Tarjetas', color: '#fbbf24', fn: (p: Player) => (p.stats.yellowCards || 0) + (p.stats.redCards || 0) },
+            { key: 'minutes', label: 'Minutos', color: '#38bdf8', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60) },
+          ];
+
+          const ROLE_ORDER = [Role.GOALKEEPER, Role.PLAYER];
+          const ROLE_LABELS: Record<string, string> = { GOALKEEPER: 'Porteros', PLAYER: 'Jugadores de campo' };
+
+          const renderTable = (players: Player[], accent: string) => (
+            <div style={{ overflowX: 'auto', marginBottom: 32 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 6px', color: '#94a3b8', fontWeight: 900, fontSize: 9, textTransform: 'uppercase', minWidth: 100 }}>Jugador</th>
+                    {ITEMS.map(it => (
+                      <th key={it.key} style={{ textAlign: 'center', padding: '4px 4px', color: it.color, fontWeight: 900, fontSize: 8, textTransform: 'uppercase' }}>{it.label.replace('.', '')}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ROLE_ORDER.map(role => {
+                    const group = players.filter(p => p.role === role);
+                    if (group.length === 0) return null;
+                    return [
+                      <tr key={`grp-${role}`} style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        <td colSpan={ITEMS.length + 1} style={{ padding: '3px 6px', color: '#64748b', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          {ROLE_LABELS[role] || role}
+                        </td>
+                      </tr>,
+                      ...group.map(p => (
+                        <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '4px 6px', color: 'white', fontWeight: 700, fontSize: 10 }}>
+                            <span style={{ color: accent, marginRight: 4, fontWeight: 900 }}>{p.number}</span>{p.name}
+                          </td>
+                          {ITEMS.map(it => (
+                            <td key={it.key} style={{ textAlign: 'center', padding: '4px 4px', color: it.fn(p) > 0 ? it.color : '#334155', fontWeight: it.fn(p) > 0 ? 900 : 400, fontSize: 10 }}>
+                              {it.fn(p)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+
+          const renderBarCharts = (players: Player[], accent: string) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 28, marginBottom: 40 }}>
+              {ITEMS.map(item => {
+                const vals = players.map(p => item.fn(p));
+                const maxVal = Math.max(...vals, 1);
+                const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+                const avgPct = Math.round((avg / maxVal) * 100);
+                return (
+                  <div key={item.key}>
+                    <div style={{ fontSize: 9, fontWeight: 900, color: item.color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>{item.label}</div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 60 }}>
+                      {players.map((p, i) => {
+                        const pct = maxVal > 0 ? (vals[i] / maxVal) * 100 : 0;
+                        const barH = Math.max(2, Math.round((pct / 100) * 52));
+                        return (
+                          <div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                            <div style={{ fontSize: 8, color: '#94a3b8', fontWeight: 700 }}>{vals[i]}</div>
+                            <div style={{ width: '60%', height: barH, background: item.color, borderRadius: '2px 2px 0 0', opacity: pct > 0 ? 1 : 0.15 }} />
+                            <div style={{ fontSize: 8, color: '#64748b', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.name.split(' ')[0]}
                             </div>
                           </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                      <div style={{ fontSize: 8, color: '#64748b', fontWeight: 900, minWidth: 52 }}>Prom.</div>
+                      <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} />
+                      </div>
+                      <div style={{ fontSize: 8, color: '#64748b', minWidth: 24, textAlign: 'right' }}>{avg.toFixed(1)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+
+          const renderSpiders = (players: Player[]) => {
+            const SPIDER_ITEMS = [
+              { label: 'Goles', fn: (p: Player) => p.stats.goals || 0, isRed: false },
+              { label: 'Tiros', fn: (p: Player) => p.stats.shots || 0, isRed: true },
+              { label: 'Pérd.', fn: (p: Player) => p.stats.losses || 0, isRed: true },
+              { label: 'Recup.', fn: (p: Player) => p.stats.steals || 0, isRed: false },
+              { label: 'Min.', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60), isRed: true },
+            ];
+            const maxVals = SPIDER_ITEMS.map(it => Math.max(...players.map(p => it.fn(p)), 1));
+            const W = 160, H = 160, cx = 80, cy = 80, R = 55;
+            const n = SPIDER_ITEMS.length;
+            const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / n) - Math.PI / 2);
+
+            const redGrad = (v: number) => {
+              const t = (v - 1) / 4;
+              const r = Math.round(140 + t * 90);
+              const g = Math.round(45 - t * 45);
+              const b = Math.round(45 - t * 45);
+              return `rgb(${r},${g},${b})`;
+            };
+
+            const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
+
+            const maxAtkVal = Math.max(...players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
+            const maxDefVal = Math.max(...players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                {players.map(p => {
+                  const normVals = SPIDER_ITEMS.map((it, i) => {
+                    const raw = it.fn(p);
+                    return maxVals[i] === 0 ? 1 : Math.round((raw / maxVals[i]) * 4) + 1;
+                  });
+                  const dataR = normVals.map(v => (v / 5) * R);
+                  const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
+
+                  const atkScore = (p.stats.goals || 0) * 2 + (p.stats.shots || 0);
+                  const defScore = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
+                  const atkPct = Math.round((atkScore / maxAtkVal) * 100);
+                  const defPct = Math.round((defScore / maxDefVal) * 100);
+                  const diff = atkPct - defPct;
+                  const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
+                  const verdictColor = diff > 15 ? '#ef4444' : diff < -15 ? '#22c55e' : '#64748b';
+
+                  return (
+                    <div key={p.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: 9, fontWeight: 900, color: 'white', textAlign: 'center', textTransform: 'uppercase' }}>
+                        <span style={{ color: '#64748b', marginRight: 4 }}>#{p.number}</span>{p.name.split(' ')[0]}
+                      </div>
+                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+                        {[1,2,3,4,5].map(lv => (
+                          <polygon key={lv} points={gridPts(lv)} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5"/>
+                        ))}
+                        {angles.map((a, i) => (
+                          <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(a)} y2={cy + R * Math.sin(a)} stroke="rgba(255,255,255,0.06)" strokeWidth="0.5"/>
+                        ))}
+                        <polygon points={dataPts} fill="rgba(59,130,246,0.15)" stroke="#3b82f6" strokeWidth="1.5"/>
+                        {angles.map((a, i) => {
+                          const px2 = cx + dataR[i] * Math.cos(a);
+                          const py2 = cy + dataR[i] * Math.sin(a);
+                          const c = SPIDER_ITEMS[i].isRed ? redGrad(normVals[i]) : '#3b82f6';
+                          return <circle key={i} cx={px2} cy={py2} r="3" fill={c} stroke="white" strokeWidth="0.5"/>;
+                        })}
+                        {SPIDER_ITEMS.map((it, i) => {
+                          const lx = cx + (R + 12) * Math.cos(angles[i]);
+                          const ly = cy + (R + 12) * Math.sin(angles[i]);
+                          const c = it.isRed ? redGrad(normVals[i]) : '#94a3b8';
+                          return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>;
+                        })}
+                      </svg>
+                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Ataque</span>
+                          <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${atkPct}%`, height: '100%', background: '#ef4444', borderRadius: 3 }}/>
+                          </div>
+                          <span style={{ fontSize: 8, color: '#94a3b8', width: 22, textAlign: 'right' }}>{atkPct}%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Defensa</span>
+                          <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${defPct}%`, height: '100%', background: '#22c55e', borderRadius: 3 }}/>
+                          </div>
+                          <span style={{ fontSize: 8, color: '#94a3b8', width: 22, textAlign: 'right' }}>{defPct}%</span>
+                        </div>
+                        <div style={{ marginTop: 4, padding: '3px 8px', borderRadius: 6, background: `${verdictColor}20`, border: `1px solid ${verdictColor}40`, fontSize: 8, fontWeight: 900, color: verdictColor, textAlign: 'center' }}>
+                          {verdict}
                         </div>
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
               </div>
+            );
+          };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 48 }}>
+              {allTeams.map((team, idx) => (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 16 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: team.accent, boxShadow: `0 0 10px ${team.accent}80` }}/>
+                    <h3 style={{ fontSize: 14, fontWeight: 900, color: 'white', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>
+                      {team.teamName}
+                    </h3>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+                      1. Tabla de estadísticas por posición
+                    </div>
+                    {renderTable(team.players, team.accent)}
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+                      2. Comparativa por ítem
+                    </div>
+                    {renderBarCharts(team.players, team.accent)}
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>
+                      3. Perfil táctico por jugador
+                    </div>
+                    {renderSpiders(team.players)}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          );
+        })()
       )}
 
       {/* Footer Branding Analytical */}

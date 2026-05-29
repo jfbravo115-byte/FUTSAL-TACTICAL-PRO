@@ -1,6 +1,9 @@
 export enum Role {
   GOALKEEPER = 'GOALKEEPER',
   PLAYER = 'PLAYER',
+  WING = 'WING',
+  PIVOT = 'PIVOT',
+  DEFENSE = 'DEFENSE',
   COACH = 'COACH',
   DELEGATE = 'DELEGATE',
 }

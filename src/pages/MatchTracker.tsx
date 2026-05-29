@@ -1206,6 +1206,9 @@ export default function MatchTracker() {
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+  const pdfPage1Ref = useRef<HTMLDivElement>(null);
+  const pdfPage2Ref = useRef<HTMLDivElement>(null);
+  const pdfPage3Ref = useRef<HTMLDivElement>(null);
   const dynamicExportRef = useRef<HTMLDivElement>(null);
 
   const [isTacticalModalOpen, setIsTacticalModalOpen] = useState(false);
@@ -1528,68 +1531,82 @@ export default function MatchTracker() {
   };
 
   const handleExport = async (type: "TEAM" | Role = "TEAM") => {
-    if (!exportRef.current) return;
     setReportType(type);
     setIsExporting(true);
 
-    try {
-      // Small delay to ensure styles are applied
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    // For TEAM type generate a proper multi-page PDF
+    if (type === "TEAM") {
+      try {
+        await new Promise(r => setTimeout(r, 600));
 
-      const dataUrl = await toPng(exportRef.current, {
-        cacheBust: true,
-        pixelRatio: 2,
-        backgroundColor: "#0A0B0E",
-        width: 850,
-        style: {
-          opacity: "1",
-          visibility: "visible",
-        },
-      });
+        const captureOpts = {
+          cacheBust: true,
+          pixelRatio: 2,
+          backgroundColor: "#ffffff",
+          style: { opacity: "1", visibility: "visible" },
+        };
 
-      if (!dataUrl || dataUrl === "data:," || dataUrl.length < 1000) {
-        throw new Error("Generación de imagen fallida o imagen vacía");
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref];
+        const images: string[] = [];
+
+        for (const ref of refs) {
+          if (!ref.current) continue;
+          const url = await toPng(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
+          if (url && url.length > 1000) images.push(url);
+        }
+
+        if (images.length === 0) throw new Error("No pages generated");
+
+        const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+        const pdfW = pdf.internal.pageSize.getWidth();   // 210mm
+        const pdfH = pdf.internal.pageSize.getHeight();  // 297mm
+
+        for (let i = 0; i < images.length; i++) {
+          if (i > 0) pdf.addPage();
+          const img = new Image();
+          img.src = images[i];
+          await new Promise(r => { img.onload = r; });
+          const imgAspect = img.height / img.width;
+          const imgH = Math.min(pdfH, pdfW * imgAspect);
+          pdf.addImage(images[i], "PNG", 0, 0, pdfW, imgH);
+        }
+
+        const fileName = `informe_${matchData.teamName.replace(/\s+/g, "_")}_${Date.now()}.pdf`;
+        pdf.save(fileName);
+      } catch (err) {
+        console.error("PDF export failed", err);
+        alert("Error al generar el PDF. Inténtalo de nuevo.");
+      } finally {
+        setIsExporting(false);
       }
+      return;
+    }
 
+    // For other types (goalkeeper) keep PNG export
+    if (!exportRef.current) { setIsExporting(false); return; }
+    try {
+      await new Promise(r => setTimeout(r, 500));
+      const dataUrl = await toPng(exportRef.current, {
+        cacheBust: true, pixelRatio: 2, backgroundColor: "#0A0B0E", width: 850,
+        style: { opacity: "1", visibility: "visible" },
+      });
+      if (!dataUrl || dataUrl === "data:," || dataUrl.length < 1000) throw new Error("Empty image");
       const fileName = `stats_${matchData.teamName.replace(/\s+/g, "_")}_${Date.now()}.png`;
-      
-      // Fallback for browsers/environments that don't support navigate.share with files
       const downloadImage = () => {
         const link = document.createElement("a");
-        link.download = fileName;
-        link.href = dataUrl;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        link.download = fileName; link.href = dataUrl;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
       };
-
       try {
         const res = await fetch(dataUrl);
         const blob = await res.blob();
         const file = new File([blob], fileName, { type: "image/png" });
-
-        if (
-          navigator.share &&
-          navigator.canShare &&
-          navigator.canShare({ files: [file] })
-        ) {
-          await navigator.share({
-            files: [file],
-            title: `Estadísticas ${matchData.teamName}`,
-            text: `Resumen de partido: ${matchData.teamName} ${goals} - ${opponentGoals} ${matchData.opponentName}`,
-          });
-        } else {
-          downloadImage();
-        }
-      } catch (shareErr) {
-        console.warn("Share failed, falling back to download", shareErr);
-        downloadImage();
-      }
-    } catch (err) {
-      console.error("Export failed", err);
-    } finally {
-      setIsExporting(false);
-    }
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: `Estadísticas ${matchData.teamName}` });
+        } else { downloadImage(); }
+      } catch { downloadImage(); }
+    } catch (err) { console.error("Export failed", err); }
+    finally { setIsExporting(false); }
   };
 
   const handleGameStateChange = (newState: GameState, isOpponent: boolean) => {
@@ -2480,6 +2497,321 @@ export default function MatchTracker() {
         formatTime={formatTime}
         reportType={reportType}
       />
+      {/* ── PDF PAGE TEMPLATES (hidden, white background) ─────── */}
+      {(() => {
+        const PDF_W = 794;
+        const allTeamsForPDF = [
+          { players: matchData.players.filter(p => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE), name: matchData.teamName, accent: '#3b82f6' },
+          { players: matchData.players.filter(p => p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE), name: matchData.opponentName, accent: '#ef4444' },
+        ].filter(t => t.players.length > 0);
+
+        const getPosLabel = (p: Player) => {
+          if (p.role === Role.GOALKEEPER) return { label: 'PR', bg: '#fef9c3', color: '#854d0e' };
+          if (p.pitchPosition !== undefined) {
+            const slots = PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
+            const slot = slots[p.pitchPosition];
+            if (slot?.label === 'CIE') return { label: 'C', bg: '#dcfce7', color: '#166534' };
+            if (slot?.label === 'PIV' || slot?.label === 'PIV') return { label: 'PV', bg: '#f3e8ff', color: '#6b21a8' };
+            if (slot?.label === 'AI' || slot?.label === 'AD' || slot?.label === 'AL') return { label: 'ALA', bg: '#dbeafe', color: '#1e40af' };
+          }
+          return { label: 'ALA', bg: '#dbeafe', color: '#1e40af' };
+        };
+
+        const ITEMS = [
+          { label: 'Goles', color: '#16a34a', fn: (p: Player) => p.stats.goals || 0 },
+          { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
+          { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => p.stats.shots || 0 },
+          { label: 'Pérdidas', color: '#dc2626', fn: (p: Player) => p.stats.losses || 0 },
+          { label: 'Recuperac.', color: '#9333ea', fn: (p: Player) => p.stats.steals || 0 },
+          { label: 'Faltas com.', color: '#ea580c', fn: (p: Player) => p.stats.fouls || 0 },
+          { label: 'Tarjetas', color: '#ca8a04', fn: (p: Player) => (p.stats.yellowCards || 0) + (p.stats.redCards || 0) },
+          { label: 'Minutos', color: '#0284c7', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60) },
+        ];
+
+        const SPIDER_ITEMS = [
+          { label: 'Goles', fn: (p: Player) => p.stats.goals || 0, isRed: false },
+          { label: 'Tiros', fn: (p: Player) => p.stats.shots || 0, isRed: true },
+          { label: 'Pérd.', fn: (p: Player) => p.stats.losses || 0, isRed: true },
+          { label: 'Recup.', fn: (p: Player) => p.stats.steals || 0, isRed: false },
+          { label: 'Min.', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60), isRed: true },
+        ];
+
+        const redGrad = (v: number) => {
+          const t = (v - 1) / 4;
+          return `rgb(${Math.round(160 + t * 80)},${Math.round(40 - t * 40)},${Math.round(40 - t * 40)})`;
+        };
+
+        const pageStyle: React.CSSProperties = {
+          position: 'absolute', top: 0, left: 0, zIndex: -200,
+          opacity: 0.01, pointerEvents: 'none',
+          width: PDF_W, backgroundColor: '#ffffff',
+          fontFamily: "'Inter', sans-serif", color: '#0f172a',
+          padding: 40,
+        };
+
+        const headerStyle: React.CSSProperties = {
+          background: '#0f172a', color: 'white', padding: '20px 24px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+          marginBottom: 24,
+        };
+
+        const sectionLabelStyle: React.CSSProperties = {
+          fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase',
+          letterSpacing: '0.1em', marginBottom: 12, paddingBottom: 6,
+          borderBottom: '0.5px solid #e2e8f0',
+        };
+
+        const footerStyle: React.CSSProperties = {
+          marginTop: 24, borderTop: '0.5px solid #e2e8f0', paddingTop: 10,
+          display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#94a3b8',
+        };
+
+        const Header = ({ page, total }: { page: number; total: number }) => (
+          <>
+            <div style={headerStyle}>
+              <div>
+                <div style={{ fontSize: 8, color: '#3b82f6', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Technical Department · Pro Analytics
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                  {matchData.teamName}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>vs {matchData.opponentName}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 8, color: '#94a3b8', marginBottom: 4 }}>Resultado final</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: 'white', letterSpacing: '0.05em' }}>
+                  {goals} — {opponentGoals}
+                </div>
+                <div style={{ fontSize: 8, color: '#64748b', marginTop: 4 }}>
+                  {new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
+                </div>
+              </div>
+            </div>
+          </>
+        );
+
+        const Footer = ({ page, total }: { page: number; total: number }) => (
+          <div style={footerStyle}>
+            <span>Futsal Commander Pro · Informe Técnico</span>
+            <span>Página {page} / {total}</span>
+          </div>
+        );
+
+        const totalPages = allTeamsForPDF.length * 3;
+        let pageCounter = 0;
+
+        return (
+          <>
+            {/* PAGE 1 per team: Header + Table */}
+            <div ref={pdfPage1Ref} style={pageStyle}>
+              {allTeamsForPDF.map((team, ti) => {
+                pageCounter++;
+                return (
+                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
+                    <Header page={pageCounter} total={totalPages} />
+                    <div style={{ marginBottom: 8, ...sectionLabelStyle }}>
+                      1. estadísticas por posición — {team.name.toLowerCase()}
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ textAlign: 'left', padding: '5px 6px', color: '#64748b', fontWeight: 700, fontSize: 9, minWidth: 100 }}>Jugador</th>
+                          <th style={{ padding: '5px 5px', color: '#64748b', fontWeight: 700, fontSize: 9 }}>Pos</th>
+                          {ITEMS.map(it => (
+                            <th key={it.label} style={{ padding: '5px 4px', color: it.color, fontWeight: 700, fontSize: 9, textAlign: 'center' }}>
+                              {it.label.split(' ')[0]}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {team.players.map(p => {
+                          const pos = getPosLabel(p);
+                          return (
+                            <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
+                              <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}>
+                                <span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>
+                                {p.name}
+                              </td>
+                              <td style={{ padding: '5px 4px', textAlign: 'center' }}>
+                                <span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>
+                                  {pos.label}
+                                </span>
+                              </td>
+                              {ITEMS.map(it => {
+                                const v = it.fn(p);
+                                const isCard = it.label === 'Tarjetas';
+                                return (
+                                  <td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>
+                                    {isCard && v > 0
+                                      ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}`
+                                      : v}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <Footer page={pageCounter} total={totalPages} />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* PAGE 2 per team: Bar charts */}
+            <div ref={pdfPage2Ref} style={pageStyle}>
+              {allTeamsForPDF.map((team, ti) => {
+                pageCounter++;
+                return (
+                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span>
+                      </div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {pageCounter}</span>
+                    </div>
+
+                    {ITEMS.map(item => {
+                      const vals = team.players.map(p => item.fn(p));
+                      const maxV = Math.max(...vals, 1);
+                      const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+                      const avgPct = Math.round((avg / maxV) * 100);
+                      return (
+                        <div key={item.label} style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>
+                            {item.label}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
+                            {team.players.map((p, i) => {
+                              const pct = maxV > 0 ? vals[i] / maxV : 0;
+                              const h = Math.max(2, Math.round(pct * 44));
+                              return (
+                                <div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                                  <div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div>
+                                  <div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} />
+                                  <div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {p.name.split(' ')[0]}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            <span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span>
+                            <div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} />
+                            </div>
+                            <span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <Footer page={pageCounter} total={totalPages} />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* PAGE 3 per team: Spider + bullet charts */}
+            <div ref={pdfPage3Ref} style={pageStyle}>
+              {allTeamsForPDF.map((team, ti) => {
+                pageCounter++;
+                const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
+                const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
+                const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
+                const W = 140, H = 140, cx = 70, cy = 70, R = 50;
+                const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
+                const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
+
+                return (
+                  <div key={ti} style={ti > 0 ? { marginTop: 60 } : {}}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico por jugador</span>
+                      </div>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {pageCounter}</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                      {team.players.map(p => {
+                        const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
+                        const dataR = normV.map(v => (v / 5) * R);
+                        const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
+                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0);
+                        const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
+                        const atkPct = Math.round((atk / maxAtkV) * 100);
+                        const defPct = Math.round((def / maxDefV) * 100);
+                        const diff = atkPct - defPct;
+                        const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
+                        const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b';
+                        const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
+                        const pos = getPosLabel(p);
+
+                        return (
+                          <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}>
+                              <span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>
+                              {p.name.split(' ')[0]}
+                              <span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>
+                                {pos.label}
+                              </span>
+                            </div>
+                            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+                              {[1,2,3,4,5].map(lv => (
+                                <polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>
+                              ))}
+                              {angles.map((a, i) => (
+                                <line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>
+                              ))}
+                              <polygon points={dataPts} fill="rgba(59,130,246,0.1)" stroke="#3b82f6" strokeWidth="1.5"/>
+                              {angles.map((a, i) => {
+                                const px = cx + dataR[i] * Math.cos(a);
+                                const py = cy + dataR[i] * Math.sin(a);
+                                const c = SPIDER_ITEMS[i].isRed ? redGrad(normV[i]) : '#3b82f6';
+                                return <circle key={i} cx={px} cy={py} r="3" fill={c} stroke="white" strokeWidth="0.5"/>;
+                              })}
+                              {SPIDER_ITEMS.map((it, i) => {
+                                const lx = cx + (R + 11) * Math.cos(angles[i]);
+                                const ly = cy + (R + 11) * Math.sin(angles[i]);
+                                const c = it.isRed ? redGrad(normV[i]) : '#94a3b8';
+                                return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>;
+                              })}
+                            </svg>
+                            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {[
+                                { label: 'Ataque', pct: atkPct, color: '#ef4444' },
+                                { label: 'Defensa', pct: defPct, color: '#22c55e' },
+                              ].map(b => (
+                                <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span style={{ fontSize: 7, color: '#94a3b8', width: 36 }}>{b.label}</span>
+                                  <div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                                    <div style={{ width: `${b.pct}%`, height: '100%', background: b.color, borderRadius: 3 }}/>
+                                  </div>
+                                  <span style={{ fontSize: 7, color: '#94a3b8', width: 22, textAlign: 'right' }}>{b.pct}%</span>
+                                </div>
+                              ))}
+                              <div style={{ marginTop: 3, padding: '2px 8px', borderRadius: 4, background: vbg, border: `0.5px solid ${vc}30`, fontSize: 8, fontWeight: 600, color: vc, textAlign: 'center' }}>
+                                {verdict}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <Footer page={pageCounter} total={totalPages} />
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
+
       <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
         style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}

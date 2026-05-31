@@ -1415,15 +1415,26 @@ export default function MatchTracker() {
     setIsDataLocked(true);
   };
 
-  const handleConfirmEndSecond = () => {
-    setMatchData((prev) => ({
-      ...prev,
+  const handleConfirmEndSecond = async () => {
+    const finalMatchData = {
+      ...matchData,
       period: Period.FINISHED,
       matchClock: 0,
       isClockRunning: false,
-    }));
+      timestamp: new Date().toISOString(),
+    };
+    setMatchData(finalMatchData);
     setIsEndSecondConfirmOpen(false);
     setIsDataLocked(true);
+
+    // Auto-save to Firestore
+    try {
+      const cleanData = JSON.parse(JSON.stringify(finalMatchData));
+      await addDoc(collection(db, 'partidos'), cleanData);
+      console.log('✅ Partido guardado automáticamente');
+    } catch (err) {
+      console.warn('⚠️ No se pudo guardar el partido:', err);
+    }
   };
 
   const copySummaryToClipboard = () => {

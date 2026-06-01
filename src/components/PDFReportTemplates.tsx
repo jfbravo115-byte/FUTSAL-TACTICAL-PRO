@@ -921,8 +921,8 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                         Local
                       </span>
                     </div>
-                    {matchData.teamLogo ? (
-                      <img src={matchData.teamLogo} className="w-8 h-8 object-contain rounded" alt="Local Logo" />
+                    {match.teamLogo ? (
+                      <img src={match.teamLogo} className="w-8 h-8 object-contain rounded" alt="Local Logo" />
                     ) : (
                       <ImageIcon size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
                     )}
@@ -946,8 +946,8 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                         Oponente
                       </span>
                     </div>
-                    {matchData.opponentLogo ? (
-                      <img src={matchData.opponentLogo} className="w-8 h-8 object-contain rounded" alt="Opponent Logo" />
+                    {match.opponentLogo ? (
+                      <img src={match.opponentLogo} className="w-8 h-8 object-contain rounded" alt="Opponent Logo" />
                     ) : (
                       <ImageIcon size={20} className="text-slate-600 group-hover:text-red-500 transition-colors" />
                     )}
@@ -1069,7 +1069,7 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
             {/* LOCAL INFO */}
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="w-10 h-10 bg-blue-600/10 border border-blue-500/30 rounded-xl flex items-center justify-center font-black text-sm text-blue-400 shrink-0 shadow-lg overflow-hidden relative group">
-                {matchData.teamLogo ? <img src={matchData.teamLogo} className="w-full h-full object-contain" /> : match.teamName.substring(0, 1).toUpperCase()}
+                {match.teamLogo ? <img src={match.teamLogo} className="w-full h-full object-contain" /> : match.teamName.substring(0, 1).toUpperCase()}
                 {!isDataLocked && (
                   <>
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1120,18 +1120,18 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                 <div className="flex items-center gap-1">
                   <span className="text-[7px] font-black text-slate-500">FALTAS:</span>
                   <span className={`transition-all duration-300 font-mono font-black leading-none ${
-                    matchData.fouls.team >= 6
+                    (match.fouls?.team ?? 0) >= 6
                       ? 'text-[18px] text-red-600 animate-[bounce_0.5s_infinite]'
-                      : matchData.fouls.team === 5
+                      : (match.fouls?.team ?? 0) === 5
                         ? 'text-[16px] text-red-500 animate-pulse'
-                        : matchData.fouls.team === 4 
+                        : (match.fouls?.team ?? 0) === 4 
                           ? 'text-[13px] text-yellow-400' 
                           : 'text-[11px] text-slate-300'
-                  }`}>{matchData.fouls.team}</span>
+                  }`}>{(match.fouls?.team ?? 0)}</span>
                   <div className="flex gap-[2px] ml-1.5 items-center">
                     <span className="text-[5px] font-black text-slate-600 mr-0.5">T.M:</span>
-                    <div className={`w-1.5 h-2.5 rounded-sm ${matchData.timeoutsUsed.team.period1 ? 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P1" />
-                    <div className={`w-1.5 h-2.5 rounded-sm ${matchData.timeoutsUsed.team.period2 ? 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P2" />
+                    <div className={`w-1.5 h-2.5 rounded-sm ${(match.timeoutsUsed?.team?.period1 ?? false) ? 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P1" />
+                    <div className={`w-1.5 h-2.5 rounded-sm ${(match.timeoutsUsed?.team?.period2 ?? false) ? 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P2" />
                   </div>
 
                 </div>
@@ -1175,24 +1175,24 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                  <div className="flex items-center justify-end gap-1">
 
                    <div className="flex gap-[2px] mr-1.5 items-center">
-                    <div className={`w-1.5 h-2.5 rounded-sm ${matchData.timeoutsUsed.opponent.period2 ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P2" />
-                    <div className={`w-1.5 h-2.5 rounded-sm ${matchData.timeoutsUsed.opponent.period1 ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P1" />
+                    <div className={`w-1.5 h-2.5 rounded-sm ${(match.timeoutsUsed?.opponent?.period2 ?? false) ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P2" />
+                    <div className={`w-1.5 h-2.5 rounded-sm ${(match.timeoutsUsed?.opponent?.period1 ?? false) ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-800 border border-white/5'}`} title="T.M. P1" />
                     <span className="text-[5px] font-black text-slate-600 ml-0.5">:T.M</span>
                   </div>
                   <span className={`transition-all duration-300 font-mono font-black leading-none ${
-                    matchData.fouls.opponent >= 6
+                    (match.fouls?.opponent ?? 0) >= 6
                       ? 'text-[18px] text-red-600 animate-[bounce_0.5s_infinite]'
-                      : matchData.fouls.opponent === 5
+                      : (match.fouls?.opponent ?? 0) === 5
                         ? 'text-[16px] text-red-500 animate-pulse'
-                        : matchData.fouls.opponent === 4 
+                        : (match.fouls?.opponent ?? 0) === 4 
                           ? 'text-[13px] text-yellow-400' 
                           : 'text-[11px] text-slate-300'
-                  }`}>{matchData.fouls.opponent}</span>
+                  }`}>{(match.fouls?.opponent ?? 0)}</span>
                   <span className="text-[7px] font-black text-slate-500 uppercase">:FALTAS</span>
                 </div>
               </div>
               <div className="w-10 h-10 bg-red-600/10 border border-red-500/30 rounded-xl flex items-center justify-center font-black text-sm text-red-500 shrink-0 shadow-lg overflow-hidden relative group">
-                {matchData.opponentLogo ? <img src={matchData.opponentLogo} className="w-full h-full object-contain" /> : match.opponentName.substring(0, 1).toUpperCase()}
+                {match.opponentLogo ? <img src={match.opponentLogo} className="w-full h-full object-contain" /> : match.opponentName.substring(0, 1).toUpperCase()}
                 {!isDataLocked && (
                   <>
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1241,10 +1241,10 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
 
                 <div className="flex flex-col items-center min-w-[90px] gap-0">
                   <span className="text-[6px] font-black text-slate-500 uppercase tracking-widest mb-0.5">
-                    {matchData.period === Period.FIRST ? "1º PARTE" : matchData.period === Period.SECOND ? "2º PARTE" : matchData.period === Period.FINISHED ? "PARTIDO FINALIZADO" : "PRÓRROGA"}
+                    {(match.period ?? 2) === Period.FIRST ? "1º PARTE" : (match.period ?? 2) === Period.SECOND ? "2º PARTE" : (match.period ?? 2) === Period.FINISHED ? "PARTIDO FINALIZADO" : "PRÓRROGA"}
                   </span>
-                  <span className={`text-4xl font-mono font-black tabular-nums leading-none tracking-tighter ${matchData.isClockRunning ? "text-amber-400" : "text-white/20"}`}>
-                    {formatTime(matchData.matchClock)}
+                  <span className={`text-4xl font-mono font-black tabular-nums leading-none tracking-tighter ${(match.isClockRunning ?? false) ? "text-amber-400" : "text-white/20"}`}>
+                    {formatTime(match.matchClock)}
                   </span>
                 </div>
 
@@ -1252,8 +1252,8 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                   onClick={toggleClock} 
                   className="group flex flex-col items-center justify-center transition-all active:scale-90"
                 >
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${matchData.isClockRunning ? "bg-amber-500/10 text-amber-500 border-amber-500/40 shadow-amber-500/20" : "bg-green-600/20 text-green-400 border-green-500/40 shadow-green-600/20"}`}>
-                    {matchData.isClockRunning ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${(match.isClockRunning ?? false) ? "bg-amber-500/10 text-amber-500 border-amber-500/40 shadow-amber-500/20" : "bg-green-600/20 text-green-400 border-green-500/40 shadow-green-600/20"}`}>
+                    {(match.isClockRunning ?? false) ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
                   </div>
                 </button>
               </div>
@@ -1266,29 +1266,29 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                     className="px-6 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-green-500 hover:bg-green-400 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)] animate-pulse flex items-center gap-2"
                   >
                     <Play size={14} fill="currentColor" />
-                    Iniciar {matchData.period === Period.SECOND ? "2ª Parte" : matchData.period === Period.OVERTIME_1 ? "Prórroga" : "Periodo"}
+                    Iniciar {(match.period ?? 2) === Period.SECOND ? "2ª Parte" : (match.period ?? 2) === Period.OVERTIME_1 ? "Prórroga" : "Periodo"}
                   </button>
                 ) : (
                   <>
                     <button
                       onClick={() => {
-                        if (matchData.period === Period.FIRST) {
+                        if ((match.period ?? 2) === Period.FIRST) {
                           setIsEndFirstConfirmOpen(true);
                         }
                       }}
-                      disabled={matchData.period !== Period.FIRST}
-                      className={`px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-tight transition-all border ${matchData.period === Period.FIRST ? 'bg-blue-600/20 border-blue-500/50 text-blue-400 hover:bg-blue-600/30' : 'bg-white/5 border-white/10 text-slate-500 opacity-50 cursor-not-allowed'}`}
+                      disabled={(match.period ?? 2) !== Period.FIRST}
+                      className={`px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-tight transition-all border ${(match.period ?? 2) === Period.FIRST ? 'bg-blue-600/20 border-blue-500/50 text-blue-400 hover:bg-blue-600/30' : 'bg-white/5 border-white/10 text-slate-500 opacity-50 cursor-not-allowed'}`}
                     >
                       FIN 1ª
                     </button>
                     <button
                       onClick={() => {
-                        if (matchData.period === Period.SECOND) {
+                        if ((match.period ?? 2) === Period.SECOND) {
                           setIsEndSecondConfirmOpen(true);
                         }
                       }}
-                      disabled={matchData.period !== Period.SECOND}
-                      className={`px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-tight transition-all border ${matchData.period === Period.SECOND ? 'bg-red-600/20 border-red-500/50 text-red-400 hover:bg-red-600/30' : 'bg-white/5 border-white/10 text-slate-500 opacity-50 cursor-not-allowed'}`}
+                      disabled={(match.period ?? 2) !== Period.SECOND}
+                      className={`px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-tight transition-all border ${(match.period ?? 2) === Period.SECOND ? 'bg-red-600/20 border-red-500/50 text-red-400 hover:bg-red-600/30' : 'bg-white/5 border-white/10 text-slate-500 opacity-50 cursor-not-allowed'}`}
                     >
                       FIN 2ª
                     </button>
@@ -2179,8 +2179,8 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                             },
                             { 
                               label: "Faltas", 
-                              local: matchData.fouls.team, 
-                              rival: matchData.fouls.opponent, 
+                              local: (match.fouls?.team ?? 0), 
+                              rival: (match.fouls?.opponent ?? 0), 
                               color: "bg-orange-500" 
                             }
                           ].map((item) => {
@@ -2259,13 +2259,13 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                             </span>
                             <div className="flex items-baseline gap-1">
                               <span className="text-2xl font-black text-white tabular-nums">
-                                {matchData.fouls.team}
+                                {(match.fouls?.team ?? 0)}
                               </span>
                               <span className="text-xs font-black text-slate-600">
                                 /
                               </span>
                               <span className="text-2xl font-black text-slate-400 tabular-nums">
-                                {matchData.fouls.opponent}
+                                {(match.fouls?.opponent ?? 0)}
                               </span>
                             </div>
                           </div>
@@ -2761,9 +2761,9 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                           <div className="w-12 h-12 flex-shrink-0">
                             <label className={`w-full h-full bg-black/40 rounded-xl border border-white/10 flex items-center justify-center overflow-hidden cursor-pointer hover:border-white/20 transition-all ${showRivalStats ? "hover:border-red-500/50" : "hover:border-blue-500/50"}`}>
                               {showRivalStats ? (
-                                matchData.opponentLogo ? (
+                                match.opponentLogo ? (
                                   <img
-                                    src={matchData.opponentLogo}
+                                    src={match.opponentLogo}
                                     alt="Logo"
                                     className="w-full h-full object-contain"
                                   />
@@ -2771,9 +2771,9 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                                   <ImageIcon size={18} className="text-slate-600" />
                                 )
                               ) : (
-                                matchData.teamLogo ? (
+                                match.teamLogo ? (
                                   <img
-                                    src={matchData.teamLogo}
+                                    src={match.teamLogo}
                                     alt="Logo"
                                     className="w-full h-full object-contain"
                                   />
@@ -3011,7 +3011,7 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                     <div className="flex flex-col items-center gap-1">
                         <h4 className="text-sm font-black text-white uppercase tracking-widest italic">DATOS BLOQUEADOS</h4>
                         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight text-center max-w-[180px]">
-                            {matchData.period === Period.SECOND ? "La primera parte ha finalizado. Pulsa el botón verde para iniciar la segunda parte." : "El periodo ha finalizado y los datos están protegidos."}
+                            {(match.period ?? 2) === Period.SECOND ? "La primera parte ha finalizado. Pulsa el botón verde para iniciar la segunda parte." : "El periodo ha finalizado y los datos están protegidos."}
                         </p>
                     </div>
                   </div>
@@ -3055,16 +3055,16 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                           <button
                             onPointerDown={(e) => { e.preventDefault(); handleAction(ActionType.TIMEOUT, staff.id); }}
                             disabled={
-                              (matchData.period !== Period.FIRST && matchData.period !== Period.SECOND) ||
+                              ((match.period ?? 2) !== Period.FIRST && (match.period ?? 2) !== Period.SECOND) ||
                               (staff.isOpponent ? 
-                                (matchData.period === Period.FIRST ? matchData.timeoutsUsed.opponent.period1 : matchData.timeoutsUsed.opponent.period2) : 
-                                (matchData.period === Period.FIRST ? matchData.timeoutsUsed.team.period1 : matchData.timeoutsUsed.team.period2)
+                                ((match.period ?? 2) === Period.FIRST ? (match.timeoutsUsed?.opponent?.period1 ?? false) : (match.timeoutsUsed?.opponent?.period2 ?? false)) : 
+                                ((match.period ?? 2) === Period.FIRST ? (match.timeoutsUsed?.team?.period1 ?? false) : (match.timeoutsUsed?.team?.period2 ?? false))
                               )
                             }
                             className={`w-full h-8 rounded-sm border border-black/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex flex-col items-center justify-center gap-0 mt-0.5 shadow-sm
                               ${(staff.isOpponent ? 
-                                 (matchData.period === Period.FIRST ? matchData.timeoutsUsed.opponent.period1 : matchData.timeoutsUsed.opponent.period2) : 
-                                 (matchData.period === Period.FIRST ? matchData.timeoutsUsed.team.period1 : matchData.timeoutsUsed.team.period2)
+                                 ((match.period ?? 2) === Period.FIRST ? (match.timeoutsUsed?.opponent?.period1 ?? false) : (match.timeoutsUsed?.opponent?.period2 ?? false)) : 
+                                 ((match.period ?? 2) === Period.FIRST ? (match.timeoutsUsed?.team?.period1 ?? false) : (match.timeoutsUsed?.team?.period2 ?? false))
                                 ) ? "bg-green-600 text-white border-green-400/50" : "bg-blue-600 text-white border-blue-400/50"}
                             `}
                           >

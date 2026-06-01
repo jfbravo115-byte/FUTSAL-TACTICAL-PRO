@@ -40,7 +40,7 @@ ${JSON.stringify(matchData, null, 2)}
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         contents: prompt,
         config: {
           systemInstruction: "Eres un analista táctico profesional especializado en Fútbol Sala de alto rendimiento. Tu comunicación es formal, precisa y rigurosa, propia de un informe técnico deportivo de élite. Utilizas terminología táctica avanzada de Futsal. No uses introducciones entusiastas ni frases coloquiales. Ve directo al análisis técnico.",

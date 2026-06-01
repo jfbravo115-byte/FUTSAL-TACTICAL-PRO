@@ -5049,17 +5049,6 @@ export default function MatchTracker() {
                           </button>
                           
                           <button
-                            onClick={handleExportCSV}
-                            className="group py-4 bg-green-600/5 border border-green-500/10 rounded-2xl text-[9px] font-black uppercase hover:bg-green-600/10 hover:border-green-500/30 transition-all text-green-500/70 hover:text-green-400 flex flex-col items-center gap-2 shadow-inner"
-                          >
-                            <div className="relative">
-                              <FileText size={18} />
-                              <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse border border-black"></div>
-                            </div>
-                            <span>Cargar en Sheets</span>
-                          </button>
-
-                          <button
                             onClick={handleTacticalAnalysis}
                             className="group py-4 bg-gradient-to-br from-red-600/15 to-blue-600/15 border border-white/15 rounded-2xl text-[9px] font-black uppercase hover:from-red-600/25 hover:to-blue-600/25 transition-all text-white flex flex-col items-center gap-2 shadow-inner relative overflow-hidden"
                           >

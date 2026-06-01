@@ -48,8 +48,39 @@ export default function MatchAnalysis() {
     fetch();
   }, [matchId]);
 
+  const [exportingPDF, setExportingPDF] = useState<'team' | 'goalkeeper' | null>(null);
+
+  const generatePDF = async (type: 'team' | 'goalkeeper') => {
+    const ref = type === 'team' ? teamPdfRef : gkPdfRef;
+    if (!ref.current || !match) return;
+    setExportingPDF(type);
+    try {
+      await new Promise(r => setTimeout(r, 400));
+      const url = await toPng(ref.current, {
+        cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff',
+        style: { opacity: '1', visibility: 'visible' },
+        width: ref.current.offsetWidth,
+      });
+      if (!url || url.length < 1000) throw new Error('Empty image');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+      const img = new Image();
+      img.src = url;
+      await new Promise(r => { img.onload = r; });
+      const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
+      pdf.addImage(url, 'PNG', 0, 0, pdfW, imgH);
+      const name = type === 'team' ? 'global_jugadores' : 'porteros_mapa';
+      pdf.save(`${name}_${(match.teamName || 'equipo').replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert('Error al generar el PDF.');
+    } finally {
+      setExportingPDF(null);
+    }
+  };
+
   const autoGenerateAnalysis = async (matchData: SavedMatch) => {
-    setAnalyzingAI(true);
     try {
       const res = await fetch('/api/tactical-pro', {
         method: 'POST',
@@ -156,17 +187,19 @@ export default function MatchAnalysis() {
         {/* PDF Export buttons */}
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => navigate(`/analysis/${match.id}?export=team`)}
-            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 transition-all active:scale-95"
+            onClick={() => generatePDF('team')}
+            disabled={exportingPDF !== null}
+            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 transition-all active:scale-95 disabled:opacity-50"
           >
-            <Download size={14} />
+            {exportingPDF === 'team' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             PDF Global Jugadores
           </button>
           <button
-            onClick={() => navigate(`/analysis/${match.id}?export=goalkeeper`)}
-            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 transition-all active:scale-95"
+            onClick={() => generatePDF('goalkeeper')}
+            disabled={exportingPDF !== null}
+            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 transition-all active:scale-95 disabled:opacity-50"
           >
-            <Download size={14} />
+            {exportingPDF === 'goalkeeper' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             PDF Porteros + Mapa
           </button>
         </div>
@@ -300,6 +333,104 @@ export default function MatchAnalysis() {
           </div>
         </div>
       </main>
+
+      {/* ── HIDDEN PDF TEMPLATES ─────────────────────────────── */}
+      {/* Team PDF */}
+      <div ref={teamPdfRef} style={{ position: 'absolute', top: 0, left: 0, zIndex: -100, opacity: 0.01, pointerEvents: 'none', width: 794, background: '#fff', fontFamily: 'Inter, sans-serif', color: '#0f172a', padding: 40 }}>
+        <div style={{ background: '#0f172a', color: 'white', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <div>
+            <div style={{ fontSize: 8, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Technical Department · Pro Analytics</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{match.teamName}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>vs {match.opponentName}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 8, color: '#94a3b8', marginBottom: 4 }}>Resultado final</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: 'white' }}>{goals}–{opponentGoals}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12, paddingBottom: 6, borderBottom: '0.5px solid #e2e8f0' }}>
+          Estadísticas por jugador
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+              {['Jugador','Pos','G','T','Pérd','Recup','F.com','Tar','Min'].map((h,i) => (
+                <th key={h} style={{ padding: '5px', textAlign: i===0?'left':'center', fontWeight: 700, fontSize: 9, color: '#64748b' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...localPlayers, ...rivalPlayers].map(p => {
+              const isRival = p.isOpponent;
+              const posLabel = p.role === 'GOALKEEPER' ? 'PORT' : p.role === 'PIVOT' ? 'PIVOT' : p.role === 'DEFENSE' ? 'CIERRE' : 'ALA';
+              return (
+                <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
+                  <td style={{ padding: '5px', textAlign: 'left', fontWeight: 600 }}>
+                    <span style={{ color: isRival ? '#ef4444' : '#3b82f6', marginRight: 4 }}>{p.number}</span>{p.name}
+                  </td>
+                  <td style={{ padding: '5px', textAlign: 'center', fontSize: 8 }}>{posLabel}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#16a34a', fontWeight: (p.stats.goals||0)>0?700:400 }}>{p.stats.goals||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{p.stats.shots||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#dc2626' }}>{p.stats.losses||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#9333ea' }}>{p.stats.steals||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{p.stats.fouls||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{(p.stats.yellowCards||0)+(p.stats.redCards||0)||'—'}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{Math.round((p.individualTimeSeconds||0)/60)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Goalkeeper PDF */}
+      <div ref={gkPdfRef} style={{ position: 'absolute', top: 0, left: 0, zIndex: -100, opacity: 0.01, pointerEvents: 'none', width: 794, background: '#fff', fontFamily: 'Inter, sans-serif', color: '#0f172a', padding: 40 }}>
+        <div style={{ background: '#0f172a', color: 'white', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <div>
+            <div style={{ fontSize: 8, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Technical Department · Goalkeeper Report</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{match.teamName} — Porteros</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>vs {match.opponentName}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 26, fontWeight: 700, color: 'white' }}>{goals}–{opponentGoals}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12, paddingBottom: 6, borderBottom: '0.5px solid #e2e8f0' }}>
+          Estadísticas de porteros
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+              {['Portero','Paradas','Encajados','% Paradas','Recuperac.','Pérdidas','Tiros','Goles','Minutos'].map((h,i) => (
+                <th key={h} style={{ padding: '5px', textAlign: i===0?'left':'center', fontWeight: 700, fontSize: 9,
+                  color: ['#64748b','#16a34a','#dc2626','#d97706','#9333ea','#ea580c','#2563eb','#16a34a','#0284c7'][i] }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...localPlayers, ...rivalPlayers].filter(p => p.role === 'GOALKEEPER').map(p => {
+              const shots = (p.stats.saves||0) + (p.stats.conceded||0);
+              const pct = shots > 0 ? Math.round((p.stats.saves||0)/shots*100) : 0;
+              return (
+                <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
+                  <td style={{ padding: '5px', textAlign: 'left', fontWeight: 600 }}>
+                    <span style={{ color: p.isOpponent?'#ef4444':'#f59e0b', marginRight: 4 }}>{p.number}</span>{p.name}
+                  </td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#16a34a', fontWeight: 700 }}>{p.stats.saves||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#dc2626' }}>{p.stats.conceded||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#d97706', fontWeight: 700 }}>{pct}%</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#9333ea' }}>{p.stats.steals||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#ea580c' }}>{p.stats.losses||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{p.stats.shots||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center', color: '#16a34a' }}>{p.stats.goals||0}</td>
+                  <td style={{ padding: '5px', textAlign: 'center' }}>{Math.round((p.individualTimeSeconds||0)/60)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 8, color: '#94a3b8', marginTop: 8 }}>% Paradas = Paradas / (Paradas + Goles encajados) × 100. Los tiros desviados/fuera no se incluyen.</p>
+      </div>
     </div>
   );
 }

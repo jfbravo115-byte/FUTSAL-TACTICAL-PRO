@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, BarChart, Bar
 } from 'recharts';
-import { Cpu, ArrowLeft, Loader2, Trophy, Target, Zap, Shield } from 'lucide-react';
+import { Cpu, ArrowLeft, Loader2, Trophy, Target, Zap, Shield, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import TacticalHeatMap from '../components/TacticalHeatMap';
 
@@ -137,20 +137,38 @@ export default function MatchAnalysis() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-8 pb-16">
-        {/* Score */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-3xl font-black text-white">{match.teamName}</h2>
-            <p className="text-slate-500 uppercase text-sm">vs {match.opponentName}</p>
+        {/* Score + PDF buttons */}
+        <div className="flex justify-between items-center gap-3">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black text-white truncate">{match.teamName}</h2>
+            <p className="text-slate-500 uppercase text-xs truncate">vs {match.opponentName}</p>
           </div>
-          <div className="text-right">
-            <div className={`text-5xl font-mono font-black tracking-widest ${goals > opponentGoals ? 'text-lime-400' : goals < opponentGoals ? 'text-red-400' : 'text-white'}`}>
-              {goals} – {opponentGoals}
+          <div className="text-right shrink-0">
+            <div className={`text-4xl font-mono font-black whitespace-nowrap ${goals > opponentGoals ? 'text-lime-400' : goals < opponentGoals ? 'text-red-400' : 'text-white'}`}>
+              {goals}–{opponentGoals}
             </div>
             <div className="text-[10px] font-black text-slate-500 uppercase mt-1">
               {goals > opponentGoals ? '🏆 Victoria' : goals < opponentGoals ? '❌ Derrota' : '🤝 Empate'}
             </div>
           </div>
+        </div>
+
+        {/* PDF Export buttons */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => navigate(`/analysis/${match.id}?export=team`)}
+            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 transition-all active:scale-95"
+          >
+            <Download size={14} />
+            PDF Global Jugadores
+          </button>
+          <button
+            onClick={() => navigate(`/analysis/${match.id}?export=goalkeeper`)}
+            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 transition-all active:scale-95"
+          >
+            <Download size={14} />
+            PDF Porteros + Mapa
+          </button>
         </div>
 
         {/* Key stats */}

@@ -43,7 +43,7 @@ ${JSON.stringify(matchData, null, 2)}
         model: "gemini-2.5-flash",
         contents: prompt,
         config: {
-          systemInstruction: "Eres un analista táctico experto de Fútbol Sala. Hablas español fluido, utilizas jerga avanzada de Futsal y eres muy analítico.",
+          systemInstruction: "Eres un analista táctico profesional especializado en Fútbol Sala de alto rendimiento. Tu comunicación es formal, precisa y rigurosa, propia de un informe técnico deportivo de élite. Utilizas terminología táctica avanzada de Futsal. No uses introducciones entusiastas ni frases coloquiales. Ve directo al análisis técnico.",
         }
       });
 

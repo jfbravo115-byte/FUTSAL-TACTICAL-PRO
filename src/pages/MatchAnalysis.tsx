@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
@@ -21,16 +23,47 @@ export default function MatchAnalysis() {
   const navigate = useNavigate();
   const [match, setMatch] = useState<SavedMatch | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analysis, setAnalysis] = useState<string>('');
+  const [analyzingAI, setAnalyzingAI] = useState(false);
+  const [searchParams] = useSearchParams();
+  const teamPdfRef = useRef<HTMLDivElement>(null);
+  const gkPdfRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!matchId) return;
     const fetch = async () => {
       const d = await getDoc(doc(db, 'partidos', matchId));
-      if (d.exists()) setMatch({ id: d.id, ...d.data() } as SavedMatch);
+      if (d.exists()) {
+        const matchData = { id: d.id, ...d.data() } as SavedMatch;
+        setMatch(matchData);
+        // Auto-generate Tactical PRO if not already available
+        if (!matchData.tacticalAnalysis) {
+          autoGenerateAnalysis(matchData);
+        } else {
+          setAnalysis(matchData.tacticalAnalysis);
+        }
+      }
       setLoading(false);
     };
     fetch();
   }, [matchId]);
+
+  const autoGenerateAnalysis = async (matchData: SavedMatch) => {
+    setAnalyzingAI(true);
+    try {
+      const res = await fetch('/api/tactical-pro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchData }),
+      });
+      const data = await res.json();
+      if (data.analysis) setAnalysis(data.analysis);
+    } catch (e) {
+      console.warn('Auto-analysis failed:', e);
+    } finally {
+      setAnalyzingAI(false);
+    }
+  };
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-screen bg-[#0A0B0E]">
@@ -231,15 +264,19 @@ export default function MatchAnalysis() {
             </div>
           </div>
           <div className="p-6 bg-slate-950 min-h-[200px]">
-            {match.tacticalAnalysis ? (
+            {analyzingAI ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Loader2 className="w-8 h-8 mb-3 text-lime-400 animate-spin" />
+                <p className="text-xs text-slate-500 uppercase font-black tracking-widest animate-pulse">Generando análisis táctico...</p>
+              </div>
+            ) : analysis ? (
               <div className="prose prose-invert prose-lime prose-p:text-slate-300 prose-headings:text-white max-w-none text-sm">
-                <Markdown>{match.tacticalAnalysis}</Markdown>
+                <Markdown>{analysis}</Markdown>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-center text-slate-600">
                 <Cpu className="w-10 h-10 mb-3 opacity-20" />
-                <p className="text-sm">Este partido no tiene análisis TACTICAL PRO guardado.</p>
-                <p className="text-xs mt-1">Usa el botón TACTICAL PRO durante el partido para generar el informe.</p>
+                <p className="text-sm">No se pudo generar el análisis.</p>
               </div>
             )}
           </div>

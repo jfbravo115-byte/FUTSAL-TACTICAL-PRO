@@ -294,8 +294,8 @@ export default function Dashboard() {
                               <p className="text-slate-600 text-[10px] mt-1">{getMatchDate(m)}</p>
                             </div>
                           </div>
-                          <div className={`px-3 py-1.5 rounded-lg font-black text-sm ${resultColor}`}>
-                            {goals} - {opGoals}
+                          <div className={`px-3 py-1 rounded-lg font-black text-sm whitespace-nowrap shrink-0 ${resultColor}`}>
+                            {goals}-{opGoals}
                           </div>
                         </div>
 
@@ -317,6 +317,24 @@ export default function Dashboard() {
                           </div>
                         )}
 
+                        {!selectMode && (
+                          <div className="flex gap-2 mb-2">
+                            <button
+                              onClick={() => navigate(`/analysis/${m.id}?export=team`)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[10px] bg-blue-500/15 border border-blue-500/20 text-blue-400 hover:bg-blue-500/25 transition-colors"
+                            >
+                              <Download size={11} />
+                              Global
+                            </button>
+                            <button
+                              onClick={() => navigate(`/analysis/${m.id}?export=goalkeeper`)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[10px] bg-amber-500/15 border border-amber-500/20 text-amber-400 hover:bg-amber-500/25 transition-colors"
+                            >
+                              <Download size={11} />
+                              Porteros
+                            </button>
+                          </div>
+                        )}
                         <button
                           onClick={() => !selectMode && navigate(`/analysis/${m.id}`)}
                           className={`mt-auto w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs transition-colors ${

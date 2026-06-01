@@ -5,7 +5,7 @@ import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import {
-  Activity, Trophy, ArrowLeft, Cpu, Users, Target, TrendingUp, LogOut, Trash2, CheckSquare, Square, X
+  Activity, Trophy, ArrowLeft, Cpu, Users, Target, TrendingUp, LogOut, Trash2, CheckSquare, Square, X, Download
 } from 'lucide-react';
 
 function getGoals(match: SavedMatch) {

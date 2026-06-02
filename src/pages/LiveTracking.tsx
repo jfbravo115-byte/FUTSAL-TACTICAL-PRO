@@ -451,7 +451,7 @@ export default function LiveTracking() {
       <div className="flex flex-col bg-[#0A0B0E] text-slate-200 allow-scroll"
            style={{ height: 'var(--app-height, 100vh)', overflowY: 'auto' }}>
         <header className="shrink-0 border-b border-white/10 bg-[#0E1015]/95 backdrop-blur-xl px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="p-2 hover:bg-white/10 rounded-xl text-slate-400">
+          <button onClick={() => navigate('/match')} className="p-2 hover:bg-white/10 rounded-xl text-slate-400">
             <ArrowLeft size={18} />
           </button>
           <div>
@@ -632,7 +632,7 @@ export default function LiveTracking() {
       {/* ── HEADER ─────────────────────────────────────────── */}
       <header className="shrink-0 border-b border-white/10 bg-[#0E1015]/95 backdrop-blur-xl px-3 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate('/')} className="p-1.5 hover:bg-white/10 rounded-xl text-slate-400">
+          <button onClick={() => navigate('/match')} className="p-1.5 hover:bg-white/10 rounded-xl text-slate-400">
             <ArrowLeft size={16} />
           </button>
           <div>

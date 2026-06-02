@@ -1815,7 +1815,9 @@ export default function MatchTracker() {
     const needsOrigin = [
       ActionType.SHOT, 
       ActionType.GOAL, 
-      GoalieAction.GOAL_CONCEDED, 
+      GoalieAction.GOAL_CONCEDED,
+      GoalieAction.SAVE_PARRY,
+      GoalieAction.SAVE_CATCH,
       ActionType.STEAL, 
       ActionType.INTERCEPTION, 
       ActionType.LOSS, 
@@ -1827,7 +1829,9 @@ export default function MatchTracker() {
         ActionType.STEAL, 
         ActionType.INTERCEPTION, 
         ActionType.LOSS, 
-        ActionType.UNFORCED_ERROR
+        ActionType.UNFORCED_ERROR,
+        GoalieAction.SAVE_PARRY,
+        GoalieAction.SAVE_CATCH,
       ].includes(type as any);
 
       setPendingAction({

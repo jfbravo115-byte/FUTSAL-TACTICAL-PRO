@@ -1830,8 +1830,6 @@ export default function MatchTracker() {
         ActionType.INTERCEPTION, 
         ActionType.LOSS, 
         ActionType.UNFORCED_ERROR,
-        GoalieAction.SAVE_PARRY,
-        GoalieAction.SAVE_CATCH,
       ].includes(type as any);
 
       setPendingAction({
@@ -2503,12 +2501,18 @@ export default function MatchTracker() {
         </div>
 
         {goalie.isOnPitch && (
-          <div className="grid grid-cols-2 gap-2 mt-3">
+          <div className="grid grid-cols-3 gap-2 mt-3">
             <button
               onClick={() => setActiveActionPlayerId(goalie.id)}
               className={`py-2.5 ${isOpponent ? 'bg-red-600/20 border-red-500/40 hover:bg-red-600/30' : 'bg-blue-600/20 border-blue-500/40 hover:bg-blue-600/30'} text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
             >
               Nueva Acción
+            </button>
+            <button
+              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id, isOpponent, {})}
+              className={`py-2.5 ${isOpponent ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} ${isOpponent ? 'text-red-300' : 'text-amber-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
+            >
+              Parada
             </button>
             <button
               onClick={() => executeSwap(goalie.id, true)}
@@ -6079,6 +6083,7 @@ export default function MatchTracker() {
                       </label>
                       <PitchZones
                         onSelect={(id) => {
+                          if (!pendingAction) return;
                           const onlyNeedsOrigin = [
                             ActionType.STEAL, 
                             ActionType.INTERCEPTION, 
@@ -6087,18 +6092,19 @@ export default function MatchTracker() {
                           ].includes(pendingAction.type as any);
 
                           if (onlyNeedsOrigin) {
+                            const current = pendingAction;
+                            setPendingAction(null); // clear immediately
                             handleAction(
-                              pendingAction.type,
-                              pendingAction.playerId,
+                              current.type,
+                              current.playerId,
                               {
                                 originGrid: id,
                                 metadata: {
-                                  isOpponent: pendingAction.isOpponent,
-                                  setPiece: pendingAction.setPiece || "normal",
+                                  isOpponent: current.isOpponent,
+                                  setPiece: current.setPiece || "normal",
                                 },
                               },
                             );
-                            setPendingAction(null);
                           } else {
                             setPendingAction((prev) => ({
                               ...prev!,
@@ -6119,19 +6125,21 @@ export default function MatchTracker() {
                       </label>
                       <GoalMap
                         onSelect={(id) => {
+                          if (!pendingAction) return;
+                          const current = pendingAction;
+                          setPendingAction(null); // clear immediately to prevent double tap
                           handleAction(
-                            pendingAction.type,
-                            pendingAction.playerId,
+                            current.type,
+                            current.playerId,
                             {
-                              originGrid: pendingAction.originGrid,
+                              originGrid: current.originGrid,
                               destinationGrid: id,
                               metadata: {
-                                isOpponent: pendingAction.isOpponent,
-                                setPiece: pendingAction.setPiece || "normal",
+                                isOpponent: current.isOpponent,
+                                setPiece: current.setPiece || "normal",
                               },
                             },
                           );
-                          setPendingAction(null);
                         }}
                         selected={pendingAction.destinationGrid}
                       />

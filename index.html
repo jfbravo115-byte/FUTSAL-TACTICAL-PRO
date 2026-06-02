@@ -23,6 +23,12 @@
         height: -webkit-fill-available;
         overflow: hidden;
       }
+      /* Force portrait on supported browsers */
+      @media screen and (orientation: landscape) and (max-height: 500px) {
+        #root {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>

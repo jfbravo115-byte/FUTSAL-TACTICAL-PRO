@@ -1552,6 +1552,8 @@ export default function MatchTracker() {
       alert("Hubo un error al exportar. Por favor, inténtalo de nuevo.");
     } finally {
       setIsExporting(false);
+      setExportToast(null);
+      setExportingType(null);
     }
   };
 
@@ -1630,6 +1632,8 @@ export default function MatchTracker() {
         alert("Error al generar el PDF. Inténtalo de nuevo.");
       } finally {
         setIsExporting(false);
+        setExportToast(null);
+        setExportingType(null);
       }
       return;
     }
@@ -1664,6 +1668,8 @@ export default function MatchTracker() {
       alert('Error al generar el PDF de porteros.');
     } finally {
       setIsExporting(false);
+      setExportToast(null);
+      setExportingType(null);
     }
   };
 

@@ -1133,20 +1133,47 @@ const formatPlayerTime = (totalSeconds: number) => {
 
 export default function MatchTracker() {
   const navigate = useNavigate();
-  const [matchData, setMatchData] = useState<MatchData>({
-    teamName: "EQUIPO LOCAL",
-    opponentName: "EQUIPO VISITANTE",
-    period: Period.FIRST,
-    matchClock: 0,
-    isClockRunning: false,
-    fouls: { team: 0, opponent: 0 },
-    timeoutsUsed: {
-      team: { period1: false, period2: false },
-      opponent: { period1: false, period2: false },
-    },
-    players: INITIAL_PLAYERS,
-    events: [],
-  });
+  // Load pre-match setup if coming from PreMatch screen
+  const getInitialMatchData = (): MatchData => {
+    const setup = sessionStorage.getItem('matchSetup');
+    if (setup) {
+      try {
+        sessionStorage.removeItem('matchSetup');
+        const s = JSON.parse(setup);
+        return {
+          teamName: s.teamName || "EQUIPO LOCAL",
+          opponentName: s.opponentName || "EQUIPO VISITANTE",
+          teamLogo: s.teamLogo,
+          period: Period.FIRST,
+          matchClock: 0,
+          isClockRunning: false,
+          fouls: { team: 0, opponent: 0 },
+          timeoutsUsed: {
+            team: { period1: false, period2: false },
+            opponent: { period1: false, period2: false },
+          },
+          players: s.players || INITIAL_PLAYERS,
+          events: [],
+        };
+      } catch {}
+    }
+    return {
+      teamName: "EQUIPO LOCAL",
+      opponentName: "EQUIPO VISITANTE",
+      period: Period.FIRST,
+      matchClock: 0,
+      isClockRunning: false,
+      fouls: { team: 0, opponent: 0 },
+      timeoutsUsed: {
+        team: { period1: false, period2: false },
+        opponent: { period1: false, period2: false },
+      },
+      players: INITIAL_PLAYERS,
+      events: [],
+    };
+  };
+
+  const [matchData, setMatchData] = useState<MatchData>(getInitialMatchData);
 
   const [gameState, setGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
   const [rivalGameState, setRivalGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
@@ -5195,6 +5222,14 @@ export default function MatchTracker() {
                           >
                             {exportingType === 'HISTORIAL' ? <Loader2 size={18} className="animate-spin text-white" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}
                             <span className="font-black">HISTORIAL</span>
+                          </button>
+
+                          <button
+                            onClick={() => navigate('/')}
+                            className="group col-span-2 py-3 bg-gradient-to-r from-blue-600/10 to-blue-500/10 border border-blue-500/20 rounded-2xl text-[9px] font-black uppercase transition-all text-blue-400 flex items-center justify-center gap-2 shadow-inner active:scale-95 hover:from-blue-600/20 hover:to-blue-500/20"
+                          >
+                            <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                            <span>NUEVO PARTIDO</span>
                           </button>
                         </div>
                       </div>

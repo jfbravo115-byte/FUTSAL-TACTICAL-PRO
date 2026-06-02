@@ -2991,7 +2991,14 @@ export default function MatchTracker() {
             </thead>
             <tbody>
               {players.map(p => {
-                const halfEvts = matchData.events.filter(e => e.playerIds.includes(p.id) && halfFilter(e));
+                // Same broad filter as GkMaps - include opponent actions directed at this goalkeeper
+                const halfEvts = matchData.events.filter(e => halfFilter(e) && (
+                  e.playerIds.includes(p.id) ||
+                  ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
+                    e.type === GoalieAction.SAVE || e.type === GoalieAction.GOAL_CONCEDED ||
+                    e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
+                    e.metadata?.isOpponent !== p.isOpponent)
+                ));
                 const saves = halfEvts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
                 const conceded = halfEvts.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
                 const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
@@ -3186,9 +3193,14 @@ export default function MatchTracker() {
                   </div>
 
                   {team.players.map(p => {
-                    const ev1 = matchData.events.filter(e => e.playerIds.includes(p.id) && isFirstHalf(e));
-                    const ev2 = matchData.events.filter(e => e.playerIds.includes(p.id) && isSecondHalf(e));
-                    const evAll = matchData.events.filter(e => e.playerIds.includes(p.id));
+                    const gkFilter = (e: any) => e.playerIds.includes(p.id) ||
+                      ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
+                        e.type === GoalieAction.SAVE || e.type === GoalieAction.GOAL_CONCEDED ||
+                        e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
+                        e.metadata?.isOpponent !== p.isOpponent);
+                    const ev1 = matchData.events.filter(e => gkFilter(e) && isFirstHalf(e));
+                    const ev2 = matchData.events.filter(e => gkFilter(e) && isSecondHalf(e));
+                    const evAll = matchData.events.filter(e => gkFilter(e));
 
                     const calcStats = (evts: any[]) => {
                       const saves = evts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;

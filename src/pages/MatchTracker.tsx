@@ -1170,12 +1170,12 @@ export default function MatchTracker() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
   const [isExporting, setIsExporting] = useState(false);
+  const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
   const [exportToast, setExportToast] = useState<string | null>(null);
 
   const showExportToast = (msg: string) => {
     setExportToast(msg);
-    // Auto-hide after 4 seconds
-    setTimeout(() => setExportToast(null), 4000);
+    // Toast will be cleared by setExportingType(null) when export finishes
   };
   const [reportType, setReportType] = useState<"TEAM" | Role>("TEAM");
   const [showRivalStats, setShowRivalStats] = useState(false);
@@ -2900,16 +2900,36 @@ export default function MatchTracker() {
         );
       })()}
 
-      {/* ── EXPORT TOAST NOTIFICATION ─────────────── */}
+      {/* ── EXPORT LOADING OVERLAY ─────────────── */}
       {exportToast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] pointer-events-none">
-          <div className="flex items-center gap-3 bg-slate-900 border border-white/10 rounded-2xl px-5 py-3 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
-              <Loader2 size={14} className="text-blue-400 animate-spin" />
+        <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-6 bg-slate-900/95 border border-white/10 rounded-3xl px-10 py-8 shadow-2xl shadow-black/80 mx-6">
+            {/* Animated rings */}
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-500/20"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-400 animate-spin"></div>
+              <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-blue-300/60 animate-spin" style={{ animationDuration: '1.5s', animationDirection: 'reverse' }}></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Download size={18} className="text-blue-400" />
+              </div>
             </div>
-            <span className="text-[11px] font-black uppercase tracking-widest text-white whitespace-nowrap">
-              {exportToast}
-            </span>
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-[13px] font-black uppercase tracking-widest text-white text-center">
+                {exportToast}
+              </span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">
+                Por favor, espera...
+              </span>
+            </div>
+            <div className="flex gap-1">
+              {[0, 1, 2].map(i => (
+                <div
+                  key={i}
+                  className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -5120,54 +5140,54 @@ export default function MatchTracker() {
                         
                         <div className="grid grid-cols-2 gap-3">
                           <button
-                            onClick={() => { showExportToast('Generando PDF Global Equipo...'); handleExport("TEAM"); }}
+                            onClick={() => { setExportingType('TEAM'); showExportToast('Generando PDF Global Equipo...'); handleExport("TEAM"); }}
                             disabled={isExporting}
-                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-blue-600/10 hover:border-blue-500/30 transition-all text-slate-400 hover:text-blue-400 flex flex-col items-center gap-2 shadow-inner active:scale-95"
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'TEAM' ? 'bg-blue-600/20 border border-blue-500/40 text-blue-400 scale-95' : 'bg-white/5 border border-white/5 hover:bg-blue-600/10 hover:border-blue-500/30 text-slate-400 hover:text-blue-400'}`}
                           >
-                            {isExporting ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}
-                            <span>{isExporting ? 'Generando...' : 'Global Equipo'}</span>
+                            {exportingType === 'TEAM' ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}
+                            <span>{exportingType === 'TEAM' ? 'Generando...' : 'Global Equipo'}</span>
                           </button>
                           
                           <button
-                            onClick={() => { showExportToast('Generando PDF Porteros + Mapa...'); handleExport(Role.GOALKEEPER); }}
+                            onClick={() => { setExportingType('GK'); showExportToast('Generando PDF Porteros + Mapa...'); handleExport(Role.GOALKEEPER); }}
                             disabled={isExporting}
-                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-amber-600/10 hover:border-amber-500/30 transition-all text-slate-400 hover:text-amber-500 flex flex-col items-center gap-2 shadow-inner active:scale-95"
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'GK' ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400 scale-95' : 'bg-white/5 border border-white/5 hover:bg-amber-600/10 hover:border-amber-500/30 text-slate-400 hover:text-amber-500'}`}
                           >
-                            {isExporting ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <ShieldCheck size={18} className="group-hover:scale-110 transition-transform" />}
-                            <span>{isExporting ? 'Generando...' : 'Porteros + Mapa'}</span>
+                            {exportingType === 'GK' ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <ShieldCheck size={18} className="group-hover:scale-110 transition-transform" />}
+                            <span>{exportingType === 'GK' ? 'Generando...' : 'Porteros + Mapa'}</span>
                           </button>
                           
                           <button
-                            onClick={handleTacticalAnalysis}
-                            className="group py-4 bg-gradient-to-br from-red-600/15 to-blue-600/15 border border-white/15 rounded-2xl text-[9px] font-black uppercase hover:from-red-600/25 hover:to-blue-600/25 transition-all text-white flex flex-col items-center gap-2 shadow-inner relative overflow-hidden"
+                            onClick={() => { setExportingType('TACTICAL'); handleTacticalAnalysis(); }}
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all flex flex-col items-center gap-2 shadow-inner relative overflow-hidden active:scale-95 ${exportingType === 'TACTICAL' ? 'bg-gradient-to-br from-red-600/30 to-blue-600/30 border border-amber-400/40 scale-95' : 'bg-gradient-to-br from-red-600/15 to-blue-600/15 border border-white/15 hover:from-red-600/25 hover:to-blue-600/25'} text-white`}
                           >
-                            <Sparkles size={18} className="text-amber-400 group-hover:scale-110 transition-transform z-10" />
-                            <span className="z-10 italic font-black">TÁCTICAL PRO</span>
+                            {exportingType === 'TACTICAL' ? <Loader2 size={18} className="animate-spin text-amber-400 z-10" /> : <Sparkles size={18} className="text-amber-400 group-hover:scale-110 transition-transform z-10" />}
+                            <span className="z-10 italic font-black">{exportingType === 'TACTICAL' ? 'Analizando...' : 'TÁCTICAL PRO'}</span>
                             <div className="absolute inset-0 bg-blue-500/5 blur-xl -z-0"></div>
                           </button>
 
                           <button
-                            onClick={() => navigate('/tactical-board')}
-                            className="group py-4 bg-gradient-to-br from-lime-600/15 to-emerald-600/15 border border-lime-500/20 rounded-2xl text-[9px] font-black uppercase hover:from-lime-600/25 hover:to-emerald-600/25 transition-all text-lime-400 flex flex-col items-center gap-2 shadow-inner"
+                            onClick={() => { setExportingType('PIZARRA'); setTimeout(() => navigate('/tactical-board'), 150); }}
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all text-lime-400 flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'PIZARRA' ? 'bg-gradient-to-br from-lime-600/30 to-emerald-600/30 border border-lime-400/40 scale-95' : 'bg-gradient-to-br from-lime-600/15 to-emerald-600/15 border border-lime-500/20 hover:from-lime-600/25 hover:to-emerald-600/25'}`}
                           >
-                            <Pencil size={18} className="group-hover:scale-110 transition-transform" />
+                            {exportingType === 'PIZARRA' ? <Loader2 size={18} className="animate-spin" /> : <Pencil size={18} className="group-hover:scale-110 transition-transform" />}
                             <span className="font-black">PIZARRA</span>
                           </button>
 
                           <button
-                            onClick={() => navigate('/live-tracking')}
-                            className="group py-4 bg-gradient-to-br from-cyan-600/15 to-blue-600/15 border border-cyan-500/20 rounded-2xl text-[9px] font-black uppercase hover:from-cyan-600/25 hover:to-blue-600/25 transition-all text-cyan-400 flex flex-col items-center gap-2 shadow-inner relative overflow-hidden"
+                            onClick={() => { setExportingType('TRACKING'); setTimeout(() => navigate('/live-tracking'), 150); }}
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all text-cyan-400 flex flex-col items-center gap-2 shadow-inner relative overflow-hidden active:scale-95 ${exportingType === 'TRACKING' ? 'bg-gradient-to-br from-cyan-600/30 to-blue-600/30 border border-cyan-400/40 scale-95' : 'bg-gradient-to-br from-cyan-600/15 to-blue-600/15 border border-cyan-500/20 hover:from-cyan-600/25 hover:to-blue-600/25'}`}
                           >
-                            <Activity size={18} className="group-hover:scale-110 transition-transform" />
+                            {exportingType === 'TRACKING' ? <Loader2 size={18} className="animate-spin" /> : <Activity size={18} className="group-hover:scale-110 transition-transform" />}
                             <span className="font-black">TRACKING</span>
                             <span className="text-[6px] text-cyan-600">EN VIVO</span>
                           </button>
 
                           <button
-                            onClick={() => navigate('/dashboard')}
-                            className="group py-4 bg-white/5 border border-white/10 rounded-2xl text-[9px] font-black uppercase hover:bg-white/10 transition-all text-slate-400 hover:text-white flex flex-col items-center gap-2 shadow-inner"
+                            onClick={() => { setExportingType('HISTORIAL'); setTimeout(() => navigate('/dashboard'), 150); }}
+                            className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'HISTORIAL' ? 'bg-white/15 border border-white/30 text-white scale-95' : 'bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white'}`}
                           >
-                            <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />
+                            {exportingType === 'HISTORIAL' ? <Loader2 size={18} className="animate-spin text-white" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}
                             <span className="font-black">HISTORIAL</span>
                           </button>
                         </div>

@@ -2928,13 +2928,13 @@ export default function MatchTracker() {
 
         const renderZoneMap = (events: any[], isGoalGrid: boolean) => {
           const zones = isGoalGrid
-            ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR']
+            ? ['G1','G2','G3','G4','G5','G6','G7','G8','G9']
             : ['A1','A2','A3','B1','B2','B3','C1','C2','C3'];
           const counts: Record<string, number> = {};
           zones.forEach(z => counts[z] = 0);
           events.forEach(e => {
             const z = isGoalGrid
-              ? (e.metadata?.goalZone || e.destinationGrid || '').toUpperCase()
+              ? (e.metadata?.zone || e.destinationGrid || '').toUpperCase()
               : (e.originGrid || e.metadata?.originGrid || '').toUpperCase();
             if (zones.includes(z)) counts[z] = (counts[z] || 0) + 1;
           });

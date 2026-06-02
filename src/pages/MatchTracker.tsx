@@ -2991,16 +2991,17 @@ export default function MatchTracker() {
             </thead>
             <tbody>
               {players.map(p => {
-                // Same broad filter as GkMaps - include opponent actions directed at this goalkeeper
-                const halfEvts = matchData.events.filter(e => halfFilter(e) && (
-                  e.playerIds.includes(p.id) ||
-                  ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
-                    e.type === GoalieAction.SAVE || e.type === GoalieAction.GOAL_CONCEDED ||
-                    e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
-                    e.metadata?.isOpponent !== p.isOpponent)
-                ));
-                const saves = halfEvts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-                const conceded = halfEvts.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+                // Use SHOT/GOAL events from rival (same as PORTERO tab)
+                const isGkInvolved = (e: any) =>
+                  e.playerIds.includes(p.id) || (e.metadata?.isOpponent !== p.isOpponent);
+                const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
+                const saves = halfEvts.filter(e =>
+                  (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
+                  e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
+                ).length;
+                const conceded = halfEvts.filter(e =>
+                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
+                ).length;
                 const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
                 const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
                 const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
@@ -3030,20 +3031,25 @@ export default function MatchTracker() {
         const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
           <div>
             {players.map(p => {
-              // Use same filter as PORTERO tab - includes shots/goals from opponents directed at this goalkeeper
-              const halfEvts = matchData.events.filter(e => halfFilter(e) && (
+              // Use SHOT/GOAL events from rival (same as PORTERO tab) - NOT SAVE_PARRY events
+              const isGoalieInvolved = (e: any) =>
                 e.playerIds.includes(p.id) ||
-                // Also include opponent shots/goals where this GK was on pitch (isOpponent flag differs)
-                ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
-                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.SHOT ||
-                  e.type === ActionType.GOAL) &&
-                  e.metadata?.isOpponent !== p.isOpponent)
-              ));
+                // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
+                (e.metadata?.isOpponent !== p.isOpponent);
+
+              const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
+
+              // Saves = rival shots that were NOT goals and NOT out (same logic as PORTERO tab)
               const saveEvts = halfEvts.filter(e =>
-                e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
+                (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
+                e.type === GoalieAction.SAVE_PARRY ||
+                e.type === GoalieAction.SAVE_CATCH ||
+                e.type === GoalieAction.SAVE
               );
+              // Goals conceded = rival goals
               const goalEvts = halfEvts.filter(e =>
-                e.type === GoalieAction.GOAL_CONCEDED
+                e.type === GoalieAction.GOAL_CONCEDED ||
+                e.type === ActionType.GOAL
               );
               const totalSaves = saveEvts.length;
               const totalGoals = goalEvts.length;
@@ -3193,18 +3199,20 @@ export default function MatchTracker() {
                   </div>
 
                   {team.players.map(p => {
-                    const gkFilter = (e: any) => e.playerIds.includes(p.id) ||
-                      ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
-                        e.type === GoalieAction.SAVE || e.type === GoalieAction.GOAL_CONCEDED ||
-                        e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
-                        e.metadata?.isOpponent !== p.isOpponent);
-                    const ev1 = matchData.events.filter(e => gkFilter(e) && isFirstHalf(e));
-                    const ev2 = matchData.events.filter(e => gkFilter(e) && isSecondHalf(e));
-                    const evAll = matchData.events.filter(e => gkFilter(e));
+                    const isGkInvolved = (e: any) =>
+                      e.playerIds.includes(p.id) || (e.metadata?.isOpponent !== p.isOpponent);
+                    const ev1 = matchData.events.filter(e => isGkInvolved(e) && isFirstHalf(e));
+                    const ev2 = matchData.events.filter(e => isGkInvolved(e) && isSecondHalf(e));
+                    const evAll = matchData.events.filter(e => isGkInvolved(e));
 
                     const calcStats = (evts: any[]) => {
-                      const saves = evts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-                      const conceded = evts.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+                      const saves = evts.filter(e =>
+                        (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
+                        e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
+                      ).length;
+                      const conceded = evts.filter(e =>
+                        e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
+                      ).length;
                       return {
                         saves,
                         conceded,

@@ -75,8 +75,13 @@ const INITIAL_STATS = {
   goals: 0,
   assists: 0,
   steals: 0,
+  stealsWithPossession: 0,
+  stealsClearance: 0,
   interceptions: 0,
   losses: 0,
+  lossesBadPass: 0,
+  lossesBadDribble: 0,
+  lossesBadControl: 0,
   errors: 0,
   fouls: 0,
   yellowCards: 0,
@@ -1236,8 +1241,9 @@ export default function MatchTracker() {
     isOpponent: boolean;
     originGrid?: string;
     destinationGrid?: string;
-    setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick" | "free_kick";
-    step: "origin" | "target" | "player" | null;
+    setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
+    subType?: string;
+    step: "origin" | "target" | "player" | "subtype" | null;
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -1965,9 +1971,18 @@ export default function MatchTracker() {
             }
           }
           if (type === ActionType.ASSIST) stats.assists += 1;
-          if (type === ActionType.STEAL) stats.steals += 1;
+          if (type === ActionType.STEAL) {
+            stats.steals += 1;
+            if (metadata?.subType === 'with_possession') stats.stealsWithPossession += 1;
+            else if (metadata?.subType === 'clearance') stats.stealsClearance += 1;
+          }
           if (type === ActionType.INTERCEPTION) stats.interceptions += 1;
-          if (type === ActionType.LOSS) stats.losses += 1;
+          if (type === ActionType.LOSS) {
+            stats.losses += 1;
+            if (metadata?.subType === 'bad_pass') stats.lossesBadPass += 1;
+            else if (metadata?.subType === 'bad_dribble') stats.lossesBadDribble += 1;
+            else if (metadata?.subType === 'bad_control') stats.lossesBadControl += 1;
+          }
           if (type === ActionType.UNFORCED_ERROR) stats.errors += 1;
           if (type === ActionType.YELLOW_CARD) {
             stats.yellowCards += 1;
@@ -2069,12 +2084,19 @@ export default function MatchTracker() {
           }
           if (event.type === ActionType.ASSIST)
             stats.assists = Math.max(0, stats.assists - 1);
-          if (event.type === ActionType.STEAL)
+          if (event.type === ActionType.STEAL) {
             stats.steals = Math.max(0, stats.steals - 1);
+            if (event.metadata?.subType === 'with_possession') stats.stealsWithPossession = Math.max(0, stats.stealsWithPossession - 1);
+            else if (event.metadata?.subType === 'clearance') stats.stealsClearance = Math.max(0, stats.stealsClearance - 1);
+          }
           if (event.type === ActionType.INTERCEPTION)
             stats.interceptions = Math.max(0, stats.interceptions - 1);
-          if (event.type === ActionType.LOSS)
+          if (event.type === ActionType.LOSS) {
             stats.losses = Math.max(0, stats.losses - 1);
+            if (event.metadata?.subType === 'bad_pass') stats.lossesBadPass = Math.max(0, stats.lossesBadPass - 1);
+            else if (event.metadata?.subType === 'bad_dribble') stats.lossesBadDribble = Math.max(0, stats.lossesBadDribble - 1);
+            else if (event.metadata?.subType === 'bad_control') stats.lossesBadControl = Math.max(0, stats.lossesBadControl - 1);
+          }
           if (event.type === ActionType.UNFORCED_ERROR)
             stats.errors = Math.max(0, stats.errors - 1);
           if (event.type === ActionType.YELLOW_CARD) {
@@ -2625,8 +2647,13 @@ export default function MatchTracker() {
           { label: 'Goles', color: '#16a34a', fn: (p: Player) => p.stats.goals || 0 },
           { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
           { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => p.stats.shots || 0 },
-          { label: 'Pérdidas', color: '#dc2626', fn: (p: Player) => p.stats.losses || 0 },
-          { label: 'Recuperac.', color: '#9333ea', fn: (p: Player) => p.stats.steals || 0 },
+          { label: 'Pérd.', color: '#dc2626', fn: (p: Player) => p.stats.losses || 0 },
+          { label: '↳ Pase', color: '#f87171', fn: (p: Player) => p.stats.lossesBadPass || 0 },
+          { label: '↳ Regate', color: '#f87171', fn: (p: Player) => p.stats.lossesBadDribble || 0 },
+          { label: '↳ Control', color: '#f87171', fn: (p: Player) => p.stats.lossesBadControl || 0 },
+          { label: 'Recup.', color: '#9333ea', fn: (p: Player) => p.stats.steals || 0 },
+          { label: '↳ Posesión', color: '#c084fc', fn: (p: Player) => p.stats.stealsWithPossession || 0 },
+          { label: '↳ Despeje', color: '#c084fc', fn: (p: Player) => p.stats.stealsClearance || 0 },
           { label: 'Faltas com.', color: '#ea580c', fn: (p: Player) => p.stats.fouls || 0 },
           { label: 'Tarjetas', color: '#ca8a04', fn: (p: Player) => (p.stats.yellowCards || 0) + (p.stats.redCards || 0) },
           { label: 'Minutos', color: '#0284c7', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60) },
@@ -4067,7 +4094,22 @@ export default function MatchTracker() {
                                     </div>
                                     <div className="flex flex-col">
                                       <span className="text-[9px] font-black uppercase truncate text-white">
-                                        {e.type.replace(/_/g, " ")}
+                                        {e.type === ActionType.GOAL ? "⚽ Gol"
+                                          : e.type === ActionType.SHOT ? "🎯 Tiro"
+                                          : e.type === ActionType.STEAL ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
+                                          : e.type === ActionType.INTERCEPTION ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
+                                          : e.type === ActionType.LOSS ? (
+                                              e.metadata?.subType === 'bad_pass' ? "🎯 Error pase"
+                                              : e.metadata?.subType === 'bad_dribble' ? "🏃 Error regate"
+                                              : e.metadata?.subType === 'bad_control' ? "🤲 Error control"
+                                              : "❌ Pérdida")
+                                          : e.type === ActionType.UNFORCED_ERROR ? "❌ Pérdida"
+                                          : e.type === ActionType.ASSIST ? "👟 Asistencia"
+                                          : e.type === ActionType.FOUL ? "⚠️ Falta"
+                                          : e.type === GoalieAction.GOAL_CONCEDED ? "🔴 Gol encajado"
+                                          : e.type === GoalieAction.SAVE_PARRY ? "🧤 Parada"
+                                          : e.type === GoalieAction.SAVE_CATCH ? "🧤 Parada"
+                                          : e.type.replace(/_/g, " ")}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
                                         {matchData.players.find(
@@ -4075,20 +4117,17 @@ export default function MatchTracker() {
                                         )?.name || "Equipo"}
                                       </span>
                                     </div>
-                                    {e.metadata?.setPiece &&
-                                      e.metadata.setPiece !== "normal" && (
-                                        <span
-                                          className={`text-[6px] font-black px-1 rounded-sm border shrink-0 ${
-                                            e.metadata.setPiece === "penalty"
-                                              ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                                              : "bg-red-500/20 text-red-400 border-red-500/30"
-                                          }`}
-                                        >
-                                          {e.metadata.setPiece === "penalty"
-                                            ? "PENALTI"
-                                            : "DOBLE P."}
-                                        </span>
-                                      )}
+                                    {e.metadata?.setPiece && e.metadata.setPiece !== "normal" && (
+                                      <span className={`text-[6px] font-black px-1 rounded-sm border shrink-0 ${
+                                        e.metadata.setPiece === "penalty" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                        : e.metadata.setPiece === "free_kick" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                        : "bg-red-500/20 text-red-400 border-red-500/30"
+                                      }`}>
+                                        {e.metadata.setPiece === "penalty" ? "PENALTI"
+                                          : e.metadata.setPiece === "free_kick" ? "FALTA"
+                                          : "DOBLE P."}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
@@ -5001,58 +5040,55 @@ export default function MatchTracker() {
 
                                 <div className="grid grid-cols-5 gap-2 border-t border-white/5 pt-2">
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">
-                                      GOL
-                                    </span>
-                                    <span
-                                      className={`text-[10px] font-black ${p.stats.goals > 0 ? "text-green-400" : "text-slate-600"}`}
-                                    >
-                                      {p.stats.goals}
-                                    </span>
+                                    <span className="text-[6px] font-black text-slate-500 uppercase">GOL</span>
+                                    <span className={`text-[10px] font-black ${p.stats.goals > 0 ? "text-green-400" : "text-slate-600"}`}>{p.stats.goals}</span>
                                   </div>
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">
-                                      ASI
-                                    </span>
-                                    <span
-                                      className={`text-[10px] font-black ${p.stats.assists > 0 ? "text-blue-400" : "text-slate-600"}`}
-                                    >
-                                      {p.stats.assists}
-                                    </span>
+                                    <span className="text-[6px] font-black text-slate-500 uppercase">ASI</span>
+                                    <span className={`text-[10px] font-black ${p.stats.assists > 0 ? "text-blue-400" : "text-slate-600"}`}>{p.stats.assists}</span>
                                   </div>
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">
-                                      PER
-                                    </span>
-                                    <span
-                                      className={`text-[10px] font-black ${p.stats.losses > 0 ? "text-red-400" : "text-slate-600"}`}
-                                    >
-                                      {p.stats.losses}
-                                    </span>
-                                  </div>
-                                  <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">
-                                      TIR (P/F)
-                                    </span>
-                                    <span
-                                      className={`text-[9px] font-black ${p.stats.shots + p.stats.goals > 0 ? "text-amber-400" : "text-slate-600"} flex items-baseline gap-0.5`}
-                                    >
+                                    <span className="text-[6px] font-black text-slate-500 uppercase">TIR (P/F)</span>
+                                    <span className={`text-[9px] font-black ${p.stats.shots + p.stats.goals > 0 ? "text-amber-400" : "text-slate-600"} flex items-baseline gap-0.5`}>
                                       <span>{(p.stats.shots - p.stats.shotsOffTarget) + p.stats.goals}</span>
                                       <span className="text-[7px] text-slate-500">/</span>
                                       <span className="text-[8px] text-slate-400 font-normal">{p.stats.shotsOffTarget}</span>
                                     </span>
                                   </div>
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">
-                                      REC
-                                    </span>
-                                    <span
-                                      className={`text-[10px] font-black ${p.stats.steals + p.stats.interceptions > 0 ? "text-cyan-400" : "text-slate-600"}`}
-                                    >
-                                      {p.stats.steals + p.stats.interceptions}
-                                    </span>
+                                    <span className="text-[6px] font-black text-red-500/70 uppercase">PER</span>
+                                    <span className={`text-[10px] font-black ${p.stats.losses > 0 ? "text-red-400" : "text-slate-600"}`}>{p.stats.losses}</span>
+                                  </div>
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[6px] font-black text-cyan-500/70 uppercase">REC</span>
+                                    <span className={`text-[10px] font-black ${p.stats.steals > 0 ? "text-cyan-400" : "text-slate-600"}`}>{p.stats.steals}</span>
                                   </div>
                                 </div>
+
+                                {/* Subtype breakdown row */}
+                                {(p.stats.losses > 0 || p.stats.steals > 0) && (
+                                  <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-1.5 pb-1">
+                                    {/* Loss subtypes */}
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[6px] font-black text-red-500/60 uppercase tracking-widest">Tipo pérdida</span>
+                                      <div className="flex gap-1.5 flex-wrap">
+                                        {p.stats.lossesBadPass > 0 && <span className="text-[7px] text-red-300 bg-red-500/10 px-1.5 py-0.5 rounded-md">🎯 Pase ×{p.stats.lossesBadPass}</span>}
+                                        {p.stats.lossesBadDribble > 0 && <span className="text-[7px] text-orange-300 bg-orange-500/10 px-1.5 py-0.5 rounded-md">🏃 Regate ×{p.stats.lossesBadDribble}</span>}
+                                        {p.stats.lossesBadControl > 0 && <span className="text-[7px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded-md">🤲 Control ×{p.stats.lossesBadControl}</span>}
+                                        {p.stats.losses > 0 && !p.stats.lossesBadPass && !p.stats.lossesBadDribble && !p.stats.lossesBadControl && <span className="text-[7px] text-slate-500 italic">sin detalle</span>}
+                                      </div>
+                                    </div>
+                                    {/* Recovery subtypes */}
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[6px] font-black text-cyan-500/60 uppercase tracking-widest">Tipo recup.</span>
+                                      <div className="flex gap-1.5 flex-wrap">
+                                        {p.stats.stealsWithPossession > 0 && <span className="text-[7px] text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-md">✅ Posesión ×{p.stats.stealsWithPossession}</span>}
+                                        {p.stats.stealsClearance > 0 && <span className="text-[7px] text-slate-300 bg-white/5 px-1.5 py-0.5 rounded-md">↗️ Despeje ×{p.stats.stealsClearance}</span>}
+                                        {p.stats.steals > 0 && !p.stats.stealsWithPossession && !p.stats.stealsClearance && <span className="text-[7px] text-slate-500 italic">sin detalle</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
 
                                 {p.role === Role.GOALKEEPER && (
                                   <>
@@ -5765,7 +5801,7 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => handleAction(ActionType.STEAL, undefined, { metadata: { isOpponent: pitchView === 'opponent' } })}
+                  onClick={() => setPendingAction({ type: ActionType.STEAL, isOpponent: pitchView === 'opponent', step: 'subtype' })}
                   className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-cyan-600/30 text-slate-200 hover:text-cyan-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <Zap size={16} />
@@ -5773,7 +5809,7 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => handleAction(ActionType.LOSS, undefined, { metadata: { isOpponent: pitchView === 'opponent' } })}
+                  onClick={() => setPendingAction({ type: ActionType.LOSS, isOpponent: pitchView === 'opponent', step: 'subtype' })}
                   className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-red-600/30 text-slate-200 hover:text-red-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <RefreshCw size={16} />
@@ -6042,6 +6078,70 @@ export default function MatchTracker() {
               </div>
 
               <div className="flex flex-col gap-6">
+                {/* ── SUBTYPE SELECTOR (for RECUP and PÉRD) ── */}
+                {pendingAction.step === 'subtype' && (
+                  <div className="flex flex-col gap-3">
+                    {[ActionType.STEAL, ActionType.INTERCEPTION].includes(pendingAction.type as any) ? (
+                      <>
+                        <p className="text-[10px] font-black text-cyan-400 uppercase tracking-widest text-center">
+                          Tipo de recuperación
+                        </p>
+                        <div className="grid grid-cols-1 gap-2">
+                          {[
+                            { id: 'with_possession', label: 'Con posesión', desc: 'El equipo controla el balón', icon: '✅', color: 'cyan' },
+                            { id: 'clearance',       label: 'Despeje',       desc: 'Interrumpe pero sin control',  icon: '↗️', color: 'slate' },
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => setPendingAction(prev => ({ ...prev!, subType: opt.id, step: 'origin' }))}
+                              className={`flex items-center gap-3 p-3 rounded-2xl border transition-all active:scale-95 text-left ${
+                                opt.color === 'cyan'
+                                  ? 'bg-cyan-500/10 border-cyan-500/30 hover:bg-cyan-500/20 text-cyan-300'
+                                  : 'bg-white/5 border-white/10 hover:bg-white/10 text-slate-300'
+                              }`}
+                            >
+                              <span className="text-2xl shrink-0">{opt.icon}</span>
+                              <div>
+                                <div className="text-[11px] font-black uppercase">{opt.label}</div>
+                                <div className="text-[9px] text-slate-500 mt-0.5">{opt.desc}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest text-center">
+                          Tipo de pérdida
+                        </p>
+                        <div className="grid grid-cols-1 gap-2">
+                          {[
+                            { id: 'bad_pass',    label: 'Error de pase',    desc: 'Pase al rival o fuera',          icon: '🎯', color: 'red' },
+                            { id: 'bad_dribble', label: 'Error de regate',  desc: 'Pierde el balón en conducción',  icon: '🏃', color: 'orange' },
+                            { id: 'bad_control', label: 'Error de control', desc: 'No controla un balón recibido',  icon: '🤲', color: 'amber' },
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => setPendingAction(prev => ({ ...prev!, subType: opt.id, step: 'origin' }))}
+                              className={`flex items-center gap-3 p-3 rounded-2xl border transition-all active:scale-95 text-left ${
+                                opt.color === 'red'    ? 'bg-red-500/10 border-red-500/30 hover:bg-red-500/20 text-red-300' :
+                                opt.color === 'orange' ? 'bg-orange-500/10 border-orange-500/30 hover:bg-orange-500/20 text-orange-300' :
+                                                         'bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 text-amber-300'
+                              }`}
+                            >
+                              <span className="text-2xl shrink-0">{opt.icon}</span>
+                              <div>
+                                <div className="text-[11px] font-black uppercase">{opt.label}</div>
+                                <div className="text-[9px] text-slate-500 mt-0.5">{opt.desc}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Set Piece Selector */}
                 {![ActionType.STEAL, ActionType.INTERCEPTION, ActionType.LOSS, ActionType.UNFORCED_ERROR].includes(pendingAction.type as any) && (
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
@@ -6187,6 +6287,7 @@ export default function MatchTracker() {
                                 metadata: {
                                   isOpponent: current.isOpponent,
                                   setPiece: current.setPiece || "normal",
+                                  subType: current.subType,
                                 },
                               },
                             );

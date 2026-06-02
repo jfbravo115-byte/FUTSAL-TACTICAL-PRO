@@ -3534,9 +3534,9 @@ export default function MatchTracker() {
       />
 
       <header
-        className="py-1 bg-[#0E1015]/95 backdrop-blur-3xl border-b border-white/5 relative z-[100] shadow-2xl shrink-0"
+        className="py-1 bg-[#0E1015]/95 backdrop-blur-3xl border-b border-white/5 relative z-[100] shadow-2xl shrink-0 overflow-hidden"
       >
-        <div className="max-w-5xl mx-auto flex flex-col px-2 gap-1">
+        <div className="max-w-5xl mx-auto flex flex-col px-2 gap-1 w-full min-w-0">
           {/* TOP ROW: LOGOS, NAMES, FOULS */}
           <div className="flex items-center justify-between gap-2 px-1">
             {/* LOCAL INFO */}
@@ -3558,13 +3558,13 @@ export default function MatchTracker() {
                   </>
                 )}
               </div>
-              <div className="flex flex-col min-w-0">
+              <div className="flex flex-col min-w-0 flex-1">
                 {isEditingLocalName ? (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 min-w-0">
                     <input
                       autoFocus
                       type="text"
-                      className="text-[11px] font-black uppercase text-blue-400 bg-white/5 border border-blue-500/50 rounded px-1 outline-none w-24"
+                      className="text-[11px] font-black uppercase text-blue-400 bg-white/5 border border-blue-500/50 rounded px-1 outline-none min-w-0 w-full max-w-[90px]"
                       value={matchData.teamName}
                       onChange={(e) => setMatchData(prev => ({ ...prev, teamName: e.target.value }))}
                       onBlur={() => setIsEditingLocalName(false)}
@@ -3613,19 +3613,19 @@ export default function MatchTracker() {
 
              {/* RIVAL INFO */}
              <div className="flex items-center justify-end gap-2 min-w-0 flex-1 text-right">
-               <div className="flex flex-col min-w-0">
+               <div className="flex flex-col min-w-0 flex-1">
                 {isEditingOpponentName ? (
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1 min-w-0">
                     <button 
                       onClick={() => setIsEditingOpponentName(false)}
-                      className="text-red-500 hover:text-red-400"
+                      className="text-red-500 hover:text-red-400 shrink-0"
                     >
                       <Check size={10} />
                     </button>
                     <input
                       autoFocus
                       type="text"
-                      className="text-[11px] font-black uppercase text-red-500 bg-white/5 border border-red-500/50 rounded px-1 outline-none w-24 text-right"
+                      className="text-[11px] font-black uppercase text-red-500 bg-white/5 border border-red-500/50 rounded px-1 outline-none min-w-0 w-full max-w-[90px] text-right"
                       value={matchData.opponentName}
                       onChange={(e) => setMatchData(prev => ({ ...prev, opponentName: e.target.value }))}
                       onBlur={() => setIsEditingOpponentName(false)}

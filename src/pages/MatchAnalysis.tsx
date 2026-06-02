@@ -316,6 +316,30 @@ export default function MatchAnalysis() {
         </div>
       </main>
 
+      {/* Export loading overlay */}
+      {exportToast && (
+        <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-6 bg-slate-900/95 border border-white/10 rounded-3xl px-10 py-8 shadow-2xl mx-6">
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-500/20"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-400 animate-spin"></div>
+              <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-blue-300/60 animate-spin" style={{ animationDuration: '1.5s', animationDirection: 'reverse' }}></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Download size={18} className="text-blue-400" />
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-[13px] font-black uppercase tracking-widest text-white text-center">{exportToast}</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Por favor, espera...</span>
+            </div>
+            <div className="flex gap-1">
+              {[0,1,2].map(i => (
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

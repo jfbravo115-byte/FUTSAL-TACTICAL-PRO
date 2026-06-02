@@ -1547,6 +1547,33 @@ export default function MatchTracker() {
     }
   };
 
+  // ── CHECK FOR PENDING PDF EXPORT FROM HISTORIAL ────────────
+  useEffect(() => {
+    const pending = sessionStorage.getItem('pendingPDFExport');
+    if (!pending) return;
+    try {
+      const { type, matchId } = JSON.parse(pending);
+      sessionStorage.removeItem('pendingPDFExport');
+      // Load match from Firestore and trigger export
+      const loadAndExport = async () => {
+        const { getDoc, doc } = await import('firebase/firestore');
+        const d = await getDoc(doc(db, 'partidos', matchId));
+        if (!d.exists()) return;
+        const savedMatch = { id: d.id, ...d.data() } as any;
+        // Restore match data
+        setMatchData(savedMatch);
+        setReportType(type === 'team' ? 'TEAM' : Role.GOALKEEPER);
+        setIsDataLocked(true);
+        // Wait for render then export
+        await new Promise(r => setTimeout(r, 1500));
+        await handleExport(type === 'team' ? 'TEAM' : Role.GOALKEEPER);
+      };
+      loadAndExport().catch(console.error);
+    } catch (e) {
+      console.error('Pending export error:', e);
+    }
+  }, []);
+
   const handleExport = async (type: "TEAM" | Role = "TEAM") => {
     setReportType(type);
     setIsExporting(true);

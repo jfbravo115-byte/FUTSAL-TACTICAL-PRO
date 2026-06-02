@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import PDFReportTemplates, { PDFReportRef } from '../components/PDFReportTemplates';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
@@ -48,21 +47,15 @@ export default function MatchAnalysis() {
   }, [matchId]);
 
   const [exportingPDF, setExportingPDF] = useState<'team' | 'goalkeeper' | null>(null);
-  const pdfRef = useRef<PDFReportRef>(null);
 
   const generatePDF = async (type: 'team' | 'goalkeeper') => {
-    if (!pdfRef.current || !match) return;
-    setExportingPDF(type);
-    try {
-      await new Promise(r => setTimeout(r, 500));
-      if (type === 'team') await pdfRef.current.exportTeamPDF();
-      else await pdfRef.current.exportGoalkeeperPDF();
-    } catch (err) {
-      console.error(err);
-      alert('Error al generar el PDF.');
-    } finally {
-      setExportingPDF(null);
-    }
+    if (!match) return;
+    // Store export request and navigate to MatchTracker which has the full PDF templates
+    sessionStorage.setItem('pendingPDFExport', JSON.stringify({
+      type,
+      matchId: match.id,
+    }));
+    navigate(`/?export=${type}&matchId=${match.id}`);
   };
 
   const autoGenerateAnalysis = async (matchData: SavedMatch) => {
@@ -319,15 +312,7 @@ export default function MatchAnalysis() {
         </div>
       </main>
 
-      {/* PDF Report Templates */}
-      {match && (
-        <PDFReportTemplates
-          ref={pdfRef}
-          match={match}
-          goals={goals}
-          opponentGoals={opponentGoals}
-        />
-      )}
+
     </div>
   );
 }

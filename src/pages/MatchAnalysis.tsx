@@ -59,7 +59,7 @@ export default function MatchAnalysis() {
       type,
       matchId: match.id,
     }));
-    setTimeout(() => navigate(`/?export=${type}&matchId=${match.id}`), 600);
+    setTimeout(() => navigate(`/match?export=${type}&matchId=${match.id}`), 600);
   };
 
   const autoGenerateAnalysis = async (matchData: SavedMatch) => {

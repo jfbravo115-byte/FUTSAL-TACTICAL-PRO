@@ -3023,9 +3023,21 @@ export default function MatchTracker() {
         const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
           <div>
             {players.map(p => {
-              const halfEvts = matchData.events.filter(e => e.playerIds.includes(p.id) && halfFilter(e));
-              const saveEvts = halfEvts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH);
-              const goalEvts = halfEvts.filter(e => e.type === GoalieAction.GOAL_CONCEDED);
+              // Use same filter as PORTERO tab - includes shots/goals from opponents directed at this goalkeeper
+              const halfEvts = matchData.events.filter(e => halfFilter(e) && (
+                e.playerIds.includes(p.id) ||
+                // Also include opponent shots/goals where this GK was on pitch (isOpponent flag differs)
+                ((e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH ||
+                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.SHOT ||
+                  e.type === ActionType.GOAL) &&
+                  e.metadata?.isOpponent !== p.isOpponent)
+              ));
+              const saveEvts = halfEvts.filter(e =>
+                e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
+              );
+              const goalEvts = halfEvts.filter(e =>
+                e.type === GoalieAction.GOAL_CONCEDED
+              );
               const totalSaves = saveEvts.length;
               const totalGoals = goalEvts.length;
               if (totalSaves === 0 && totalGoals === 0) {

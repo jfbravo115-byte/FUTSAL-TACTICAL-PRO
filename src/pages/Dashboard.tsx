@@ -99,7 +99,7 @@ export default function Dashboard() {
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/match')}
               className="p-2 hover:bg-white/10 rounded-xl transition-all text-slate-400 hover:text-white"
             >
               <ArrowLeft size={20} />
@@ -250,7 +250,7 @@ export default function Dashboard() {
                   <h3 className="text-xl font-black text-white mb-2">Sin partidos guardados</h3>
                   <p className="text-slate-500 mb-6">Usa el botón TACTICAL PRO durante un partido para guardar el análisis automáticamente.</p>
                   <button
-                    onClick={() => navigate('/')}
+                    onClick={() => navigate('/match')}
                     className="bg-lime-400 text-slate-950 font-black px-6 py-2 rounded-xl hover:bg-lime-500 transition-colors"
                   >
                     Ir al Partido

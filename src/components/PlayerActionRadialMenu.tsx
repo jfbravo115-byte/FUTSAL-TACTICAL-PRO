@@ -34,8 +34,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
 
   const goalkeeperActions = [
     { type: GoalieAction.SAVE_PARRY,    label: 'PARADA',   icon: <Handshake size={14} />,     color: 'bg-blue-500',   count: player.stats.saves },
-    { type: GoalieAction.GOAL_CONCEDED, label: 'ENCAJADO', icon: '🥅',                        color: 'bg-red-600',    count: player.stats.conceded },
     { type: ActionType.GOAL,            label: 'GOL',      icon: '⚽',                        color: 'bg-green-500',  count: player.stats.goals },
+    { type: ActionType.ASSIST,          label: 'ASIST',    icon: <Handshake size={14} />,     color: 'bg-yellow-500', count: player.stats.assists },
     { type: ActionType.SHOT,            label: 'TIRO',     icon: <Target size={14} />,        color: 'bg-rose-500',   count: player.stats.shots },
     { type: ActionType.LOSS,            label: 'PÉRD.',    icon: <RefreshCw size={14} />,     color: 'bg-red-500',    count: player.stats.losses },
     { type: ActionType.STEAL,           label: 'RECUP.',   icon: <Zap size={14} />,           color: 'bg-purple-600', count: player.stats.steals },

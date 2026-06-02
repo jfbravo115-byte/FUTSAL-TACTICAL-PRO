@@ -186,9 +186,10 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       {!selectingZone && !selectingSubtype && (
         <motion.div
           key="radial"
-          initial={{ scale: 0, opacity: 0 }}
+          initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
+          exit={{ scale: 0.8, opacity: 0 }}
+          transition={{ duration: 0.1 }}
           className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[250]"
         >
           {/* Center info */}
@@ -211,10 +212,10 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
             return (
               <motion.button
                 key={action.type.toString()}
-                initial={{ scale: 0, x: 0, y: 0, opacity: 0 }}
+                initial={{ scale: 0.5, opacity: 0 }}
                 animate={{ scale: 1, x, y, opacity: 1 }}
                 exit={{ scale: 0, x: 0, y: 0, opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20, delay: i * 0.03 }}
+                transition={{ duration: 0.1 }}
                 whileHover={{ scale: 1.15, filter: 'brightness(1.1)' }}
                 whileTap={{ scale: 0.9 }}
                 onClick={(e) => {

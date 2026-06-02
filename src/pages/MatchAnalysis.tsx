@@ -47,15 +47,19 @@ export default function MatchAnalysis() {
   }, [matchId]);
 
   const [exportingPDF, setExportingPDF] = useState<'team' | 'goalkeeper' | null>(null);
+  const [exportToast, setExportToast] = useState<string | null>(null);
 
   const generatePDF = async (type: 'team' | 'goalkeeper') => {
     if (!match) return;
+    const msg = type === 'team' ? 'Generando PDF Global Equipo...' : 'Generando PDF Porteros + Mapa...';
+    setExportToast(msg);
+    setTimeout(() => setExportToast(null), 4000);
     // Store export request and navigate to MatchTracker which has the full PDF templates
     sessionStorage.setItem('pendingPDFExport', JSON.stringify({
       type,
       matchId: match.id,
     }));
-    navigate(`/?export=${type}&matchId=${match.id}`);
+    setTimeout(() => navigate(`/?export=${type}&matchId=${match.id}`), 600);
   };
 
   const autoGenerateAnalysis = async (matchData: SavedMatch) => {

@@ -1236,7 +1236,7 @@ export default function MatchTracker() {
     isOpponent: boolean;
     originGrid?: string;
     destinationGrid?: string;
-    setPiece?: "normal" | "penalty" | "double_penalty";
+    setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick" | "free_kick";
     step: "origin" | "target" | "player" | null;
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
@@ -4208,6 +4208,7 @@ export default function MatchTracker() {
                           const teamGoalEvents = myEvents.filter(e => e?.type === ActionType.GOAL);
                           const totalGoalPenalties = teamGoalEvents.filter(e => e?.metadata?.setPiece === "penalty").length;
                           const totalGoalDoublePenalties = teamGoalEvents.filter(e => e?.metadata?.setPiece === "double_penalty").length;
+                          const totalGoalFreeKicks = teamGoalEvents.filter(e => e?.metadata?.setPiece === "free_kick").length;
 
                           const totalAssists = myPlayers.reduce(
                             (acc, p) => acc + (p?.stats?.assists || 0),
@@ -6043,18 +6044,18 @@ export default function MatchTracker() {
               <div className="flex flex-col gap-6">
                 {/* Set Piece Selector */}
                 {![ActionType.STEAL, ActionType.INTERCEPTION, ActionType.LOSS, ActionType.UNFORCED_ERROR].includes(pendingAction.type as any) && (
-                <div className="bg-white/5 p-3 rounded-2xl border border-white/5 flex items-center justify-between">
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic">
+                <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic block mb-2">
                     ¿Acción desde?
                   </span>
-                  <div className="flex gap-1">
+                  <div className="grid grid-cols-2 gap-1.5">
                     {[
-                      { id: "normal", label: "Jugada" },
-                      { id: "penalty", label: "Penalti" },
-                      { id: "double_penalty", label: "Doble P." },
+                      { id: "normal",         label: "Jugada",     icon: "⚽" },
+                      { id: "free_kick",      label: "Falta",      icon: "🎯" },
+                      { id: "penalty",        label: "Penalti",    icon: "🥅" },
+                      { id: "double_penalty", label: "Doble P.",   icon: "🔴" },
                     ].map((opt) => {
-                      const isSel =
-                        (pendingAction.setPiece || "normal") === opt.id;
+                      const isSel = (pendingAction.setPiece || "normal") === opt.id;
                       return (
                         <button
                           key={opt.id}
@@ -6064,12 +6065,13 @@ export default function MatchTracker() {
                               setPiece: opt.id as any,
                             }))
                           }
-                          className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all border ${
+                          className={`py-2 px-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center justify-center gap-1.5 ${
                             isSel
-                              ? "bg-amber-500/20 border-amber-500 text-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.2)]"
+                              ? "bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.2)]"
                               : "bg-white/5 border-white/10 text-slate-500 hover:text-slate-300"
                           }`}
                         >
+                          <span className="text-[11px]">{opt.icon}</span>
                           {opt.label}
                         </button>
                       );

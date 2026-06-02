@@ -42,6 +42,7 @@ import {
   Sparkles,
   Edit2,
   Pencil,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";
@@ -1169,6 +1170,13 @@ export default function MatchTracker() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
   const [isExporting, setIsExporting] = useState(false);
+  const [exportToast, setExportToast] = useState<string | null>(null);
+
+  const showExportToast = (msg: string) => {
+    setExportToast(msg);
+    // Auto-hide after 4 seconds
+    setTimeout(() => setExportToast(null), 4000);
+  };
   const [reportType, setReportType] = useState<"TEAM" | Role>("TEAM");
   const [showRivalStats, setShowRivalStats] = useState(false);
   const [isConfigVisible, setIsConfigVisible] = useState(false);
@@ -2891,6 +2899,20 @@ export default function MatchTracker() {
           </>
         );
       })()}
+
+      {/* ── EXPORT TOAST NOTIFICATION ─────────────── */}
+      {exportToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] pointer-events-none">
+          <div className="flex items-center gap-3 bg-slate-900 border border-white/10 rounded-2xl px-5 py-3 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
+              <Loader2 size={14} className="text-blue-400 animate-spin" />
+            </div>
+            <span className="text-[11px] font-black uppercase tracking-widest text-white whitespace-nowrap">
+              {exportToast}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ── GOALKEEPER PDF PAGES — 3 pages by half ─── */}
       {(() => {
@@ -5098,21 +5120,21 @@ export default function MatchTracker() {
                         
                         <div className="grid grid-cols-2 gap-3">
                           <button
-                            onClick={() => handleExport("TEAM")}
+                            onClick={() => { showExportToast('Generando PDF Global Equipo...'); handleExport("TEAM"); }}
                             disabled={isExporting}
-                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-blue-600/10 hover:border-blue-500/30 transition-all text-slate-400 hover:text-blue-400 flex flex-col items-center gap-2 shadow-inner"
+                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-blue-600/10 hover:border-blue-500/30 transition-all text-slate-400 hover:text-blue-400 flex flex-col items-center gap-2 shadow-inner active:scale-95"
                           >
-                            <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />
-                            <span>Global Equipo</span>
+                            {isExporting ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}
+                            <span>{isExporting ? 'Generando...' : 'Global Equipo'}</span>
                           </button>
                           
                           <button
-                            onClick={() => handleExport(Role.GOALKEEPER)}
+                            onClick={() => { showExportToast('Generando PDF Porteros + Mapa...'); handleExport(Role.GOALKEEPER); }}
                             disabled={isExporting}
-                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-amber-600/10 hover:border-amber-500/30 transition-all text-slate-400 hover:text-amber-500 flex flex-col items-center gap-2 shadow-inner"
+                            className="group py-4 bg-white/5 border border-white/5 rounded-2xl text-[9px] font-black uppercase hover:bg-amber-600/10 hover:border-amber-500/30 transition-all text-slate-400 hover:text-amber-500 flex flex-col items-center gap-2 shadow-inner active:scale-95"
                           >
-                            <ShieldCheck size={18} className="group-hover:scale-110 transition-transform" />
-                            <span>Porteros + Mapa</span>
+                            {isExporting ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <ShieldCheck size={18} className="group-hover:scale-110 transition-transform" />}
+                            <span>{isExporting ? 'Generando...' : 'Porteros + Mapa'}</span>
                           </button>
                           
                           <button

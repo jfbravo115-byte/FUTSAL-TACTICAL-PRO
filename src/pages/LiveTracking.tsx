@@ -325,7 +325,10 @@ export default function LiveTracking() {
 
       ws.onmessage = (e) => {
         try {
-          const frame: TrackingFrame = JSON.parse(e.data);
+          const msg = JSON.parse(e.data);
+          // Ignore non-frame messages (conexion, jugada_guardada, etc.)
+          if (msg.tipo !== 'frame' || !msg.posiciones_render) return;
+          const frame: TrackingFrame = msg;
           setCurrentFrame(frame);
 
           // Buffer last 450 frames (~15s at 30fps)

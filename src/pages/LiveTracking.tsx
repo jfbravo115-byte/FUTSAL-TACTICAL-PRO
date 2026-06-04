@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Wifi, WifiOff, Play, Pause, Rewind, FastForward,
   Target, Trophy, Zap, Shield, Save, Settings, X, ChevronRight,
-  AlertTriangle, Activity, Camera, Check
+  AlertTriangle, Activity, Camera, CameraOff, Check
 } from 'lucide-react';
 import {
   TrackingConfig, TrackingFrame, TacticalAlert, SavedPlay,
@@ -233,8 +233,14 @@ export default function LiveTracking() {
   const [replayPlay, setReplayPlay] = useState<SavedPlay | null>(null);
   const replayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Calibration
-  const [calibImgUrl, setCalibImgUrl] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const captureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'simulation' | 'camera'>('simulation');
+  const [fps, setFps] = useState(0);
+  const fpsCounterRef = useRef(0);
+  const fpsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const calibCanvasRef = useRef<HTMLCanvasElement>(null);
   const [calibPoints, setCalibPoints] = useState<CalibrationPoint[]>([]);
   const CALIB_LABELS = ['↖ Esquina superior izquierda', '↗ Esquina superior derecha',
@@ -312,9 +318,10 @@ export default function LiveTracking() {
 
       ws.onopen = () => {
         setWsStatus('connected');
-        // Send config
         ws.send(JSON.stringify({
           tipo: 'init',
+          local_color: config.localColor,
+          rival_color: config.rivalColor,
           prompts_tacticos: {
             local: `players wearing ${config.localColor} shirts`,
             rival: `players wearing ${config.rivalColor} shirts`,
@@ -361,7 +368,90 @@ export default function LiveTracking() {
     setWsStatus('disconnected');
   };
 
-  // ── COMMANDS ────────────────────────────────────────────────
+  // ── CAMERA STREAMING ────────────────────────────────────────
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // cámara trasera
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        }
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setCameraActive(true);
+        setCameraMode('camera');
+        startFrameCapture();
+      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      alert('No se pudo acceder a la cámara. Usando modo simulación.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(t => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (cameraIntervalRef.current) clearInterval(cameraIntervalRef.current);
+    if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
+    setCameraActive(false);
+    setCameraMode('simulation');
+  };
+
+  const startFrameCapture = () => {
+    if (cameraIntervalRef.current) clearInterval(cameraIntervalRef.current);
+    
+    // FPS counter
+    fpsTimerRef.current = setInterval(() => {
+      setFps(fpsCounterRef.current);
+      fpsCounterRef.current = 0;
+    }, 1000);
+
+    // Capture frame every 150ms (~7fps) — balance entre velocidad y precisión SAM2
+    cameraIntervalRef.current = setInterval(() => {
+      const video = videoRef.current;
+      const captureCanvas = captureCanvasRef.current;
+      const ws = wsRef.current;
+
+      if (!video || !captureCanvas || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (video.readyState < 2) return; // video not ready
+
+      const W = 640, H = 480;
+      captureCanvas.width = W;
+      captureCanvas.height = H;
+      const ctx = captureCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.drawImage(video, 0, 0, W, H);
+      
+      // Compress to JPEG base64 (quality 0.7 for speed)
+      const b64 = captureCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+      
+      ws.send(JSON.stringify({
+        tipo: 'frame_video',
+        imagen: b64,
+        width: W,
+        height: H,
+        timestamp: Date.now(),
+      }));
+
+      fpsCounterRef.current++;
+    }, 150);
+  };
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
+
   const sendCommand = (comando: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ comando_accion: comando }));
@@ -688,6 +778,29 @@ export default function LiveTracking() {
             <span className="text-[8px] font-black text-blue-400 uppercase">{sistema}</span>
           </div>
 
+          {/* FPS counter when camera active */}
+          {cameraActive && (
+            <div className="px-2 py-1 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <span className="text-[8px] font-black text-green-400 uppercase">{fps}fps</span>
+            </div>
+          )}
+
+          {/* Camera toggle */}
+          <button
+            onClick={cameraActive ? stopCamera : startCamera}
+            disabled={!isConnected}
+            className={`p-2 rounded-xl transition-all ${
+              cameraActive
+                ? 'bg-green-500/20 text-green-400 border border-green-500/30 animate-pulse'
+                : isConnected
+                ? 'bg-white/5 text-slate-400 border border-white/10 hover:bg-green-500/10 hover:text-green-400'
+                : 'bg-white/5 text-slate-600 border border-white/5 opacity-50 cursor-not-allowed'
+            }`}
+            title={cameraActive ? 'Parar cámara' : 'Usar cámara'}
+          >
+            {cameraActive ? <CameraOff size={14} /> : <Camera size={14} />}
+          </button>
+
           {/* Connect/Disconnect */}
           <button
             onClick={isConnected ? disconnectWS : connectWS}
@@ -706,6 +819,10 @@ export default function LiveTracking() {
           </button>
         </div>
       </header>
+
+      {/* Hidden video + capture canvas for camera streaming */}
+      <video ref={videoRef} playsInline muted className="hidden" />
+      <canvas ref={captureCanvasRef} className="hidden" />
 
       {/* ── CANVAS ─────────────────────────────────────────── */}
       <div className="relative flex-1 overflow-hidden" style={{ maxHeight: 'calc(var(--app-height, 100vh) - 200px)' }}>

@@ -5237,7 +5237,7 @@ export default function MatchTracker() {
                           </button>
 
                           <button
-                            onClick={() => { setExportingType('PIZARRA'); setTimeout(() => navigate('/tactical-board'), 150); }}
+                            onClick={() => { setExportingType('PIZARRA'); setExportToast(null); setTimeout(() => { setExportingType(null); navigate('/tactical-board'); }, 150); }}
                             className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all text-lime-400 flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'PIZARRA' ? 'bg-gradient-to-br from-lime-600/30 to-emerald-600/30 border border-lime-400/40 scale-95' : 'bg-gradient-to-br from-lime-600/15 to-emerald-600/15 border border-lime-500/20 hover:from-lime-600/25 hover:to-emerald-600/25'}`}
                           >
                             {exportingType === 'PIZARRA' ? <Loader2 size={18} className="animate-spin" /> : <Pencil size={18} className="group-hover:scale-110 transition-transform" />}
@@ -5245,7 +5245,7 @@ export default function MatchTracker() {
                           </button>
 
                           <button
-                            onClick={() => { setExportingType('TRACKING'); setTimeout(() => navigate('/live-tracking'), 150); }}
+                            onClick={() => { setExportingType('TRACKING'); setExportToast(null); setTimeout(() => { setExportingType(null); navigate('/live-tracking'); }, 150); }}
                             className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all text-cyan-400 flex flex-col items-center gap-2 shadow-inner relative overflow-hidden active:scale-95 ${exportingType === 'TRACKING' ? 'bg-gradient-to-br from-cyan-600/30 to-blue-600/30 border border-cyan-400/40 scale-95' : 'bg-gradient-to-br from-cyan-600/15 to-blue-600/15 border border-cyan-500/20 hover:from-cyan-600/25 hover:to-blue-600/25'}`}
                           >
                             {exportingType === 'TRACKING' ? <Loader2 size={18} className="animate-spin" /> : <Activity size={18} className="group-hover:scale-110 transition-transform" />}
@@ -5254,7 +5254,7 @@ export default function MatchTracker() {
                           </button>
 
                           <button
-                            onClick={() => { setExportingType('HISTORIAL'); setTimeout(() => navigate('/dashboard'), 150); }}
+                            onClick={() => { setExportingType('HISTORIAL'); setExportToast(null); setTimeout(() => { setExportingType(null); navigate('/dashboard'); }, 150); }}
                             className={`group py-4 rounded-2xl text-[9px] font-black uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95 ${exportingType === 'HISTORIAL' ? 'bg-white/15 border border-white/30 text-white scale-95' : 'bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white'}`}
                           >
                             {exportingType === 'HISTORIAL' ? <Loader2 size={18} className="animate-spin text-white" /> : <LayoutDashboard size={18} className="group-hover:scale-110 transition-transform" />}

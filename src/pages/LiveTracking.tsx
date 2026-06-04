@@ -266,6 +266,14 @@ export default function LiveTracking() {
 
   useEffect(() => {
     if (screen === 'tracking') {
+      // Draw pitch immediately even without a frame
+      setTimeout(() => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) drawPitch(ctx, canvas.width, canvas.height);
+        }
+      }, 50);
       const frameToRender = replay.active && replayPlay
         ? replayPlay.frames[replay.frameIdx]
         : currentFrame;
@@ -677,12 +685,23 @@ export default function LiveTracking() {
       </header>
 
       {/* ── CANVAS ─────────────────────────────────────────── */}
-      <div className="relative flex-1 overflow-hidden" style={{ maxHeight: 'calc(var(--app-height, 100vh) - 200px)' }}>
+      <div ref={(el) => {
+        if (el && canvasRef.current) {
+          const canvas = canvasRef.current;
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && canvas.width !== rect.width) {
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) { drawPitch(ctx, canvas.width, canvas.height); }
+          }
+        }
+      }} className="relative flex-1 overflow-hidden" style={{ maxHeight: 'calc(var(--app-height, 100vh) - 200px)' }}>
         <canvas
           ref={canvasRef}
           width={300}
           height={480}
-          className="w-full h-full"
+          className="w-full h-full bg-[#1a6b9a]"
           style={{ imageRendering: 'crisp-edges' }}
         />
 

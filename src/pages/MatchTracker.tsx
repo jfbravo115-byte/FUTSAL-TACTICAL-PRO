@@ -2543,22 +2543,42 @@ export default function MatchTracker() {
                   return isGoalieInvolved && (e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL) && (e.destinationGrid === z || e.metadata?.zone === z);
                 }).length;
 
+                // Color logic: green=saves only, red=goals only, orange=both, empty=none
+                const hasSaves = saves > 0;
+                const hasGoals = goals > 0;
+                const bgColor = hasSaves && hasGoals
+                  ? 'bg-orange-500/30 border-orange-400/40'
+                  : hasSaves
+                  ? 'bg-green-500/25 border-green-400/30'
+                  : hasGoals
+                  ? 'bg-red-500/30 border-red-400/40'
+                  : 'bg-white/5 border-white/10';
+                const textColor = hasSaves && hasGoals ? 'text-orange-300' : hasSaves ? 'text-green-300' : 'text-red-300';
+                const total = saves + goals;
+
                 return (
-                  <div key={z} className="relative flex items-center justify-center border-white/10 border bg-white/5 rounded-sm overflow-hidden group">
-                    {saves > 0 && (
-                      <div className={`absolute inset-0 ${isOpponent ? 'bg-red-500/20' : 'bg-blue-500/20'} flex items-center justify-center`}>
-                        <span className={`text-[10px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} drop-shadow-sm`}>{saves}</span>
-                      </div>
-                    )}
-                    {goals > 0 && (
-                      <div className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border border-slate-900 z-10 shadow-lg">
-                        <span className="text-[8px] font-black text-white">{goals}</span>
+                  <div key={z} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
+                    {total > 0 && (
+                      <div className="flex flex-col items-center justify-center leading-none gap-0.5">
+                        <span className={`text-[11px] font-black ${textColor} drop-shadow-sm`}>{total}</span>
+                        {hasSaves && hasGoals && (
+                          <div className="flex gap-0.5">
+                            <span className="text-[6px] text-green-400 font-black">{saves}P</span>
+                            <span className="text-[6px] text-red-400 font-black">{goals}G</span>
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="absolute bottom-0.5 left-0.5 opacity-20 text-[5px] font-mono text-white">{z}</div>
                   </div>
                 );
               })}
+            </div>
+            {/* Legend */}
+            <div className="flex gap-3 justify-center mt-1.5">
+              <span className="flex items-center gap-1 text-[7px] font-black text-green-400"><span className="w-2 h-2 rounded-sm bg-green-500/40 inline-block"></span>Paradas</span>
+              <span className="flex items-center gap-1 text-[7px] font-black text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500/40 inline-block"></span>Goles</span>
+              <span className="flex items-center gap-1 text-[7px] font-black text-orange-400"><span className="w-2 h-2 rounded-sm bg-orange-500/40 inline-block"></span>Ambos</span>
             </div>
           </div>
         </div>

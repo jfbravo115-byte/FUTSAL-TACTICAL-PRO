@@ -515,13 +515,13 @@ export default function LiveTracking() {
           <div className="space-y-3">
             <button
               onClick={() => setScreen('calibration')}
-              className="w-full py-4 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/30 rounded-2xl text-sm font-black text-blue-300 flex items-center justify-center gap-3 active:scale-98 transition-all">
+              className="w-full py-4 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/30 rounded-2xl text-sm font-black text-blue-300 flex items-center justify-center gap-3 active:scale-95 transition-all">
               <Camera size={18} />
               Calibrar Cámara (Recomendado)
             </button>
             <button
-              onClick={() => setScreen('tracking')}
-              className="w-full py-4 bg-lime-400 text-slate-900 rounded-2xl text-sm font-black flex items-center justify-center gap-3 active:scale-98 transition-all">
+              onClick={() => { setScreen('tracking'); connectWS(); }}
+              className="w-full py-4 bg-lime-400 text-slate-900 rounded-2xl text-sm font-black flex items-center justify-center gap-3 active:scale-95 transition-all">
               <Activity size={18} />
               Ir al Tracking →
             </button>

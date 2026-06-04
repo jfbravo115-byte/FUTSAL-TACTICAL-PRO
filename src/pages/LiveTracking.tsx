@@ -265,21 +265,41 @@ export default function LiveTracking() {
   }, [config.localColor, config.rivalColor, alerts]);
 
   useEffect(() => {
-    if (screen === 'tracking') {
-      // Draw pitch immediately even without a frame
-      setTimeout(() => {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) drawPitch(ctx, canvas.width, canvas.height);
-        }
-      }, 50);
-      const frameToRender = replay.active && replayPlay
-        ? replayPlay.frames[replay.frameIdx]
-        : currentFrame;
-      renderCanvas(frameToRender || null);
+    if (screen !== 'tracking') return;
+    const frameToRender = replay.active && replayPlay
+      ? replayPlay.frames[replay.frameIdx]
+      : currentFrame;
+    renderCanvas(frameToRender || null);
+  }, [screen, currentFrame, replay, replayPlay, renderCanvas, wsStatus]);
+
+  // Ensure canvas always shows pitch even when nothing else triggers redraw
+  useEffect(() => {
+    if (screen !== 'tracking') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // Set canvas size to match display size
+    const parent = canvas.parentElement;
+    if (parent) {
+      const w = parent.clientWidth;
+      const h = parent.clientHeight;
+      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+        canvas.width = w;
+        canvas.height = h;
+      }
     }
-  }, [screen, currentFrame, replay, replayPlay, renderCanvas]);
+    drawPitch(ctx, canvas.width, canvas.height);
+    drawZones(ctx, canvas.width, canvas.height);
+    if (currentFrame) {
+      const highlightIds = alerts.flatMap(a => a.jugadores || []);
+      drawPlayers(ctx, canvas.width, canvas.height, currentFrame,
+        TEAM_COLOR_HEX[config.localColor],
+        TEAM_COLOR_HEX[config.rivalColor],
+        highlightIds
+      );
+    }
+  });
 
   // ── WEBSOCKET ────────────────────────────────────────────────
   const connectWS = useCallback(() => {
@@ -685,18 +705,7 @@ export default function LiveTracking() {
       </header>
 
       {/* ── CANVAS ─────────────────────────────────────────── */}
-      <div ref={(el) => {
-        if (el && canvasRef.current) {
-          const canvas = canvasRef.current;
-          const rect = el.getBoundingClientRect();
-          if (rect.width > 0 && canvas.width !== rect.width) {
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-            const ctx = canvas.getContext('2d');
-            if (ctx) { drawPitch(ctx, canvas.width, canvas.height); }
-          }
-        }
-      }} className="relative flex-1 overflow-hidden" style={{ maxHeight: 'calc(var(--app-height, 100vh) - 200px)' }}>
+      <div className="relative flex-1 overflow-hidden" style={{ maxHeight: 'calc(var(--app-height, 100vh) - 200px)' }}>
         <canvas
           ref={canvasRef}
           width={300}

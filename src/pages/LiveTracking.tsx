@@ -224,13 +224,18 @@ export default function LiveTracking() {
         try {
           const msg = JSON.parse(e.data);
 
-          // ── NUEVO: frame anotado con imagen de la cámara ──────────────
+          // Imagen anotada — puede venir sola o combinada con tracks
           if (msg.tipo === 'frame_anotado' && msg.imagen) {
             setCameraFrameSrc(`data:image/jpeg;base64,${msg.imagen}`);
             return;
           }
 
           if (msg.tipo !== 'frame' || !msg.posiciones_render) return;
+
+          // Imagen combinada con tracks (sincronización perfecta)
+          if (msg.imagen) {
+            setCameraFrameSrc(`data:image/jpeg;base64,${msg.imagen}`);
+          }
           const frame: TrackingFrame = msg;
           setCurrentFrame(frame);
           frameBufferRef.current.push(frame);

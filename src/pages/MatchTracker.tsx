@@ -3467,8 +3467,8 @@ export default function MatchTracker() {
       })()}
 
             <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-x-hidden"
-        style={{ height: '100%', maxHeight: '100%' } as React.CSSProperties}
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
+        style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -3694,6 +3694,7 @@ export default function MatchTracker() {
 
       <header
         className="py-1 bg-[#0E1015]/95 backdrop-blur-3xl border-b border-white/5 relative z-[100] shadow-2xl shrink-0 overflow-hidden"
+        style={{ paddingTop: 'calc(0.25rem + env(safe-area-inset-top, 0px))' }}
       >
         <div className="max-w-5xl mx-auto flex flex-col px-2 gap-1 w-full min-w-0">
           {/* TOP ROW: LOGOS, NAMES, FOULS */}

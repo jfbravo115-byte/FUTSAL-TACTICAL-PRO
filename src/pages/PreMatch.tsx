@@ -257,8 +257,8 @@ export default function PreMatch() {
   }
 
   return (
-    <div className="h-screen bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
-      style={{ height: 'var(--app-height, 100vh)' }}>
+    <div className="bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
+      style={{ height: '100%' }}>
 
       {/* ── HEADER ──────────────────────────────────────────── */}
       <header className="bg-[#0E1015]/95 border-b border-white/5 px-4 py-3 flex items-center justify-between shrink-0">

@@ -257,11 +257,12 @@ export default function PreMatch() {
   }
 
   return (
-    <div className="bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
-      style={{ height: '100%' }}>
+    <div className="h-screen bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
+      style={{ height: 'var(--app-height, 100vh)' }}>
 
       {/* ── HEADER ──────────────────────────────────────────── */}
-      <header className="bg-[#0E1015]/95 border-b border-white/5 px-4 py-3 flex items-center justify-between shrink-0">
+      <header className="bg-[#0E1015]/95 border-b border-white/5 px-4 py-3 flex items-center justify-between shrink-0"
+        style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-blue-600/20 border border-blue-500/30 rounded-xl flex items-center justify-center">
             <Shield size={16} className="text-blue-400" />

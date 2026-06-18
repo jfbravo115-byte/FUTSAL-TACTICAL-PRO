@@ -23,13 +23,15 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const goalZones = Array.from({ length: 9 }).map((_, i) => ({ id: `G${i + 1}`, label: '' }));
 
   const playerActions = [
-    { type: ActionType.GOAL,   label: 'GOL',    icon: '⚽',                         color: 'bg-green-500',  count: player.stats.goals },
-    { type: ActionType.ASSIST, label: 'ASIST',  icon: <Handshake size={14} />,      color: 'bg-yellow-500', count: player.stats.assists },
-    { type: ActionType.SHOT,   label: 'TIRO',   icon: <Target size={14} />,         color: 'bg-rose-500',   count: player.stats.shots },
-    { type: ActionType.FOUL,   label: 'FALTA',  icon: <AlertTriangle size={14} />,  color: 'bg-orange-500', count: player.stats.fouls },
-    { type: ActionType.STEAL,  label: 'RECUP.', icon: <Zap size={14} />,            color: 'bg-purple-600', count: player.stats.steals },
-    { type: ActionType.LOSS,   label: 'PÉRD.',  icon: <RefreshCw size={14} />,      color: 'bg-red-500',    count: player.stats.losses },
-    { type: 'SWAP',            label: 'CAMBIO', icon: <RotateCcw size={14} />,      color: 'bg-amber-500',  count: undefined },
+    { type: ActionType.GOAL,        label: 'GOL',    icon: '⚽',                         color: 'bg-green-500',  count: player.stats.goals },
+    { type: ActionType.ASSIST,      label: 'ASIST',  icon: <Handshake size={14} />,      color: 'bg-yellow-500', count: player.stats.assists },
+    { type: ActionType.SHOT,        label: 'TIRO',   icon: <Target size={14} />,         color: 'bg-rose-500',   count: player.stats.shots },
+    { type: ActionType.FOUL,        label: 'FALTA',  icon: <AlertTriangle size={14} />,  color: 'bg-orange-500', count: player.stats.fouls },
+    { type: ActionType.STEAL,       label: 'RECUP.', icon: <Zap size={14} />,            color: 'bg-purple-600', count: player.stats.steals },
+    { type: ActionType.LOSS,        label: 'PÉRD.',  icon: <RefreshCw size={14} />,      color: 'bg-red-500',    count: player.stats.losses },
+    { type: ActionType.YELLOW_CARD, label: 'AMAR.',  icon: <div className="w-3 h-4 bg-yellow-400 rounded-[1px] border border-yellow-700" />, color: 'bg-yellow-600', count: player.stats.yellowCards },
+    { type: ActionType.RED_CARD,    label: 'ROJA',   icon: <div className="w-3 h-4 bg-red-600 rounded-[1px] border border-red-900" />,       color: 'bg-red-700',    count: player.stats.redCards },
+    { type: 'SWAP',                 label: 'CAMBIO', icon: <RotateCcw size={14} />,      color: 'bg-amber-500',  count: undefined },
   ];
 
   const goalkeeperActions = [
@@ -40,6 +42,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     { type: ActionType.LOSS,            label: 'PÉRD.',    icon: <RefreshCw size={14} />,     color: 'bg-red-500',    count: player.stats.losses },
     { type: ActionType.STEAL,           label: 'RECUP.',   icon: <Zap size={14} />,           color: 'bg-purple-600', count: player.stats.steals },
     { type: ActionType.FOUL,            label: 'FALTA',    icon: <AlertTriangle size={14} />, color: 'bg-orange-500', count: player.stats.fouls },
+    { type: ActionType.YELLOW_CARD,     label: 'AMAR.',    icon: <div className="w-3 h-4 bg-yellow-400 rounded-[1px] border border-yellow-700" />, color: 'bg-yellow-600', count: player.stats.yellowCards },
+    { type: ActionType.RED_CARD,        label: 'ROJA',     icon: <div className="w-3 h-4 bg-red-600 rounded-[1px] border border-red-900" />,       color: 'bg-red-700',    count: player.stats.redCards },
     { type: 'SWAP',                     label: 'CAMBIO',   icon: <RotateCcw size={14} />,     color: 'bg-amber-500',  count: undefined },
   ];
 
@@ -67,7 +71,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const handleActionClick = (actionType: any) => {
     if (actionType === 'SWAP') {
       onSwap(player.id);
-    } else if (actionType === GoalieAction.SAVE_PARRY || actionType === GoalieAction.GOAL_CONCEDED) {
+    } else if (actionType === GoalieAction.SAVE_PARRY || actionType === GoalieAction.GOAL_CONCEDED || actionType === ActionType.SHOT) {
       setPendingActionType(actionType);
       setSelectionStep('shot');
       setSelectingZone(true);
@@ -178,6 +182,14 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
               </button>
             ))}
           </div>
+          {selectionStep === 'goal' && pendingActionType === ActionType.SHOT && (
+            <button
+              onClick={() => handleGoalZoneSelect('OUT')}
+              className="mt-2 w-full py-2.5 rounded-xl bg-slate-700/40 border border-slate-500/30 text-[10px] font-black text-slate-300 uppercase tracking-widest hover:bg-slate-700/60 active:scale-95 transition-all"
+            >
+              ↗️ Desviado / Fuera
+            </button>
+          )}
           <button onClick={onClose} className="mt-3 w-full py-2 text-[10px] font-black text-slate-500 uppercase">Cancelar</button>
         </motion.div>
       )}

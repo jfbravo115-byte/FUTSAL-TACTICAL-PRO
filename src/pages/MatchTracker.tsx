@@ -3468,7 +3468,14 @@ export default function MatchTracker() {
 
             <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
-        style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
+        style={{
+          height: 'var(--app-height, 100vh)',
+          maxHeight: 'var(--app-height, 100vh)',
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          paddingRight: 'env(safe-area-inset-right, 0px)',
+          boxSizing: 'border-box',
+        } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -3743,7 +3750,7 @@ export default function MatchTracker() {
                     className="flex items-center gap-1 group cursor-pointer"
                     onClick={() => !isDataLocked && setIsEditingLocalName(true)}
                   >
-                    <span className="text-[11px] font-black uppercase text-blue-400 truncate tracking-tight leading-none mb-0.5">
+                    <span className="text-[11px] font-black uppercase text-blue-400 tracking-tight leading-none mb-0.5 break-words line-clamp-2">
                       {matchData.teamName}
                     </span>
                     <Edit2 size={8} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -3799,7 +3806,7 @@ export default function MatchTracker() {
                     onClick={() => !isDataLocked && setIsEditingOpponentName(true)}
                   >
                     <Edit2 size={8} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <span className="text-[11px] font-black uppercase text-red-500 truncate tracking-tight leading-none mb-0.5">
+                    <span className="text-[11px] font-black uppercase text-red-500 tracking-tight leading-none mb-0.5 break-words line-clamp-2">
                       {matchData.opponentName}
                     </span>
                   </div>
@@ -6855,8 +6862,20 @@ const GoalMap = ({
   selected?: string;
 }) => (
   <div className="flex flex-col gap-4 w-full">
-    <div className="relative group">
-      <div className="grid grid-cols-3 grid-rows-3 gap-2 p-2 bg-slate-900 border-[6px] border-slate-700 rounded-2xl aspect-[3/2] w-full shadow-2xl relative overflow-hidden">
+    {/* Portería realista: larguero + postes blancos, red de fondo */}
+    <div className="relative group pt-3 px-3">
+      {/* Larguero superior */}
+      <div className="absolute top-0 left-0 right-0 h-3 bg-gradient-to-b from-white to-slate-300 rounded-t-lg shadow-md z-20 border-x-[6px] border-t-[3px] border-white" />
+      {/* Postes laterales */}
+      <div className="absolute top-0 bottom-8 left-0 w-3 bg-gradient-to-r from-white to-slate-300 shadow-md z-20" />
+      <div className="absolute top-0 bottom-8 right-0 w-3 bg-gradient-to-l from-white to-slate-300 shadow-md z-20" />
+
+      <div className="grid grid-cols-3 grid-rows-3 gap-2 p-2 rounded-b-sm aspect-[3/2] w-full shadow-2xl relative overflow-hidden"
+        style={{
+          background: '#0f172a',
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)',
+          backgroundSize: '11px 11px',
+        }}>
         <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none"></div>
         {Array.from({ length: 9 }).map((_, i) => {
           const id = `G${i + 1}`;
@@ -6866,18 +6885,23 @@ const GoalMap = ({
               whileHover={{ scale: 0.98 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => onSelect(id)}
-              className={`relative rounded-lg transition-all border flex items-center justify-center
+              className={`relative rounded-md transition-all border flex items-center justify-center
                 ${selected === id 
-                  ? "bg-red-500 border-white shadow-[0_0_20px_rgba(239,68,68,0.5)] z-10 scale-105" 
-                  : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20"
+                  ? "bg-red-500/90 border-white shadow-[0_0_20px_rgba(239,68,68,0.6)] z-10 scale-105" 
+                  : "bg-white/[0.03] border-white/10 hover:bg-red-500/20 hover:border-white/30"
                 }`}
             >
-              <span className={`text-[10px] font-black font-mono transition-opacity ${selected === id ? "text-white opacity-100" : "text-slate-600 opacity-40 group-hover:opacity-100"}`}>
+              <span className={`text-[10px] font-black font-mono transition-opacity ${selected === id ? "text-white opacity-100" : "text-slate-500 opacity-40 group-hover:opacity-100"}`}>
                 {id}
               </span>
             </motion.button>
           );
         })}
+      </div>
+      {/* Suelo / línea de gol */}
+      <div className="h-8 flex items-center justify-center relative">
+        <div className="absolute top-1 left-0 right-0 h-[3px] bg-white/80 rounded-full" />
+        <div className="absolute top-1 left-0 right-0 h-8 bg-gradient-to-b from-green-700/40 to-transparent" />
       </div>
     </div>
     <motion.button
@@ -7222,19 +7246,32 @@ const PitchZones = ({
   const rows = ["A", "B", "C"];
   const cols = ["1", "2", "3"];
   return (
-    <div className="relative aspect-[2/3] w-full max-w-[200px] mx-auto bg-slate-950 rounded-xl border-4 border-slate-800 overflow-hidden shadow-2xl">
+    <div className="relative aspect-[2/3] w-full max-w-[200px] mx-auto rounded-xl border-4 border-slate-800 overflow-hidden shadow-2xl"
+      style={{ background: 'linear-gradient(180deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
+      {/* Franjas de césped */}
+      <div className="absolute inset-0 pointer-events-none">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="absolute left-0 right-0" style={{ top: `${(i / 6) * 100}%`, height: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }} />
+        ))}
+      </div>
       {/* Marcas de la pista realistas */}
-      <div className="absolute inset-0 pointer-events-none opacity-20">
+      <div className="absolute inset-0 pointer-events-none opacity-60">
+        {/* Línea perimetral */}
+        <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
         {/* Línea Medio Campo */}
-        <div className="absolute top-1/2 w-full h-[2px] bg-white -translate-y-1/2" />
+        <div className="absolute top-1/2 left-2 right-2 h-[2px] bg-white/70 -translate-y-1/2" />
         {/* Círculo Central */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border-2 border-white rounded-full" />
-        {/* Áreas de 6 metros */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-b-2 border-white rounded-b-3xl" />
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-t-2 border-white rounded-t-3xl" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 border-2 border-white/70 rounded-full" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
+        {/* Áreas de portería (semicírculos 6m) */}
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-b-2 border-white/70 rounded-b-[3rem]" />
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-t-2 border-white/70 rounded-t-[3rem]" />
+        {/* Porterías */}
+        <div className="absolute top-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
         {/* Punto de Penalti */}
-        <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white rounded-full" />
-        <div className="absolute bottom-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white rounded-full" />
+        <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/70 rounded-full" />
+        <div className="absolute bottom-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/70 rounded-full" />
       </div>
 
       <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-1 gap-1">
@@ -7248,12 +7285,12 @@ const PitchZones = ({
                 className={`rounded-lg transition-all border flex items-center justify-center font-mono text-[10px] font-black uppercase
                 ${
                   selected === id
-                    ? "bg-blue-600/80 border-white text-white scale-[0.98] z-10 shadow-[0_0_15px_rgba(37,99,235,0.5)]"
-                    : "bg-white/5 border-white/5 text-slate-500 hover:bg-white/10 hover:text-white"
+                    ? "bg-blue-600/70 border-white text-white scale-[0.98] z-10 shadow-[0_0_15px_rgba(37,99,235,0.6)]"
+                    : "bg-black/10 border-white/20 text-white/80 hover:bg-blue-500/30 hover:border-white/50 hover:text-white"
                 }
               `}
               >
-                <span className="bg-black/60 px-2 py-1 rounded backdrop-blur-md">
+                <span className="bg-black/50 px-2 py-1 rounded backdrop-blur-md">
                   {id}
                 </span>
               </button>

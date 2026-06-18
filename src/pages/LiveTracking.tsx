@@ -157,6 +157,8 @@ export default function LiveTracking() {
   const [liveBoxes, setLiveBoxes] = useState<any[]>([]);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const displayVideoRef = useRef<HTMLVideoElement>(null);
+  const interpFrameRef = useRef<{ from: TrackingFrame | null; to: TrackingFrame | null; startTs: number; duration: number }>({ from: null, to: null, startTs: 0, duration: 250 });
+  const rafRef = useRef<number>(0);
   const cameraImgRef = useRef<HTMLImageElement>(null);
 
   // ── CANVAS RENDER ────────────────────────────────────────────────────────
@@ -175,11 +177,56 @@ export default function LiveTracking() {
     }
   }, [config.localColor, config.rivalColor, alerts]);
 
+  // Interpola posiciones entre el frame anterior y el nuevo para movimiento suave
+  const interpolatePlayers = (from: TrackingFrame | null, to: TrackingFrame, t: number): TrackingFrame => {
+    if (!from) return to;
+    const lerp = (a: number, b: number) => a + (b - a) * t;
+    const interpList = (fromList: any[], toList: any[]) =>
+      toList.map(tp => {
+        const fp = fromList.find(f => f.id === tp.id);
+        if (!fp) return tp;
+        return { ...tp, x_m: lerp(fp.x_m, tp.x_m), y_m: lerp(fp.y_m, tp.y_m) };
+      });
+    return {
+      ...to,
+      posiciones_render: {
+        local: interpList(from.posiciones_render?.local || [], to.posiciones_render?.local || []),
+        rival: interpList(from.posiciones_render?.rival || [], to.posiciones_render?.rival || []),
+        balon: to.posiciones_render?.balon || null,
+      },
+    };
+  };
+
+  // Cuando llega un frame nuevo, arranca una interpolación desde la posición actual
+  useEffect(() => {
+    if (screen !== 'tracking' || replay.active) return;
+    if (!currentFrame) return;
+    const prevTarget = interpFrameRef.current.to;
+    interpFrameRef.current = { from: prevTarget, to: currentFrame, startTs: performance.now(), duration: 220 };
+  }, [currentFrame, screen, replay.active]);
+
+  // Loop de animación: interpola y dibuja a 60fps independientemente de cuándo llegan los datos
   useEffect(() => {
     if (screen !== 'tracking') return;
-    const frameToRender = replay.active && replayPlay ? replayPlay.frames[replay.frameIdx] : currentFrame;
-    renderCanvas(frameToRender || null);
-  }, [screen, currentFrame, replay, replayPlay, renderCanvas, wsStatus]);
+
+    const tick = () => {
+      if (replay.active && replayPlay) {
+        renderCanvas(replayPlay.frames[replay.frameIdx] || null);
+      } else {
+        const { from, to, startTs, duration } = interpFrameRef.current;
+        if (to) {
+          const elapsed = performance.now() - startTs;
+          const t = Math.min(1, elapsed / duration);
+          renderCanvas(interpolatePlayers(from, to, t));
+        } else {
+          renderCanvas(null);
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [screen, replay.active, replayPlay, replay.frameIdx, renderCanvas]);
 
   useEffect(() => {
     if (screen !== 'tracking') return;

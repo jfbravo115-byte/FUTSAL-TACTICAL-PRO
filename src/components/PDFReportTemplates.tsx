@@ -488,8 +488,16 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
           return `rgb(255,${g},${b})`;
         };
         const textOnRed = (v: number) => v > 0.5 ? '#ffffff' : v > 0 ? '#7f1d1d' : '#475569';
+        // Verde para paradas — coherente con la etiqueta "Paradas" en verde,
+        // así se distingue visualmente del rojo de "Goles encajados"
+        const greenGrad = (v: number) => {
+          if (v === 0) return '#1e293b';
+          const r = Math.round(255 - v * 220), b = Math.round(255 - v * 220);
+          return `rgb(${r},255,${b})`;
+        };
+        const textOnGreen = (v: number) => v > 0.5 ? '#ffffff' : v > 0 ? '#14532d' : '#475569';
 
-        const renderZoneMap = (events: any[], isGoalGrid: boolean) => {
+        const renderZoneMap = (events: any[], isGoalGrid: boolean, colorMode: 'red' | 'green' = 'red') => {
           const zones = isGoalGrid
             ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR']
             : ['A1','A2','A3','B1','B2','B3','C1','C2','C3'];
@@ -515,11 +523,11 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                 return (
                   <g key={z}>
                     <rect x={x} y={y} width={cW - 1} height={cH - 1}
-                      fill={redGrad(v > 0 ? 0.15 + intensity * 0.85 : 0)} />
+                      fill={(colorMode === 'green' ? greenGrad : redGrad)(v > 0 ? 0.15 + intensity * 0.85 : 0)} />
                     {v > 0 && (
                       <text x={x + cW/2 - 0.5} y={y + cH/2} textAnchor="middle"
                         dominantBaseline="central" fontSize="8"
-                        fill={textOnRed(intensity)} fontWeight="500">{v}</text>
+                        fill={(colorMode === 'green' ? textOnGreen : textOnRed)(intensity)} fontWeight="500">{v}</text>
                     )}
                   </g>
                 );
@@ -555,13 +563,17 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
             <tbody>
               {players.map(p => {
                 const halfEvts = match.events.filter(e => e.playerIds.includes(p.id) && halfFilter(e));
+                // Eventos donde el portero es el AUTOR (primer id) — para Tiros/Goles propios.
+                // Esto evita contar tiros/goles recibidos (donde el portero solo es el destinatario
+                // y aparece añadido al final de playerIds, no al principio).
+                const ownEvts = halfEvts.filter(e => e.playerIds[0] === p.id);
                 const saves = halfEvts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
                 const conceded = halfEvts.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
                 const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
-                const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
-                const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
-                const shots = halfEvts.filter(e => e.type === ActionType.SHOT).length;
-                const goals_scored = halfEvts.filter(e => e.type === ActionType.GOAL).length;
+                const recoveries = ownEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
+                const losses = ownEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
+                const shots = ownEvts.filter(e => e.type === ActionType.SHOT).length;
+                const goals_scored = ownEvts.filter(e => e.type === ActionType.GOAL).length;
                 const mins = Math.round((p.individualTimeSeconds || 0) / 60);
                 return (
                   <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
@@ -614,12 +626,12 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div>
                           <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(saveEvts, false)}
+                          {renderZoneMap(saveEvts, false, 'green')}
                         </div>
                         <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
                         <div>
                           <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(saveEvts, true)}
+                          {renderZoneMap(saveEvts, true, 'green')}
                         </div>
                       </div>
                     </div>
@@ -632,12 +644,12 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div>
                           <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(goalEvts, false)}
+                          {renderZoneMap(goalEvts, false, 'red')}
                         </div>
                         <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
                         <div>
                           <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(goalEvts, true)}
+                          {renderZoneMap(goalEvts, true, 'red')}
                         </div>
                       </div>
                     </div>
@@ -742,14 +754,16 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                     const evAll = match.events.filter(e => e.playerIds.includes(p.id));
 
                     const calcStats = (evts: any[]) => {
+                      const ownEvts = evts.filter(e => e.playerIds[0] === p.id);
                       const saves = evts.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
                       const conceded = evts.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
                       return {
                         saves,
                         conceded,
+                        shotsFaced: saves + conceded,
                         savePct: saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0,
-                        recoveries: evts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
-                        losses: evts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
+                        recoveries: ownEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
+                        losses: ownEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
                       };
                     };
 
@@ -758,6 +772,7 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                     const sAll = calcStats(evAll);
 
                     const compareItems = [
+                      { label: 'Tiros recibidos', v1: s1.shotsFaced, v2: s2.shotsFaced },
                       { label: 'Paradas', v1: s1.saves, v2: s2.saves },
                       { label: 'Goles encajados', v1: s1.conceded, v2: s2.conceded },
                       { label: '% Paradas', v1: s1.savePct, v2: s2.savePct, suffix: '%', maxVal: 100 },
@@ -808,6 +823,7 @@ const PDFReportTemplates = forwardRef<PDFReportRef, Props>(({ match, goals, oppo
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                           {[
+                            { label: 'Tiros recibidos', val: sAll.shotsFaced, color: '#2563eb' },
                             { label: 'Total paradas', val: sAll.saves, color: '#16a34a' },
                             { label: 'Goles encajados', val: sAll.conceded, color: '#dc2626' },
                             { label: '% Paradas', val: `${sAll.savePct}%`, color: '#d97706' },

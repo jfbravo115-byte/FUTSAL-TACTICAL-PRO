@@ -118,7 +118,6 @@ export default function LiveTracking() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const frameBufferRef = useRef<TrackingFrame[]>([]);
-  const animFrameRef = useRef<number>(0);
 
   const [screen, setScreen] = useState<Screen>('config');
   const [config, setConfig] = useState<TrackingConfig>({
@@ -151,7 +150,6 @@ export default function LiveTracking() {
   const CALIB_LABELS = ['↖ Esquina superior izquierda', '↗ Esquina superior derecha',
                         '↘ Esquina inferior derecha', '↙ Esquina inferior izquierda'];
 
-  // ── NUEVO: vista dividida ─────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [cameraFrameSrc, setCameraFrameSrc] = useState<string>('');
   const [liveBoxes, setLiveBoxes] = useState<any[]>([]);
@@ -167,6 +165,16 @@ export default function LiveTracking() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Ajusta tamaño del canvas al contenedor (solo cuando cambia)
+    const parent = canvas.parentElement;
+    if (parent) {
+      const w = parent.clientWidth, h = parent.clientHeight;
+      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+        canvas.width = w; canvas.height = h;
+      }
+    }
+
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     drawPitch(ctx, W, H);
@@ -205,7 +213,8 @@ export default function LiveTracking() {
     interpFrameRef.current = { from: prevTarget, to: currentFrame, startTs: performance.now(), duration: 220 };
   }, [currentFrame, screen, replay.active]);
 
-  // Loop de animación: interpola y dibuja a 60fps independientemente de cuándo llegan los datos
+  // Loop de animación: ÚNICA fuente de dibujo del canvas de pista. Interpola y
+  // dibuja a 60fps independientemente de cuándo llegan los datos del servidor.
   useEffect(() => {
     if (screen !== 'tracking') return;
 
@@ -227,28 +236,6 @@ export default function LiveTracking() {
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [screen, replay.active, replayPlay, replay.frameIdx, renderCanvas]);
-
-  useEffect(() => {
-    if (screen !== 'tracking') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const parent = canvas.parentElement;
-    if (parent) {
-      const w = parent.clientWidth, h = parent.clientHeight;
-      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
-        canvas.width = w; canvas.height = h;
-      }
-    }
-    drawPitch(ctx, canvas.width, canvas.height);
-    drawZones(ctx, canvas.width, canvas.height);
-    if (currentFrame) {
-      const highlightIds = alerts.flatMap(a => a.jugadores || []);
-      drawPlayers(ctx, canvas.width, canvas.height, currentFrame,
-        TEAM_COLOR_HEX[config.localColor], TEAM_COLOR_HEX[config.rivalColor], highlightIds);
-    }
-  });
 
   // ── WEBSOCKET ────────────────────────────────────────────────────────────
   const connectWS = useCallback(() => {
@@ -274,7 +261,6 @@ export default function LiveTracking() {
         try {
           const msg = JSON.parse(e.data);
 
-          // Imagen anotada — puede venir sola o combinada con tracks
           if (msg.tipo === 'frame_anotado' && msg.imagen) {
             setCameraFrameSrc(`data:image/jpeg;base64,${msg.imagen}`);
             return;
@@ -282,11 +268,9 @@ export default function LiveTracking() {
 
           if (msg.tipo !== 'frame' || !msg.posiciones_render) return;
 
-          // Imagen combinada con tracks (sincronización perfecta) - modo video archivo
           if (msg.imagen) {
             setCameraFrameSrc(`data:image/jpeg;base64,${msg.imagen}`);
           }
-          // Boxes para dibujar sobre el video en vivo de la camara (sin imagen del servidor)
           if (msg.boxes) {
             setLiveBoxes(msg.boxes);
           }
@@ -515,8 +499,6 @@ export default function LiveTracking() {
   }, []);
 
   const isConnected = wsStatus === 'connected';
-  const replayFrame = replay.active && replayPlay ? replayPlay.frames[replay.frameIdx] : null;
-  const displayFrame = replayFrame || currentFrame;
 
   // ════════════════════════════════════════════════════════════
   // ── SCREEN: CONFIG ──────────────────────────────────────════
@@ -578,7 +560,6 @@ export default function LiveTracking() {
             />
           </div>
 
-          {/* ── NUEVO: selector de vista ── */}
           <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
               Modo de Visualización
@@ -711,7 +692,6 @@ export default function LiveTracking() {
             </div>
           )}
 
-          {/* ── NUEVO: botón cambio de vista ── */}
           <button
             onClick={() => setViewMode(v => v === 'split' ? 'pitch' : v === 'pitch' ? 'camera' : 'split')}
             className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-lime-400 transition-all"
@@ -745,7 +725,6 @@ export default function LiveTracking() {
         {/* ── MODO SPLIT: cámara arriba, pista abajo ── */}
         {viewMode === 'split' && (
           <>
-            {/* Mitad superior: video en vivo de la cámara + overlay de cajones */}
             <div className="flex-1 relative bg-black border-b border-white/10 overflow-hidden">
               {cameraActive ? (
                 <div className="relative w-full h-full">
@@ -769,13 +748,11 @@ export default function LiveTracking() {
                   </p>
                 </div>
               )}
-              {/* Label */}
               <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded-lg">
                 <span className="text-[8px] font-black text-white uppercase">📷 Cámara Real</span>
               </div>
             </div>
 
-            {/* Mitad inferior: pista virtual */}
             <div className="flex-1 relative overflow-hidden">
               <canvas ref={canvasRef} width={300} height={240}
                 className="w-full h-full bg-[#1a6b9a]" style={{ imageRendering: 'crisp-edges' }} />
@@ -814,7 +791,6 @@ export default function LiveTracking() {
                 </p>
               </div>
             )}
-            {/* Overlay con stats cuando hay imagen */}
             {cameraFrameSrc && currentFrame && (
               <div className="absolute bottom-2 left-2 right-2 bg-black/70 backdrop-blur-sm rounded-xl p-2 flex justify-around">
                 <div className="text-center">
@@ -834,7 +810,6 @@ export default function LiveTracking() {
           </div>
         )}
 
-        {/* Replay overlay (solo en modo pista) */}
         {replay.active && replayPlay && viewMode !== 'camera' && (
           <div className="absolute bottom-2 left-2 right-2 bg-black/80 backdrop-blur-sm rounded-xl p-2 border border-white/10 z-10">
             <div className="flex items-center justify-between mb-1.5">

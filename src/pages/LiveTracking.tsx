@@ -205,12 +205,43 @@ export default function LiveTracking() {
     };
   };
 
+  // Mantiene jugadores recientes aunque desaparezcan 1-2 frames (evita parpadeo
+  // por pérdidas momentáneas de tracking en el servidor)
+  const lastSeenRef = useRef<Map<string, { player: any; team: 'local'|'rival'; ts: number }>>(new Map());
+  const GRACE_MS = 600;
+
+  const stabilizeFrame = (frame: TrackingFrame): TrackingFrame => {
+    const now = performance.now();
+    const seen = lastSeenRef.current;
+
+    (frame.posiciones_render?.local || []).forEach((p: any) => seen.set(p.id, { player: p, team: 'local', ts: now }));
+    (frame.posiciones_render?.rival || []).forEach((p: any) => seen.set(p.id, { player: p, team: 'rival', ts: now }));
+
+    // Elimina entradas demasiado viejas (jugador realmente se fue, no solo un frame perdido)
+    for (const [id, entry] of seen.entries()) {
+      if (now - entry.ts > GRACE_MS) seen.delete(id);
+    }
+
+    const local = [...(frame.posiciones_render?.local || [])];
+    const rival = [...(frame.posiciones_render?.rival || [])];
+    const localIds = new Set(local.map((p: any) => p.id));
+    const rivalIds = new Set(rival.map((p: any) => p.id));
+
+    seen.forEach((entry, id) => {
+      if (entry.team === 'local' && !localIds.has(id)) local.push(entry.player);
+      if (entry.team === 'rival' && !rivalIds.has(id)) rival.push(entry.player);
+    });
+
+    return { ...frame, posiciones_render: { ...frame.posiciones_render, local, rival } };
+  };
+
   // Cuando llega un frame nuevo, arranca una interpolación desde la posición actual
   useEffect(() => {
     if (screen !== 'tracking' || replay.active) return;
     if (!currentFrame) return;
+    const stabilized = stabilizeFrame(currentFrame);
     const prevTarget = interpFrameRef.current.to;
-    interpFrameRef.current = { from: prevTarget, to: currentFrame, startTs: performance.now(), duration: 220 };
+    interpFrameRef.current = { from: prevTarget, to: stabilized, startTs: performance.now(), duration: 220 };
   }, [currentFrame, screen, replay.active]);
 
   // Loop de animación: ÚNICA fuente de dibujo del canvas de pista. Interpola y

@@ -154,6 +154,9 @@ export default function LiveTracking() {
   // ── NUEVO: vista dividida ─────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [cameraFrameSrc, setCameraFrameSrc] = useState<string>('');
+  const [liveBoxes, setLiveBoxes] = useState<any[]>([]);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const displayVideoRef = useRef<HTMLVideoElement>(null);
   const cameraImgRef = useRef<HTMLImageElement>(null);
 
   // ── CANVAS RENDER ────────────────────────────────────────────────────────
@@ -232,9 +235,13 @@ export default function LiveTracking() {
 
           if (msg.tipo !== 'frame' || !msg.posiciones_render) return;
 
-          // Imagen combinada con tracks (sincronización perfecta)
+          // Imagen combinada con tracks (sincronización perfecta) - modo video archivo
           if (msg.imagen) {
             setCameraFrameSrc(`data:image/jpeg;base64,${msg.imagen}`);
+          }
+          // Boxes para dibujar sobre el video en vivo de la camara (sin imagen del servidor)
+          if (msg.boxes) {
+            setLiveBoxes(msg.boxes);
           }
           const frame: TrackingFrame = msg;
           setCurrentFrame(frame);
@@ -312,6 +319,57 @@ export default function LiveTracking() {
       fpsCounterRef.current++;
     }, 150);
   };
+
+  // Sincroniza el video visible con el stream del video oculto (fuente real)
+  useEffect(() => {
+    if (cameraActive && videoRef.current?.srcObject && displayVideoRef.current) {
+      displayVideoRef.current.srcObject = videoRef.current.srcObject;
+      displayVideoRef.current.play().catch(() => {});
+    }
+  }, [cameraActive, viewMode]);
+
+  // Dibuja los cajones de tracking sobre el canvas overlay transparente
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    const video = displayVideoRef.current;
+    if (!canvas || !video) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const displayW = video.clientWidth;
+    const displayH = video.clientHeight;
+    if (canvas.width !== displayW || canvas.height !== displayH) {
+      canvas.width = displayW;
+      canvas.height = displayH;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const TEAM_HEX: Record<string, string> = {
+      local: TEAM_COLOR_HEX[config.localColor],
+      rival: TEAM_COLOR_HEX[config.rivalColor],
+      desconocido: '#999999',
+    };
+
+    liveBoxes.forEach((b: any) => {
+      const scaleX = displayW / (b.frame_w || 640);
+      const scaleY = displayH / (b.frame_h || 480);
+      const x1 = b.x1 * scaleX, y1 = b.y1 * scaleY;
+      const x2 = b.x2 * scaleX, y2 = b.y2 * scaleY;
+      const color = TEAM_HEX[b.team] || '#999999';
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+      const label = `#${b.id} ${(b.team || '?').slice(0,3).toUpperCase()}`;
+      ctx.font = 'bold 11px Inter';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = color;
+      ctx.fillRect(x1, y1 - 16, tw + 6, 16);
+      ctx.fillStyle = 'white';
+      ctx.fillText(label, x1 + 3, y1 - 4);
+    });
+  }, [liveBoxes, config.localColor, config.rivalColor]);
 
   useEffect(() => { return () => { stopCamera(); }; }, []);
 
@@ -630,7 +688,7 @@ export default function LiveTracking() {
         </div>
       </header>
 
-      {/* Hidden video + canvas */}
+      {/* Video oculto: fuente de verdad para captura de frames */}
       <video ref={videoRef} playsInline muted className="hidden" />
       <canvas ref={captureCanvasRef} className="hidden" />
 
@@ -640,9 +698,16 @@ export default function LiveTracking() {
         {/* ── MODO SPLIT: cámara arriba, pista abajo ── */}
         {viewMode === 'split' && (
           <>
-            {/* Mitad superior: imagen real con bounding boxes */}
+            {/* Mitad superior: video en vivo de la cámara + overlay de cajones */}
             <div className="flex-1 relative bg-black border-b border-white/10 overflow-hidden">
-              {cameraFrameSrc ? (
+              {cameraActive ? (
+                <div className="relative w-full h-full">
+                  <video ref={displayVideoRef} playsInline muted autoPlay
+                    className="w-full h-full object-contain" />
+                  <canvas ref={overlayCanvasRef}
+                    className="absolute inset-0 w-full h-full pointer-events-none" />
+                </div>
+              ) : cameraFrameSrc ? (
                 <img
                   ref={cameraImgRef}
                   src={cameraFrameSrc}

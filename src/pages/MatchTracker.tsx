@@ -602,22 +602,28 @@ const StatsExportTemplate = React.forwardRef<
   const localPlayers = relevantPlayers.filter(p => !p.isOpponent);
   const rivalPlayers = relevantPlayers.filter(p => p.isOpponent);
 
-  const renderGoalieSection = (players: Player[], teamName: string, isOpponent: boolean) => (
+  const renderGoalieSection = (players: Player[], teamName: string, isOpponent: boolean, periodFilter?: (e: typeof matchData.events[0]) => boolean, halfLabel?: string) => (
     <div className="flex flex-col gap-10">
       <div className="flex items-center gap-4 border-b border-white/10 pb-4">
         <div className={`w-3 h-3 rounded-full ${isOpponent ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'}`} />
         <h3 className="text-xl font-black italic uppercase tracking-wider text-slate-100">
-          PORTEROS {isOpponent ? 'RIVALES' : 'LOCALES'} - {teamName.toUpperCase()}
+          PORTEROS {isOpponent ? 'RIVALES' : 'LOCALES'} - {teamName.toUpperCase()}{halfLabel ? ` · ${halfLabel}` : ''}
         </h3>
       </div>
       
       <div className="flex flex-col gap-12">
         {players.map((p) => {
-          const goalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
-          const saves = p.stats.saves;
-          const conceded = p.stats.conceded;
+          // Eventos del partido donde el portero está involucrado, filtrados por
+          // mitad si se especifica (evita acumular 1ª+2ª en la misma tarjeta/mapa)
+          const allGoalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
+          const goalieEvents = periodFilter ? allGoalieEvents.filter(periodFilter) : allGoalieEvents;
+          const saves = goalieEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
+          const conceded = goalieEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
           const shotsFaced = saves + conceded;
           const effectiveness = shotsFaced > 0 ? ((saves / shotsFaced) * 100).toFixed(1) : "0.0";
+
+          // No mostrar porteros sin ninguna intervención en esta mitad concreta
+          if (periodFilter && shotsFaced === 0) return null;
 
           return (
             <div
@@ -650,7 +656,7 @@ const StatsExportTemplate = React.forwardRef<
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
                       PARADAS
                     </span>
-                    <span className={`text-4xl font-black ${isOpponent ? 'text-rose-400' : 'text-amber-500'} tabular-nums`}>
+                    <span className={`text-4xl font-black ${isOpponent ? 'text-rose-400' : 'text-green-500'} tabular-nums`}>
                       {saves}
                     </span>
                   </div>
@@ -680,7 +686,7 @@ const StatsExportTemplate = React.forwardRef<
                     <MapIcon size={14} /> ORIGEN DE TIRO (PISTA)
                   </h4>
                   <div className="flex-1 flex items-center justify-center">
-                    {renderPitchOriginMap(p, isOpponent, matchData.events)}
+                    {renderPitchOriginMap(p, isOpponent, periodFilter ? matchData.events.filter(periodFilter) : matchData.events)}
                   </div>
                 </div>
 
@@ -713,7 +719,7 @@ const StatsExportTemplate = React.forwardRef<
                         >
                           <div className="flex gap-1">
                              {zoneSaves > 0 && (
-                               <div className="w-6 h-6 rounded-full bg-amber-500 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
+                               <div className="w-6 h-6 rounded-full bg-green-600 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
                                  {zoneSaves}
                                </div>
                              )}
@@ -738,14 +744,25 @@ const StatsExportTemplate = React.forwardRef<
                     <Activity size={14} /> ACCIONES REGISTRADAS
                   </h4>
                   <div className="grid grid-cols-2 gap-4 h-full">
-                    {[
-                      { label: 'GOLES', value: p.stats.goals, color: 'text-green-500' },
-                      { label: 'TIROS', value: p.stats.shots, color: 'text-amber-500' },
-                      { label: 'RECUPER.', value: p.stats.steals, color: 'text-purple-400' },
-                      { label: 'PÉRDIDAS', value: p.stats.losses, color: 'text-red-400' },
-                      { label: 'FALTAS', value: p.stats.fouls, color: 'text-orange-400' },
-                      { label: 'ASIST.', value: p.stats.assists, color: 'text-blue-400' },
-                    ].map((action, i) => (
+                    {(() => {
+                      // Solo eventos donde el portero es el AUTOR (no el destinatario de un
+                      // tiro/gol rival), y ya filtrados por la mitad correspondiente
+                      const ownEvents = goalieEvents.filter(e => e.playerIds[0] === p.id);
+                      const ownGoals = ownEvents.filter(e => e.type === ActionType.GOAL).length;
+                      const ownShots = ownEvents.filter(e => e.type === ActionType.SHOT).length;
+                      const ownSteals = ownEvents.filter(e => e.type === ActionType.STEAL).length;
+                      const ownLosses = ownEvents.filter(e => e.type === ActionType.LOSS).length;
+                      const ownFouls = ownEvents.filter(e => e.type === ActionType.FOUL).length;
+                      const ownAssists = ownEvents.filter(e => e.type === ActionType.ASSIST).length;
+                      return [
+                        { label: 'GOLES', value: ownGoals, color: 'text-green-500' },
+                        { label: 'TIROS', value: ownShots, color: 'text-amber-500' },
+                        { label: 'RECUPER.', value: ownSteals, color: 'text-purple-400' },
+                        { label: 'PÉRDIDAS', value: ownLosses, color: 'text-red-400' },
+                        { label: 'FALTAS', value: ownFouls, color: 'text-orange-400' },
+                        { label: 'ASIST.', value: ownAssists, color: 'text-blue-400' },
+                      ];
+                    })().map((action, i) => (
                       <div key={i} className="bg-black/30 border border-white/5 p-4 rounded-2xl flex flex-col justify-center">
                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{action.label}</span>
                          <span className={`text-2xl font-black ${action.color} tabular-nums leading-none`}>{action.value}</span>
@@ -858,10 +875,28 @@ const StatsExportTemplate = React.forwardRef<
       </div>
 
       {isGoalkeeperReport ? (
-        /* SPECIALIZED GOALKEEPER VIEW - DETAILED */
+        /* SPECIALIZED GOALKEEPER VIEW - DETAILED, separada por mitad para no
+           mezclar tiros/paradas de 1ª y 2ª parte ni mostrar el mismo portero
+           con datos idénticos en ambas mitades */
         <div className="flex-1 flex flex-col gap-20">
-          {localPlayers.length > 0 && renderGoalieSection(localPlayers, matchData.teamName, false)}
-          {rivalPlayers.length > 0 && renderGoalieSection(rivalPlayers, matchData.opponentName, true)}
+          {(() => {
+            const isFirstHalf = (e: typeof matchData.events[0]) => e.period === Period.FIRST;
+            const isSecondHalf = (e: typeof matchData.events[0]) => e.period === Period.SECOND;
+            return (
+              <>
+                <div className="flex flex-col gap-16">
+                  <h2 className="text-sm font-black text-blue-400 uppercase tracking-[0.3em] border-b border-blue-500/20 pb-2">1ª Parte</h2>
+                  {localPlayers.length > 0 && renderGoalieSection(localPlayers, matchData.teamName, false, isFirstHalf, '1ª Parte')}
+                  {rivalPlayers.length > 0 && renderGoalieSection(rivalPlayers, matchData.opponentName, true, isFirstHalf, '1ª Parte')}
+                </div>
+                <div className="flex flex-col gap-16">
+                  <h2 className="text-sm font-black text-red-400 uppercase tracking-[0.3em] border-b border-red-500/20 pb-2">2ª Parte</h2>
+                  {localPlayers.length > 0 && renderGoalieSection(localPlayers, matchData.teamName, false, isSecondHalf, '2ª Parte')}
+                  {rivalPlayers.length > 0 && renderGoalieSection(rivalPlayers, matchData.opponentName, true, isSecondHalf, '2ª Parte')}
+                </div>
+              </>
+            );
+          })()}
         </div>
       ) : (
         /* GLOBAL TEAM VIEW — TABLA + BARRAS + ARAÑA */
@@ -873,8 +908,8 @@ const StatsExportTemplate = React.forwardRef<
 
           const ITEMS = [
             { key: 'goals', label: 'Goles', color: '#22c55e', fn: (p: Player) => p.stats.goals || 0 },
-            { key: 'shots', label: 'Tiros tot.', color: '#f59e0b', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
-            { key: 'shotsOT', label: 'Tiros p.', color: '#fb923c', fn: (p: Player) => p.stats.shots || 0 },
+            { key: 'shots', label: 'Tiros tot.', color: '#f59e0b', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.shotsOffTarget || 0) + (p.stats.goals || 0) },
+            { key: 'shotsOT', label: 'Tiros p.', color: '#fb923c', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
             { key: 'losses', label: 'Pérdidas', color: '#ef4444', fn: (p: Player) => p.stats.losses || 0 },
             { key: 'recoveries', label: 'Recuperac.', color: '#a855f7', fn: (p: Player) => p.stats.steals || 0 },
             { key: 'foulsC', label: 'Faltas com.', color: '#f97316', fn: (p: Player) => p.stats.fouls || 0 },
@@ -1965,9 +2000,10 @@ export default function MatchTracker() {
         if (p.id === playerId || (p.id === effectivePlayerId && p.id !== targetGoalieId)) {
           if (type === ActionType.GOAL) stats.goals += 1;
           if (type === ActionType.SHOT) {
-            stats.shots += 1;
             if (metadata?.destinationGrid === "OUT") {
               stats.shotsOffTarget += 1;
+            } else {
+              stats.shots += 1;
             }
           }
           if (type === ActionType.ASSIST) stats.assists += 1;
@@ -2076,9 +2112,10 @@ export default function MatchTracker() {
             if (isOpposingKeeper) {
               if (event.destinationGrid !== "OUT") stats.saves = Math.max(0, stats.saves - 1);
             } else {
-              stats.shots = Math.max(0, stats.shots - 1);
               if (event.destinationGrid === "OUT") {
                 stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
+              } else {
+                stats.shots = Math.max(0, stats.shots - 1);
               }
             }
           }
@@ -2665,8 +2702,8 @@ export default function MatchTracker() {
 
         const ITEMS = [
           { label: 'Goles', color: '#16a34a', fn: (p: Player) => p.stats.goals || 0 },
-          { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
-          { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => p.stats.shots || 0 },
+          { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.shotsOffTarget || 0) + (p.stats.goals || 0) },
+          { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
           { label: 'Pérd.', color: '#dc2626', fn: (p: Player) => p.stats.losses || 0 },
           { label: '↳ Pase', color: '#f87171', fn: (p: Player) => p.stats.lossesBadPass || 0 },
           { label: '↳ Regate', color: '#f87171', fn: (p: Player) => p.stats.lossesBadDribble || 0 },

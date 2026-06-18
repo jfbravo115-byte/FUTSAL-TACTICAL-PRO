@@ -157,6 +157,25 @@ export default function PreMatch() {
       ...bench.map(p => buildPlayer(p, false)),
     ];
 
+    // Garantiza que siempre exista cuerpo técnico LOCAL para poder
+    // registrar tarjetas, aunque el usuario no lo haya añadido manualmente
+    const hasLocalCoach = localPlayers.some(p => p.role === Role.COACH);
+    const hasLocalDelegate = localPlayers.some(p => p.role === Role.DELEGATE);
+    if (!hasLocalCoach) {
+      localPlayers.push({
+        id: 'auto_coach_local', number: 0, name: 'ENTRENADOR LOCAL', role: Role.COACH,
+        isOnPitch: false, pitchPosition: undefined, plusMinus: 0, individualTimeSeconds: 0,
+        isStarter: false, isOpponent: false, stats: { ...INITIAL_STATS },
+      });
+    }
+    if (!hasLocalDelegate) {
+      localPlayers.push({
+        id: 'auto_delegate_local', number: 0, name: 'DELEGADO LOCAL', role: Role.DELEGATE,
+        isOnPitch: false, pitchPosition: undefined, plusMinus: 0, individualTimeSeconds: 0,
+        isStarter: false, isOpponent: false, stats: { ...INITIAL_STATS },
+      });
+    }
+
     // Default rival players
     const rivalPlayers = [
       { id: 'r1', number: 1, name: 'POR RIVAL 1', role: Role.GOALKEEPER, isOnPitch: true, pitchPosition: 0, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
@@ -164,6 +183,10 @@ export default function PreMatch() {
       { id: 'r3', number: 10, name: 'PJ RIVAL 2', role: Role.PLAYER, isOnPitch: true, pitchPosition: 2, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
       { id: 'r4', number: 8, name: 'PJ RIVAL 3', role: Role.PLAYER, isOnPitch: true, pitchPosition: 3, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
       { id: 'r5', number: 11, name: 'PJ RIVAL 4', role: Role.PLAYER, isOnPitch: true, pitchPosition: 4, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      // Cuerpo técnico rival predeterminado — garantiza que siempre se puedan
+      // registrar tarjetas al staff visitante aunque no se configure manualmente
+      { id: 'auto_coach_rival', number: 0, name: 'ENTRENADOR VISITANTE', role: Role.COACH, isOnPitch: false, pitchPosition: undefined, plusMinus: 0, individualTimeSeconds: 0, isStarter: false, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'auto_delegate_rival', number: 0, name: 'DELEGADO VISITANTE', role: Role.DELEGATE, isOnPitch: false, pitchPosition: undefined, plusMinus: 0, individualTimeSeconds: 0, isStarter: false, isOpponent: true, stats: { ...INITIAL_STATS } },
     ];
 
     const matchSetup = {

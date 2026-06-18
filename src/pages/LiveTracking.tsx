@@ -309,7 +309,7 @@ export default function LiveTracking() {
       const ws = wsRef.current;
       if (!video || !captureCanvas || !ws || ws.readyState !== WebSocket.OPEN) return;
       if (video.readyState < 2) return;
-      const W = 640, H = 480;
+      const W = 480, H = 360;
       captureCanvas.width = W; captureCanvas.height = H;
       const ctx = captureCanvas.getContext('2d');
       if (!ctx) return;
@@ -317,7 +317,7 @@ export default function LiveTracking() {
       const b64 = captureCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
       ws.send(JSON.stringify({ tipo: 'frame_video', imagen: b64, width: W, height: H, timestamp: Date.now() }));
       fpsCounterRef.current++;
-    }, 150);
+    }, 250);
   };
 
   // Sincroniza el video visible con el stream del video oculto (fuente real)

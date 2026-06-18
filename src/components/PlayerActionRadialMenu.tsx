@@ -29,8 +29,6 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     { type: ActionType.FOUL,        label: 'FALTA',  icon: <AlertTriangle size={14} />,  color: 'bg-orange-500', count: player.stats.fouls },
     { type: ActionType.STEAL,       label: 'RECUP.', icon: <Zap size={14} />,            color: 'bg-purple-600', count: player.stats.steals },
     { type: ActionType.LOSS,        label: 'PÉRD.',  icon: <RefreshCw size={14} />,      color: 'bg-red-500',    count: player.stats.losses },
-    { type: ActionType.YELLOW_CARD, label: 'AMAR.',  icon: <div className="w-3 h-4 bg-yellow-400 rounded-[1px] border border-yellow-700" />, color: 'bg-yellow-600', count: player.stats.yellowCards },
-    { type: ActionType.RED_CARD,    label: 'ROJA',   icon: <div className="w-3 h-4 bg-red-600 rounded-[1px] border border-red-900" />,       color: 'bg-red-700',    count: player.stats.redCards },
     { type: 'SWAP',                 label: 'CAMBIO', icon: <RotateCcw size={14} />,      color: 'bg-amber-500',  count: undefined },
   ];
 
@@ -42,8 +40,6 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     { type: ActionType.LOSS,            label: 'PÉRD.',    icon: <RefreshCw size={14} />,     color: 'bg-red-500',    count: player.stats.losses },
     { type: ActionType.STEAL,           label: 'RECUP.',   icon: <Zap size={14} />,           color: 'bg-purple-600', count: player.stats.steals },
     { type: ActionType.FOUL,            label: 'FALTA',    icon: <AlertTriangle size={14} />, color: 'bg-orange-500', count: player.stats.fouls },
-    { type: ActionType.YELLOW_CARD,     label: 'AMAR.',    icon: <div className="w-3 h-4 bg-yellow-400 rounded-[1px] border border-yellow-700" />, color: 'bg-yellow-600', count: player.stats.yellowCards },
-    { type: ActionType.RED_CARD,        label: 'ROJA',     icon: <div className="w-3 h-4 bg-red-600 rounded-[1px] border border-red-900" />,       color: 'bg-red-700',    count: player.stats.redCards },
     { type: 'SWAP',                     label: 'CAMBIO',   icon: <RotateCcw size={14} />,     color: 'bg-amber-500',  count: undefined },
   ];
 
@@ -246,6 +242,42 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
               </motion.button>
             );
           })}
+        </motion.div>
+      )}
+
+      {/* Card buttons — separate bar below the radial, not part of it */}
+      {!selectingZone && !selectingSubtype && (
+        <motion.div
+          key="card-buttons"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="fixed bottom-4 left-4 right-4 z-[260] flex gap-3"
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); onAction(ActionType.YELLOW_CARD, player.id); onClose(); }}
+            className="flex-1 py-3 rounded-2xl bg-yellow-600 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
+          >
+            <div className="w-3 h-4 bg-yellow-300 rounded-[1px] border border-yellow-700" />
+            <span className="text-[11px] font-black uppercase tracking-tighter">Amarilla</span>
+            {player.stats.yellowCards > 0 && (
+              <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
+                {player.stats.yellowCards}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onAction(ActionType.RED_CARD, player.id); onClose(); }}
+            className="flex-1 py-3 rounded-2xl bg-red-700 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
+          >
+            <div className="w-3 h-4 bg-red-500 rounded-[1px] border border-red-900" />
+            <span className="text-[11px] font-black uppercase tracking-tighter">Roja</span>
+            {player.stats.redCards > 0 && (
+              <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
+                {player.stats.redCards}
+              </span>
+            )}
+          </button>
         </motion.div>
       )}
 

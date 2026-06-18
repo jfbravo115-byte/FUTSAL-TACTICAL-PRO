@@ -3467,15 +3467,8 @@ export default function MatchTracker() {
       })()}
 
             <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
-        style={{
-          height: 'var(--app-height, 100vh)',
-          maxHeight: 'var(--app-height, 100vh)',
-          paddingTop: 'env(safe-area-inset-top, 0px)',
-          paddingLeft: 'env(safe-area-inset-left, 0px)',
-          paddingRight: 'env(safe-area-inset-right, 0px)',
-          boxSizing: 'border-box',
-        } as React.CSSProperties}
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-x-hidden"
+        style={{ height: '100%', maxHeight: '100%' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
       <AnimatePresence>
@@ -6085,7 +6078,7 @@ export default function MatchTracker() {
       <style>{`
         @media (max-width: 1024px) {
           .custom-scrollbar::-webkit-scrollbar { width: 0px; }
-          html, body { overflow: hidden !important; max-width: 100vw !important; height: 100%; position: fixed; width: 100%; }
+          html, body { overflow: hidden !important; max-width: 100vw !important; }
         }
       `}</style>
 

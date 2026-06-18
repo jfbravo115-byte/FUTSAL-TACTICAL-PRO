@@ -6078,7 +6078,7 @@ export default function MatchTracker() {
       <style>{`
         @media (max-width: 1024px) {
           .custom-scrollbar::-webkit-scrollbar { width: 0px; }
-          body { overflow-x: hidden !important; max-width: 100vw !important; }
+          html, body { overflow: hidden !important; max-width: 100vw !important; height: 100%; position: fixed; width: 100%; }
         }
       `}</style>
 

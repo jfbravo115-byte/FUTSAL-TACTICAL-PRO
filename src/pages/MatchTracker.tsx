@@ -3467,7 +3467,7 @@ export default function MatchTracker() {
       })()}
 
             <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_auto] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"
         style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
@@ -5982,7 +5982,8 @@ export default function MatchTracker() {
 
 
 
-      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         <div className="flex justify-around items-center h-12 max-w-sm mx-auto">
           <button
             onClick={() => setActiveTab("pitch")}

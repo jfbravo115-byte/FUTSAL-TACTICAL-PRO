@@ -3,12 +3,20 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// ── Lock viewport height ONCE at load ───────────────────────────
+// ── Lock viewport height ────────────────────────────────────────
 const setAppHeight = () => {
-  const h = window.innerHeight;
-  document.documentElement.style.setProperty('--app-height', `${h}px`);
+  // visualViewport refleja el área realmente visible en PWA iOS
+  // (innerHeight a veces incluye zonas que ocupa el sistema)
+  const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${Math.round(h)}px`);
 };
 setAppHeight();
+
+// Recalcular cuando el viewport visible cambie (barras del sistema, etc.)
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeight);
+}
+window.addEventListener('resize', setAppHeight);
 
 // ── Lock orientation to portrait ────────────────────────────────
 const lockPortrait = async () => {

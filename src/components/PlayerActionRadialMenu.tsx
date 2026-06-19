@@ -160,24 +160,77 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
           <h3 className="text-[11px] font-black text-amber-400 uppercase tracking-widest mb-3 text-center">
             {selectionStep === 'shot' ? '📍 Zona de tiro' : '🥅 Zona de portería'}
           </h3>
-          <div className={`grid grid-cols-3 gap-1 ${selectionStep === 'goal' ? 'aspect-[3/2]' : 'aspect-square'}`}>
-            {(selectionStep === 'shot'
-              ? Array.from({ length: 9 }).map((_, i) => {
+
+          {selectionStep === 'shot' ? (
+            /* ── ZONA DE TIRO: cuadrícula 3×3 sobre imagen de pista ── */
+            <div className="relative aspect-square w-full max-w-[280px] mx-auto rounded-2xl border-4 border-slate-800 overflow-hidden shadow-2xl"
+              style={{ background: 'linear-gradient(180deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
+              {/* Franjas de césped */}
+              <div className="absolute inset-0 pointer-events-none">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="absolute left-0 right-0" style={{ top: `${(i / 6) * 100}%`, height: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'transparent' }} />
+                ))}
+              </div>
+              {/* Marcas de pista */}
+              <div className="absolute inset-0 pointer-events-none opacity-60">
+                <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
+                <div className="absolute top-1/2 left-2 right-2 h-[2px] bg-white/70 -translate-y-1/2" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border-2 border-white/70 rounded-full" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-10 border-x-2 border-b-2 border-white/70 rounded-b-[3rem]" />
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-10 border-x-2 border-t-2 border-white/70 rounded-t-[3rem]" />
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
+                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
+              </div>
+              <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-1 p-1">
+                {Array.from({ length: 9 }).map((_, i) => {
                   const row = Math.floor(i / 3);
                   const col = i % 3;
-                  return { id: `${'ABC'[row]}${col + 1}`, label: `${'ABC'[row]}${col + 1}` };
-                })
-              : goalZones
-            ).map(zone => (
-              <button
-                key={zone.id}
-                onClick={() => selectionStep === 'shot' ? handleShotZoneSelect(zone.id) : handleGoalZoneSelect(zone.id)}
-                className="bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black text-slate-400 hover:bg-amber-500/20 hover:text-amber-400 hover:border-amber-500/40 transition-all active:scale-95"
-              >
-                {zone.label}
-              </button>
-            ))}
-          </div>
+                  const id = `${'ABC'[row]}${col + 1}`;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => handleShotZoneSelect(id)}
+                      className="rounded-lg border border-white/20 bg-black/10 flex items-center justify-center text-[10px] font-black text-white/80 hover:bg-amber-500/40 hover:border-white/50 hover:text-white transition-all active:scale-95"
+                    >
+                      <span className="bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-md">{id}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            /* ── ZONA DE PORTERÍA: cuadrícula 3×3 con forma de portería ── */
+            <div className="relative pt-3 px-3 w-full max-w-[300px] mx-auto">
+              {/* Larguero superior */}
+              <div className="absolute top-0 left-0 right-0 h-3 bg-gradient-to-b from-white to-slate-300 rounded-t-lg shadow-md z-20 border-x-[6px] border-t-[3px] border-white" />
+              {/* Postes laterales */}
+              <div className="absolute top-0 bottom-6 left-0 w-3 bg-gradient-to-r from-white to-slate-300 shadow-md z-20" />
+              <div className="absolute top-0 bottom-6 right-0 w-3 bg-gradient-to-l from-white to-slate-300 shadow-md z-20" />
+              <div className="grid grid-cols-3 gap-1 aspect-[3/2] rounded-b-sm p-2 relative overflow-hidden"
+                style={{
+                  background: '#0f172a',
+                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)',
+                  backgroundSize: '11px 11px',
+                }}>
+                {goalZones.map(zone => (
+                  <button
+                    key={zone.id}
+                    onClick={() => handleGoalZoneSelect(zone.id)}
+                    className="rounded-md border border-white/10 bg-white/[0.03] flex items-center justify-center text-[10px] font-black text-slate-400 hover:bg-amber-500/30 hover:text-amber-300 hover:border-white/30 transition-all active:scale-95"
+                  >
+                    {zone.label}
+                  </button>
+                ))}
+              </div>
+              {/* Suelo / línea de gol */}
+              <div className="h-6 relative">
+                <div className="absolute top-1 left-0 right-0 h-[3px] bg-white/80 rounded-full" />
+                <div className="absolute top-1 left-0 right-0 h-6 bg-gradient-to-b from-green-700/40 to-transparent" />
+              </div>
+            </div>
+          )}
+
           {selectionStep === 'goal' && pendingActionType === ActionType.SHOT && (
             <button
               onClick={() => handleGoalZoneSelect('OUT')}

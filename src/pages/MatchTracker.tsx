@@ -2310,11 +2310,21 @@ export default function MatchTracker() {
     if (isDataLocked) return;
     const point = info?.point;
     if (!point) return;
-    const dropEl = document.elementFromPoint(point.x, point.y);
-    const targetEl = dropEl?.closest("[data-player-id]") as HTMLElement | null;
-    const targetId = targetEl?.getAttribute("data-player-id");
-    if (targetId && targetId !== sourcePlayerId) {
-      swapPlayersByDrag(sourcePlayerId, targetId);
+    // The dragged card itself is rendered on top of the drop point (it has an
+    // elevated z-index while dragging), so we must check EVERY element stacked
+    // at that point — not just the topmost — and skip the source player's own
+    // card to find whatever player is actually underneath it.
+    const stackedEls: Element[] = document.elementsFromPoint
+      ? document.elementsFromPoint(point.x, point.y)
+      : [document.elementFromPoint(point.x, point.y)].filter(Boolean) as Element[];
+
+    for (const el of stackedEls) {
+      const targetEl = el.closest("[data-player-id]") as HTMLElement | null;
+      const targetId = targetEl?.getAttribute("data-player-id");
+      if (targetId && targetId !== sourcePlayerId) {
+        swapPlayersByDrag(sourcePlayerId, targetId);
+        return;
+      }
     }
   };
 

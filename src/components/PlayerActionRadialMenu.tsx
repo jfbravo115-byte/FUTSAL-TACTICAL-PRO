@@ -67,7 +67,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const handleActionClick = (actionType: any) => {
     if (actionType === 'SWAP') {
       onSwap(player.id);
-    } else if (actionType === GoalieAction.SAVE_PARRY || actionType === GoalieAction.GOAL_CONCEDED || actionType === ActionType.SHOT) {
+    } else if (actionType === GoalieAction.SAVE_PARRY || actionType === GoalieAction.GOAL_CONCEDED) {
       setPendingActionType(actionType);
       setSelectionStep('shot');
       setSelectingZone(true);

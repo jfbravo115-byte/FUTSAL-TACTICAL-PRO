@@ -162,25 +162,25 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
           </h3>
 
           {selectionStep === 'shot' ? (
-            /* ── ZONA DE TIRO: cuadrícula 3×3 sobre imagen de pista ── */
-            <div className="relative aspect-square w-full max-w-[280px] mx-auto rounded-2xl border-4 border-slate-800 overflow-hidden shadow-2xl"
-              style={{ background: 'linear-gradient(180deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
-              {/* Franjas de césped */}
+            /* ── ZONA DE TIRO: cuadrícula 3×3 sobre imagen de pista (horizontal) ── */
+            <div className="relative aspect-[3/2] w-full max-w-[320px] mx-auto rounded-2xl border-4 border-slate-800 overflow-hidden shadow-2xl"
+              style={{ background: 'linear-gradient(90deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
+              {/* Franjas de césped (verticales) */}
               <div className="absolute inset-0 pointer-events-none">
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="absolute left-0 right-0" style={{ top: `${(i / 6) * 100}%`, height: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'transparent' }} />
+                  <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / 6) * 100}%`, width: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'transparent' }} />
                 ))}
               </div>
-              {/* Marcas de pista */}
+              {/* Marcas de pista (horizontal) */}
               <div className="absolute inset-0 pointer-events-none opacity-60">
                 <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
-                <div className="absolute top-1/2 left-2 right-2 h-[2px] bg-white/70 -translate-y-1/2" />
+                <div className="absolute left-1/2 top-2 bottom-2 w-[2px] bg-white/70 -translate-x-1/2" />
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border-2 border-white/70 rounded-full" />
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-10 border-x-2 border-b-2 border-white/70 rounded-b-[3rem]" />
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-10 border-x-2 border-t-2 border-white/70 rounded-t-[3rem]" />
-                <div className="absolute top-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
-                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 h-24 w-10 border-y-2 border-r-2 border-white/70 rounded-r-[3rem]" />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 h-24 w-10 border-y-2 border-l-2 border-white/70 rounded-l-[3rem]" />
+                <div className="absolute left-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
               </div>
               <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-1 p-1">
                 {Array.from({ length: 9 }).map((_, i) => {

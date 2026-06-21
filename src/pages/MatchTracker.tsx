@@ -3467,7 +3467,7 @@ export default function MatchTracker() {
       })()}
 
             <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_auto] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
         style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
@@ -5982,8 +5982,7 @@ export default function MatchTracker() {
 
 
 
-      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <div className="flex justify-around items-center h-12 max-w-sm mx-auto">
           <button
             onClick={() => setActiveTab("pitch")}
@@ -6080,13 +6079,7 @@ export default function MatchTracker() {
       <style>{`
         @media (max-width: 1024px) {
           .custom-scrollbar::-webkit-scrollbar { width: 0px; }
-          html, body {
-            overflow: hidden !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            overscroll-behavior: none !important;
-            position: relative;
-          }
+          html, body { overflow: hidden !important; max-width: 100vw !important; }
         }
       `}</style>
 

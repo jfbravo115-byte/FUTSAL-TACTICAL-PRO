@@ -3467,7 +3467,7 @@ export default function MatchTracker() {
       })()}
 
             <div 
-        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_64px] lg:grid-rows-[auto_1fr] w-screen max-w-screen overflow-x-hidden"
+        className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_auto] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"
         style={{ height: 'var(--app-height, 100vh)', maxHeight: 'var(--app-height, 100vh)' } as React.CSSProperties}
       >
         {/* Sidebar Overlay */}
@@ -5651,7 +5651,7 @@ export default function MatchTracker() {
               />
             </div>
 
-            <div className="flex-1 flex flex-row gap-1 p-0.5 min-h-0 overflow-hidden relative">
+            <div className="flex-1 flex flex-col gap-1 p-0.5 min-h-0 overflow-hidden relative">
               {/* LOCK OVERLAY */}
               {isDataLocked && (
                 <div className="absolute inset-0 z-[500] bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center pointer-events-auto cursor-not-allowed border-2 border-dashed border-white/10 rounded-2xl m-0.5">
@@ -5669,9 +5669,9 @@ export default function MatchTracker() {
                 </div>
               )}
 
-              {/* LEFT SIDEBAR: STAFF CONTROLS */}
-              <div className="w-12 sm:w-14 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-r border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
-                <div className="flex flex-col items-center gap-1 mb-2">
+              {/* TOP BAR: STAFF CONTROLS (horizontal) */}
+              <div className="w-full flex flex-row items-stretch gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-b border-white/10 overflow-x-auto no-scrollbar shrink-0 allow-scroll">
+                <div className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-1">
                   <Users size={14} className="text-slate-500" />
                   <span className="text-[7px] font-black text-slate-500 uppercase text-center leading-none">STAFF</span>
                 </div>
@@ -5680,27 +5680,25 @@ export default function MatchTracker() {
                   .filter(p => (p.role === Role.COACH || p.role === Role.DELEGATE) && p.isOpponent === (pitchView === 'opponent'))
                   .sort((a, b) => Number(a.isOpponent) - Number(b.isOpponent))
                   .map(staff => (
-                    <div key={staff.id} className={`w-full flex flex-col gap-1 p-1 bg-white/5 rounded-lg border-2 transition-all ${
+                    <div key={staff.id} className={`flex flex-row items-center gap-1 p-1 bg-white/5 rounded-lg border-2 transition-all shrink-0 ${
                   staff.stats.redCards > 0
                     ? 'border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
                     : staff.stats.yellowCards > 0
                       ? 'border-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.35)]'
                       : 'border-white/10'
                 }`}>
-                      <span className={`text-[6px] font-black uppercase text-center ${staff.isOpponent ? 'text-red-400' : 'text-blue-400'}`}>{staff.role === Role.COACH ? 'ENT' : 'DEL'} {staff.isOpponent ? 'V' : 'L'}</span>
-                      <div className="flex flex-col gap-1">
-                        <div className="flex gap-1 justify-center">
-                          <button
-                            onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards && staff.stats.yellowCards < 2) handleAction(ActionType.YELLOW_CARD, staff.id); }}
-                            disabled={staff.stats.redCards > 0 || staff.stats.yellowCards >= 2}
-                            className="flex-1 h-8 bg-yellow-400 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
-                          />
-                          <button
-                            onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards) handleAction(ActionType.RED_CARD, staff.id); }}
-                            disabled={staff.stats.redCards > 0}
-                            className="flex-1 h-8 bg-red-600 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
-                          />
-                        </div>
+                      <span className={`text-[7px] font-black uppercase ${staff.isOpponent ? 'text-red-400' : 'text-blue-400'} px-0.5 whitespace-nowrap`}>{staff.role === Role.COACH ? 'ENT' : 'DEL'} {staff.isOpponent ? 'V' : 'L'}</span>
+                      <div className="flex flex-row gap-1 items-center">
+                        <button
+                          onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards && staff.stats.yellowCards < 2) handleAction(ActionType.YELLOW_CARD, staff.id); }}
+                          disabled={staff.stats.redCards > 0 || staff.stats.yellowCards >= 2}
+                          className="w-5 h-7 bg-yellow-400 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
+                        />
+                        <button
+                          onPointerDown={(e) => { e.preventDefault(); if (!staff.stats.redCards) handleAction(ActionType.RED_CARD, staff.id); }}
+                          disabled={staff.stats.redCards > 0}
+                          className="w-5 h-7 bg-red-600 rounded-md border border-black/20 active:scale-95 transition-all disabled:opacity-20"
+                        />
 
                         {staff.role === Role.COACH && (
                           <button
@@ -5712,15 +5710,15 @@ export default function MatchTracker() {
                                 (matchData.period === Period.FIRST ? matchData.timeoutsUsed.team.period1 : matchData.timeoutsUsed.team.period2)
                               )
                             }
-                            className={`w-full h-8 rounded-sm border border-black/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex flex-col items-center justify-center gap-0 mt-0.5 shadow-sm
+                            className={`h-7 px-1.5 rounded-sm border border-black/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex flex-col items-center justify-center gap-0 shadow-sm
                               ${(staff.isOpponent ? 
                                  (matchData.period === Period.FIRST ? matchData.timeoutsUsed.opponent.period1 : matchData.timeoutsUsed.opponent.period2) : 
                                  (matchData.period === Period.FIRST ? matchData.timeoutsUsed.team.period1 : matchData.timeoutsUsed.team.period2)
                                 ) ? "bg-green-600 text-white border-green-400/50" : "bg-blue-600 text-white border-blue-400/50"}
                             `}
                           >
-                            <TimerIcon size={12} strokeWidth={3} />
-                            <span className="text-[6px] font-black uppercase leading-none">T. MORT.</span>
+                            <TimerIcon size={11} strokeWidth={3} />
+                            <span className="text-[6px] font-black uppercase leading-none">T.M.</span>
                           </button>
                         )}
                       </div>
@@ -5731,29 +5729,29 @@ export default function MatchTracker() {
 
               {/* CENTER: PITCH VISUAL */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-                {/* PITCH VISUAL - VERTICAL ORIENTATION */}
-                <div className={`relative w-full flex-1 min-h-0 bg-gradient-to-b ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
+                {/* PITCH VISUAL - HORIZONTAL ORIENTATION */}
+                <div className={`relative w-full flex-1 min-h-0 bg-gradient-to-r ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
                   {/* Grid Marks */}
-                  <div className="absolute inset-0 grid grid-cols-8 grid-rows-10 opacity-5 z-0">
+                  <div className="absolute inset-0 grid grid-cols-10 grid-rows-8 opacity-5 z-0">
                     {Array.from({ length: 80 }).map((_, i) => (
                       <div key={i} className="border-[0.5px] border-white"></div>
                     ))}
                   </div>
 
-                  {/* Vertical Pitch Markings */}
+                  {/* Horizontal Pitch Markings */}
                   <div className="absolute inset-0 pointer-events-none z-0">
                     <div className="absolute inset-2 border border-white/20 rounded-sm"></div>
-                    <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-white/20"></div>
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[35%] aspect-square border border-white/20 rounded-full"></div>
+                    <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-white/20"></div>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[55%] aspect-square border border-white/20 rounded-full"></div>
                     
-                    {/* Goal Areas - Own goal (bottom) is what we defend */}
-                    {/* Bottom Area (Defended) */}
-                    <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-[60%] h-[18%] border-x border-t border-white/30 rounded-t-[3rem] bg-white/5"></div>
-                    {/* Top Area (Attacking) */}
-                    <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-[60%] h-[18%] border-x border-b border-white/20 rounded-b-[3rem]"></div>
+                    {/* Goal Areas - lado defendido resaltado según la vista */}
+                    {/* Left Area */}
+                    <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-r rounded-r-[3rem] ${pitchView === 'local' ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
+                    {/* Right Area */}
+                    <div className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-l rounded-l-[3rem] ${pitchView === 'opponent' ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
                     
-                    <div className="absolute top-[12%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
-                    <div className="absolute bottom-[12%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
+                    <div className="absolute left-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
+                    <div className="absolute right-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
                   </div>
 
                   {/* Tactical Slots and Players */}
@@ -5768,9 +5766,9 @@ export default function MatchTracker() {
                       <>
                         {currentSlots.map((slot, index) => {
                           if (occupiedSlots.includes(index)) return null;
-                          // Vertical Mirror Logic: Own goal (left:8 in Horizontal) -> Bottom (high uiTop in Vertical)
-                          const uiTop = 100 - slot.left; 
-                          const uiLeft = slot.top;
+                          // Horizontal Logic: local defiende izquierda; rival defiende derecha (espejo)
+                          const uiLeft = isOpp ? (100 - slot.left) : slot.left;
+                          const uiTop = slot.top;
 
                           return (
                             <div
@@ -5799,8 +5797,8 @@ export default function MatchTracker() {
 
                         {onPitchPlayers.map((player) => {
                           const slot = currentSlots[player.pitchPosition ?? 0] || currentSlots[0];
-                          const uiTop = 100 - slot.left;
-                          const uiLeft = slot.top;
+                          const uiLeft = isOpp ? (100 - slot.left) : slot.left;
+                          const uiTop = slot.top;
 
                           return (
                             <motion.div
@@ -5830,13 +5828,13 @@ export default function MatchTracker() {
                 </div>
               </div>
 
-              {/* RIGHT SIDEBAR: QUICK ACTIONS */}
-              <div className="w-12 sm:w-14 flex flex-col gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-l border-white/10 h-full overflow-y-auto no-scrollbar pt-2 shrink-0 allow-scroll">
+              {/* BOTTOM BAR: QUICK ACTIONS (horizontal) */}
+              <div className="w-full flex flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll">
 
                 {/* Match Actions */}
                 <button
                   onClick={() => setPendingAction({ type: ActionType.GOAL, step: "player", isOpponent: pitchView === 'opponent' })}
-                  className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:opacity-80 transition-all font-black shadow-lg border ${pitchView === 'opponent' ? 'bg-red-600/30 text-red-500 border-red-500/50' : 'bg-green-600/30 text-green-400 border-green-500/50'}`}
+                  className={`flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:opacity-80 transition-all font-black shadow-lg border ${pitchView === 'opponent' ? 'bg-red-600/30 text-red-500 border-red-500/50' : 'bg-green-600/30 text-green-400 border-green-500/50'}`}
                 >
                   <Trophy size={16} />
                   <span className="text-[7px] uppercase">Gol</span>
@@ -5844,7 +5842,7 @@ export default function MatchTracker() {
                 
                 <button
                   onClick={() => setPendingAction({ type: ActionType.SHOT, step: "player", isOpponent: pitchView === 'opponent' })}
-                  className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-slate-700 transition-all font-black shadow-lg bg-white/10 border border-white/20 text-slate-200"
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-slate-700 transition-all font-black shadow-lg bg-white/10 border border-white/20 text-slate-200"
                 >
                   <Target size={16} />
                   <span className="text-[7px] uppercase">Tiro</span>
@@ -5852,7 +5850,7 @@ export default function MatchTracker() {
 
                 <button
                   onClick={() => handleFoul(pitchView === 'local')}
-                  className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-orange-600/30 text-slate-200 hover:text-orange-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-orange-600/30 text-slate-200 hover:text-orange-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <AlertTriangle size={16} />
                   <span className="text-[7px] uppercase">Falta</span>
@@ -5860,7 +5858,7 @@ export default function MatchTracker() {
 
                 <button
                   onClick={() => setPendingAction({ type: ActionType.STEAL, isOpponent: pitchView === 'opponent', step: 'subtype' })}
-                  className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-cyan-600/30 text-slate-200 hover:text-cyan-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-cyan-600/30 text-slate-200 hover:text-cyan-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <Zap size={16} />
                   <span className="text-[7px] uppercase leading-none px-0.5 text-slate-200">RECUP.</span>
@@ -5868,7 +5866,7 @@ export default function MatchTracker() {
 
                 <button
                   onClick={() => setPendingAction({ type: ActionType.LOSS, isOpponent: pitchView === 'opponent', step: 'subtype' })}
-                  className="w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-red-600/30 text-slate-200 hover:text-red-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-red-600/30 text-slate-200 hover:text-red-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <RefreshCw size={16} />
                   <span className="text-[7px] uppercase leading-none px-0.5 text-slate-200">PÉRD.</span>
@@ -5982,7 +5980,8 @@ export default function MatchTracker() {
 
 
 
-      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+      <nav className="lg:hidden bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 z-[100] px-2 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         <div className="flex justify-around items-center h-12 max-w-sm mx-auto">
           <button
             onClick={() => setActiveTab("pitch")}
@@ -6079,7 +6078,13 @@ export default function MatchTracker() {
       <style>{`
         @media (max-width: 1024px) {
           .custom-scrollbar::-webkit-scrollbar { width: 0px; }
-          html, body { overflow: hidden !important; max-width: 100vw !important; }
+          html, body {
+            overflow: hidden !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            overscroll-behavior: none !important;
+            position: relative;
+          }
         }
       `}</style>
 
@@ -7240,32 +7245,32 @@ const PitchZones = ({
   const rows = ["A", "B", "C"];
   const cols = ["1", "2", "3"];
   return (
-    <div className="relative aspect-[2/3] w-full max-w-[200px] mx-auto rounded-xl border-4 border-slate-800 overflow-hidden shadow-2xl"
-      style={{ background: 'linear-gradient(180deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
-      {/* Franjas de césped */}
+    <div className="relative aspect-[3/2] w-full max-w-[300px] mx-auto rounded-xl border-4 border-slate-800 overflow-hidden shadow-2xl"
+      style={{ background: 'linear-gradient(90deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
+      {/* Franjas de césped (verticales) */}
       <div className="absolute inset-0 pointer-events-none">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="absolute left-0 right-0" style={{ top: `${(i / 6) * 100}%`, height: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }} />
+          <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / 6) * 100}%`, width: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }} />
         ))}
       </div>
-      {/* Marcas de la pista realistas */}
+      {/* Marcas de la pista realistas (horizontal) */}
       <div className="absolute inset-0 pointer-events-none opacity-60">
         {/* Línea perimetral */}
         <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
-        {/* Línea Medio Campo */}
-        <div className="absolute top-1/2 left-2 right-2 h-[2px] bg-white/70 -translate-y-1/2" />
+        {/* Línea Medio Campo (vertical) */}
+        <div className="absolute left-1/2 top-2 bottom-2 w-[2px] bg-white/70 -translate-x-1/2" />
         {/* Círculo Central */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 border-2 border-white/70 rounded-full" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-        {/* Áreas de portería (semicírculos 6m) */}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-b-2 border-white/70 rounded-b-[3rem]" />
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-t-2 border-white/70 rounded-t-[3rem]" />
+        {/* Áreas de portería (semicírculos 6m) izquierda/derecha */}
+        <div className="absolute left-2 top-1/2 -translate-y-1/2 h-24 w-12 border-y-2 border-r-2 border-white/70 rounded-r-[3rem]" />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 h-24 w-12 border-y-2 border-l-2 border-white/70 rounded-l-[3rem]" />
         {/* Porterías */}
-        <div className="absolute top-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-10 h-1.5 border-2 border-white/80 bg-white/20" />
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
         {/* Punto de Penalti */}
-        <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/70 rounded-full" />
-        <div className="absolute bottom-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white/70 rounded-full" />
+        <div className="absolute left-[15%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
+        <div className="absolute right-[15%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
       </div>
 
       <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-1 gap-1">

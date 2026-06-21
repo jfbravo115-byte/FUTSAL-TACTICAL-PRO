@@ -2281,6 +2281,43 @@ export default function MatchTracker() {
 
   // Remove finalizeSwap as it's now integrated into executeSwap
 
+  // ── DRAG-AND-DROP PLAYER SWAP (drag a player card onto another) ──
+  // Pure position swap between two on-pitch players (no substitution,
+  // no game event logged — it's just a tactical position change).
+  const swapPlayersByDrag = (sourceId: string, targetId: string) => {
+    if (isDataLocked || sourceId === targetId) return;
+    setMatchData((prev) => {
+      const sourcePlayer = prev.players.find((p) => p.id === sourceId);
+      const targetPlayer = prev.players.find((p) => p.id === targetId);
+      if (!sourcePlayer || !targetPlayer) return prev;
+      if (!sourcePlayer.isOnPitch || !targetPlayer.isOnPitch) return prev;
+      // Safety: only swap within the same team (local-local or rival-rival)
+      if (!!sourcePlayer.isOpponent !== !!targetPlayer.isOpponent) return prev;
+
+      return {
+        ...prev,
+        players: prev.players.map((p) => {
+          if (p.id === sourceId) return { ...p, pitchPosition: targetPlayer.pitchPosition };
+          if (p.id === targetId) return { ...p, pitchPosition: sourcePlayer.pitchPosition };
+          return p;
+        }),
+      };
+    });
+  };
+
+  // Detects which player card (if any) is under the pointer when the drag ends
+  const handlePlayerDragEnd = (sourcePlayerId: string, info: any) => {
+    if (isDataLocked) return;
+    const point = info?.point;
+    if (!point) return;
+    const dropEl = document.elementFromPoint(point.x, point.y);
+    const targetEl = dropEl?.closest("[data-player-id]") as HTMLElement | null;
+    const targetId = targetEl?.getAttribute("data-player-id");
+    if (targetId && targetId !== sourcePlayerId) {
+      swapPlayersByDrag(sourcePlayerId, targetId);
+    }
+  };
+
   const handlePitchDragEnd = (playerId: string, info: any) => {
     if (!pitchRef.current || isDataLocked) return;
 
@@ -5730,7 +5767,7 @@ export default function MatchTracker() {
               {/* CENTER: PITCH VISUAL */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                 {/* PITCH VISUAL - HORIZONTAL ORIENTATION */}
-                <div className={`relative w-full flex-1 min-h-0 bg-gradient-to-r ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
+                <div ref={pitchRef} className={`relative w-full flex-1 min-h-0 bg-gradient-to-r ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
                   {/* Grid Marks */}
                   <div className="absolute inset-0 grid grid-cols-10 grid-rows-8 opacity-5 z-0">
                     {Array.from({ length: 80 }).map((_, i) => (
@@ -5804,8 +5841,16 @@ export default function MatchTracker() {
                             <motion.div
                               key={player.id}
                               layout
+                              data-player-id={player.id}
                               animate={{ top: `${uiTop}%`, left: `${uiLeft}%` }}
-                              className={`absolute w-[20vw] h-[10vh] max-w-[75px] max-h-[85px] -translate-x-1/2 -translate-y-1/2 ${activeActionPlayerId === player.id ? "z-[155]" : "z-[30]"}`}
+                              drag={!isDataLocked && !swapSelection}
+                              dragMomentum={false}
+                              dragElastic={0.1}
+                              dragSnapToOrigin
+                              dragConstraints={pitchRef}
+                              onDragEnd={(_, info) => handlePlayerDragEnd(player.id, info)}
+                              whileDrag={{ scale: 1.18, zIndex: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.6)" }}
+                              className={`absolute w-[20vw] h-[10vh] max-w-[75px] max-h-[85px] -translate-x-1/2 -translate-y-1/2 touch-none ${activeActionPlayerId === player.id ? "z-[155]" : "z-[30]"}`}
                             >
                               <PlayerCard
                                 player={player}

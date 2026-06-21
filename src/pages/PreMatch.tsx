@@ -257,7 +257,7 @@ export default function PreMatch() {
   }
 
   return (
-    <div className="bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
+    <div className="h-screen bg-[#0A0B0E] text-slate-100 flex flex-col overflow-hidden font-sans"
       style={{ height: 'var(--app-height, 100vh)' }}>
 
       {/* ── HEADER ──────────────────────────────────────────── */}
@@ -389,8 +389,7 @@ export default function PreMatch() {
       </div>
 
       {/* ── START MATCH BUTTON ───────────────────────────────── */}
-      <div className="shrink-0 px-4 pt-3 bg-gradient-to-t from-[#0A0B0E] to-transparent"
-        style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}>
+      <div className="shrink-0 px-4 pb-6 pt-3 bg-gradient-to-t from-[#0A0B0E] to-transparent">
         <button
           onClick={startMatch}
           className="w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 rounded-2xl flex items-center justify-center gap-3 text-white font-black text-[14px] uppercase tracking-widest shadow-2xl shadow-blue-900/50 hover:from-blue-500 hover:to-blue-400 transition-all active:scale-[0.98]"

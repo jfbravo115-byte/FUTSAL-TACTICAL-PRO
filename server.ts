@@ -10,7 +10,7 @@ async function startServer() {
   app.use(express.json({ limit: "1mb" }));
 
   // MODAL URL - Análisis YOLO con tracking automático
-  const MODAL_URL = "https://futsal-commander--yolo-fastapi-app-dev.modal.run";
+  const MODAL_URL = "https://jf-bravo115--futsal-commander-yolo-fastapi-app.modal.run";
 
   // AI endpoint
   app.post("/api/tactical-pro", async (req, res) => {

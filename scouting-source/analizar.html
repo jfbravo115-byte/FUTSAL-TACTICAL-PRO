@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analizar Partido — Futsal Commander Pro</title>
+<style>
+  :root { --bg:#0A0B0E; --panel:#12141A; --panel2:#1A1D26; --border:rgba(255,255,255,0.08);
+    --txt:#e2e8f0; --muted:#64748b; --blue:#3b82f6; --red:#ef4444; --green:#22c55e;
+    --amber:#f59e0b; --cyan:#06b6d4; --purple:#a855f7; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); font-family:'Inter',-apple-system,sans-serif; padding-bottom:60px; }
+  header { padding:14px 22px; border-bottom:1px solid var(--border); background:var(--panel); }
+  header h1 { font-size:15px; font-weight:900; text-transform:uppercase; letter-spacing:0.15em; font-style:italic; }
+  header h1 span { color:var(--green); }
+  main { max-width:1000px; margin:0 auto; padding:18px; display:flex; flex-direction:column; gap:16px; }
+  section { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; }
+  section.off { opacity:0.4; pointer-events:none; }
+  h2 { font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:0.18em; color:var(--green); margin-bottom:12px; }
+  h2 .num { display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--green); color:#000; align-items:center; justify-content:center; font-size:11px; margin-right:8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text], input[type=number], select { background:var(--panel2); border:1px solid var(--border); color:var(--txt); padding:9px 12px; border-radius:10px; font-size:12px; outline:none; }
+  input[type=text] { flex:1; min-width:200px; }
+  input:focus, select:focus { border-color:var(--green); }
+  .btn { background:var(--panel2); border:1px solid var(--border); color:var(--txt); padding:9px 14px; border-radius:10px; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:0.08em; cursor:pointer; white-space:nowrap; }
+  .btn:hover { filter:brightness(1.3); }
+  .btn.primary { background:rgba(34,197,94,0.15); border-color:rgba(34,197,94,0.4); color:var(--green); }
+  .btn.big { padding:14px 22px; font-size:12px; width:100%; }
+  .ok { color:var(--green); font-weight:900; font-size:11px; }
+  .err { color:var(--red); font-weight:900; font-size:11px; }
+  .hint { font-size:9.5px; color:var(--muted); line-height:1.6; margin-top:8px; }
+  .filebtn { position:relative; overflow:hidden; }
+  .filebtn input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+  /* Calibración */
+  .framewrap { position:relative; margin-top:10px; border-radius:12px; overflow:hidden; border:1px solid var(--border); }
+  #lienzo { width:100%; display:block; cursor:crosshair; background:#000; }
+  .targets { display:flex; flex-direction:column; gap:5px; margin-top:12px; }
+  .target { display:flex; align-items:center; gap:8px; background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:7px 10px; cursor:pointer; font-size:11px; }
+  .target.activo { border-color:var(--green); background:rgba(34,197,94,0.07); }
+  .target.hecho .estado { color:var(--green); }
+  .target .dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; border:2px solid #fff3; }
+  .target .nombre { flex:1; font-weight:800; }
+  .target .estado { font-size:9px; color:var(--muted); font-weight:900; text-transform:uppercase; }
+  .target select { padding:4px 8px; font-size:10px; }
+  .progresobar { height:22px; background:var(--panel2); border-radius:10px; overflow:hidden; border:1px solid var(--border); margin-top:10px; }
+  .progresobar .fill { height:100%; background:linear-gradient(90deg,#22c55e,#4ade80); width:0%; transition:width .5s; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:900; color:#000; }
+  .estadotxt { font-family:monospace; font-size:10px; color:var(--muted); margin-top:6px; }
+</style>
+</head>
+<body>
+<header><h1>Analizar <span>Partido</span> · Futsal Commander Pro</h1></header>
+<main>
+
+  <!-- PASO 1: SERVIDOR -->
+  <section id="s1">
+    <h2><span class="num">1</span>Conectar con el servidor de análisis</h2>
+    <div class="row">
+      <input type="text" id="inServer" placeholder="URL del túnel (https://….trycloudflare.com)">
+      <button class="btn primary" id="btnConectar">Conectar</button>
+      <span id="srvEstado"></span>
+    </div>
+    <p class="hint">La URL sale de la terminal del túnel en la instancia GPU. Cambia en cada arranque.</p>
+  </section>
+
+  <!-- PASO 2: VÍDEO -->
+  <section id="s2" class="off">
+    <h2><span class="num">2</span>Vídeo del partido</h2>
+    <div class="row">
+      <input type="text" id="inYT" placeholder="Pega el enlace de YouTube…">
+      <button class="btn primary" id="btnYT">Descargar en el servidor</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label class="btn filebtn">⬆️ …o subir archivo del Mac<input type="file" accept="video/*" id="inFile"></label>
+      <select id="selVideos"><option value="">…o elegir un vídeo ya en el servidor</option></select>
+      <button class="btn" id="btnUsarExistente">Usar</button>
+    </div>
+    <div class="progresobar" id="pbVideo" style="display:none"><div class="fill" id="pbVideoFill">0%</div></div>
+    <p class="hint" id="videoEstado"></p>
+  </section>
+
+  <!-- PASO 3: CALIBRACIÓN -->
+  <section id="s3" class="off">
+    <h2><span class="num">3</span>Calibración táctil</h2>
+    <div class="row" id="modoRow" style="margin-bottom:10px">
+      <b style="font-size:11px">TIPO DE VÍDEO:</b>
+      <select id="modoSel">
+        <option value="fijo">🎥 Partido cámara FIJA (análisis completo con calibración)</option>
+        <option value="clips">🎬 MONTAJE de clips / cámara móvil (detectar cortes, sin calibración)</option>
+      </select>
+      <label id="movRow" style="display:none;font-size:11px;cursor:pointer">
+        <input type="checkbox" id="chkMov"> Captar MOVIMIENTOS de jugadores (toca las camisetas; más lento)
+      </label>
+    </div>
+    <div class="row">
+      <button class="btn" data-dt="-30">−30 s</button>
+      <button class="btn" data-dt="-5">−5 s</button>
+      <input type="number" id="inT" value="30" min="0" step="1" style="width:90px"> s
+      <button class="btn" data-dt="5">+5 s</button>
+      <button class="btn" data-dt="30">+30 s</button>
+      <button class="btn primary" id="btnFrame">Actualizar fotograma</button>
+      <button class="btn" id="btnInicio">🏁 El partido EMPIEZA aquí</button>
+      <span class="ok" id="inicioTxt"></span>
+    </div>
+    <div class="framewrap"><canvas id="lienzo" width="1920" height="1080"></canvas></div>
+    <p class="hint">Busca un fotograma donde se vean bien la pista y las camisetas. Toca cada referencia de la lista sobre la imagen (se avanza sola a la siguiente). Si una esquina no se ve, no importa: usa las referencias alternativas del desplegable — las esquinas se calculan solas.</p>
+    <div class="targets" id="targets"></div>
+    <div class="row" style="margin-top:12px">
+      Equipo A: <select id="cLocal"></select>
+      Equipo B (el que estudias): <select id="cRival"></select>
+      Portero A: <select id="cGkL"></select>
+      Portero B: <select id="cGkR"></select>
+    </div>
+  </section>
+
+  <!-- PASO 4: ANALIZAR -->
+  <section id="s4" class="off">
+    <h2><span class="num">4</span>Lanzar el análisis</h2>
+    <button class="btn primary big" id="btnAnalizar">⚡ ANALIZAR PARTIDO</button>
+    <div class="progresobar" id="pbJob" style="display:none"><div class="fill" id="pbJobFill">0%</div></div>
+    <p class="estadotxt" id="jobTxt"></p>
+    <div class="row" id="resultadoRow" style="display:none;margin-top:10px">
+      <button class="btn primary" id="btnDescargar">💾 Descargar análisis (JSON)</button>
+      <a class="btn primary" id="lnkVisor" href="visor_scouting.html" target="_blank">🎬 Abrir en el Visor (vídeo + análisis cargados)</a>
+    </div>
+  </section>
+
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const COLORES = ["yellow","white","pink","black","blue","red","green","orange","purple","cyan"];
+let SRV = "", VIDEO_ID = "", natW = 1920, natH = 1080, frameImg = null;
+let inicio = "";           // "M:SS"
+let muestrasT = null;      // segundo del fotograma de las camisetas
+let JOB = "";
+
+// ── Definición de referencias de calibración ─────────────────────
+// court: coordenadas reales en metros (pista 40x20) según la opción elegida
+const TARGETS = [
+  { id:"p1", nombre:"Esquina ARRIBA-IZQUIERDA (fondo lejano izq.)", color:"#f59e0b", tipo:"pista",
+    opciones:[{txt:"Esquina arriba-izq", court:[0,0]}] },
+  { id:"p2", nombre:"Esquina ARRIBA-DERECHA (fondo lejano der.)", color:"#f59e0b", tipo:"pista",
+    opciones:[{txt:"Esquina arriba-der", court:[40,0]}] },
+  { id:"p3", nombre:"Referencia IZQUIERDA", color:"#06b6d4", tipo:"pista",
+    opciones:[{txt:"Punto de penalti IZQUIERDO (6 m)", court:[6,10]},
+              {txt:"Punto de doble penalti IZQ (10 m)", court:[10,10]},
+              {txt:"Esquina abajo-izquierda (si se ve)", court:[0,20]}] },
+  { id:"p4", nombre:"Referencia CENTRAL/DERECHA", color:"#06b6d4", tipo:"pista",
+    opciones:[{txt:"Cruce línea central con banda de ABAJO", court:[20,20]},
+              {txt:"Punto de penalti DERECHO (6 m)", court:[34,10]},
+              {txt:"Esquina abajo-derecha (si se ve)", court:[40,20]}] },
+  { id:"ml1", nombre:"Camiseta Equipo A · jugador 1", color:"#3b82f6", tipo:"muestra", clave:"local" },
+  { id:"ml2", nombre:"Camiseta Equipo A · jugador 2", color:"#3b82f6", tipo:"muestra", clave:"local" },
+  { id:"mr1", nombre:"Camiseta Equipo B · jugador 1", color:"#ef4444", tipo:"muestra", clave:"rival" },
+  { id:"mr2", nombre:"Camiseta Equipo B · jugador 2", color:"#ef4444", tipo:"muestra", clave:"rival" },
+  { id:"gkl", nombre:"Camiseta PORTERO A", color:"#a855f7", tipo:"muestra", clave:"gklocal" },
+  { id:"gkr", nombre:"Camiseta PORTERO B", color:"#a855f7", tipo:"muestra", clave:"gkrival" },
+  { id:"gradas", nombre:"Línea de gradas cercana (OPCIONAL: toca donde empieza el público)", color:"#64748b", tipo:"gradas" },
+];
+const puntos = {};   // id -> {x, y} en píxeles reales del vídeo
+let targetActivo = 0;
+
+// ── Paso 1: servidor ─────────────────────────────────────────────
+// Recordar la URL del servidor entre sesiones
+try { const u = localStorage.getItem('srv_url'); if (u) $('inServer').value = u; } catch (e) {}
+$('btnConectar').addEventListener('click', async () => {
+  SRV = $('inServer').value.trim().replace(/\/+$/, '');
+  if (!SRV.startsWith('http')) { $('srvEstado').innerHTML = '<span class="err">URL no válida</span>'; return; }
+  $('srvEstado').textContent = 'Conectando…';
+  try {
+    const r = await fetch(SRV + '/salud');
+    const d = await r.json();
+    if (d.ok && d.motor) {
+      $('srvEstado').innerHTML = '<span class="ok">✅ Conectado · motor listo</span>';
+      try { localStorage.setItem('srv_url', SRV); } catch (e2) {}
+      $('s2').classList.remove('off');
+      cargarVideosExistentes();
+    } else {
+      $('srvEstado').innerHTML = '<span class="err">Servidor responde pero falta el motor (video_analyzer.py)</span>';
+    }
+  } catch (e) {
+    $('srvEstado').innerHTML = '<span class="err">No responde. ¿Servidor y túnel arrancados?</span>';
+  }
+});
+
+async function cargarVideosExistentes() {
+  try {
+    const vids = await (await fetch(SRV + '/videos')).json();
+    const sel = $('selVideos');
+    sel.innerHTML = '<option value="">…o elegir un vídeo ya en el servidor</option>' +
+      vids.map(v => `<option value="${v.video_id}">${v.video_id} (${v.mb} MB)</option>`).join('');
+  } catch (e) { /* servidor v1 sin /videos: ignorar */ }
+}
+
+// ── Paso 2: vídeo ────────────────────────────────────────────────
+$('btnYT').addEventListener('click', async () => {
+  const url = $('inYT').value.trim();
+  if (!url) return;
+  $('videoEstado').textContent = 'Encargando descarga al servidor…';
+  const r = await fetch(SRV + '/descargar', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url }) });
+  const d = await r.json();
+  if (d.error) { $('videoEstado').innerHTML = `<span class="err">${d.error}</span>`; return; }
+  seguirDescarga(d.job_id, d.video_id);
+});
+
+function seguirDescarga(jobId, videoId) {
+  $('pbVideo').style.display = 'block';
+  const timer = setInterval(async () => {
+    const e = await (await fetch(SRV + '/estado/' + jobId)).json();
+    $('pbVideoFill').style.width = e.progreso + '%';
+    $('pbVideoFill').textContent = e.progreso + '%';
+    $('videoEstado').textContent = e.mensaje || e.estado;
+    if (e.estado === 'completado') { clearInterval(timer); videoListo(videoId); }
+    if (e.estado === 'error') { clearInterval(timer);
+      $('videoEstado').innerHTML = `<span class="err">${e.mensaje}</span>`; }
+  }, 1500);
+}
+
+$('inFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('pbVideo').style.display = 'block';
+  $('videoEstado').textContent = 'Subiendo ' + f.name + '…';
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', SRV + '/subir');
+  xhr.upload.onprogress = ev => {
+    if (ev.lengthComputable) {
+      const p = Math.round(ev.loaded / ev.total * 100);
+      $('pbVideoFill').style.width = p + '%'; $('pbVideoFill').textContent = p + '%';
+    }
+  };
+  xhr.onload = () => {
+    const d = JSON.parse(xhr.responseText);
+    if (d.video_id) videoListo(d.video_id);
+    else $('videoEstado').innerHTML = '<span class="err">Fallo en la subida</span>';
+  };
+  const fd = new FormData(); fd.append('archivo', f);
+  xhr.send(fd);
+});
+
+$('btnUsarExistente').addEventListener('click', () => {
+  const v = $('selVideos').value;
+  if (v) videoListo(v);
+});
+
+function videoListo(videoId) {
+  VIDEO_ID = videoId;
+  $('videoEstado').innerHTML = `<span class="ok">✅ Vídeo listo en el servidor: ${videoId}</span>`;
+  $('s3').classList.remove('off');
+  construirTargets();
+  cargarFrame();
+  setModo();
+}
+
+// ── Paso 3: calibración ──────────────────────────────────────────
+COLORES.forEach(c => ['cLocal','cRival','cGkL','cGkR'].forEach(id =>
+  $(id).insertAdjacentHTML('beforeend', `<option value="${c}">${c}</option>`)));
+$('cLocal').value = 'yellow'; $('cRival').value = 'white';
+$('cGkL').value = 'pink'; $('cGkR').value = 'black';
+
+document.querySelectorAll('[data-dt]').forEach(b =>
+  b.addEventListener('click', () => {
+    $('inT').value = Math.max(0, (+$('inT').value) + (+b.dataset.dt));
+    cargarFrame();
+  }));
+$('btnFrame').addEventListener('click', cargarFrame);
+
+function cargarFrame() {
+  const t = +$('inT').value;
+  const muestrasPuestas = TARGETS.some(tg => tg.tipo === 'muestra' && puntos[tg.id]);
+  if (muestrasPuestas && muestrasT !== null && t !== muestrasT) {
+    if (!confirm('Cambiar de fotograma borra los puntos de camisetas (deben marcarse todos en el mismo fotograma). ¿Continuar?')) {
+      $('inT').value = muestrasT; return;
+    }
+    TARGETS.forEach(tg => { if (tg.tipo === 'muestra') delete puntos[tg.id]; });
+    muestrasT = null;
+    refrescarTargets();
+  }
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    natW = img.naturalWidth; natH = img.naturalHeight;
+    frameImg = img;
+    $('lienzo').width = natW; $('lienzo').height = natH;
+    dibujar();
+  };
+  img.onerror = () => alert('No se pudo cargar el fotograma. ¿Vídeo listo y servidor activo?');
+  img.src = `${SRV}/frame/${VIDEO_ID}?t=${t}&cb=${Date.now()}`;
+}
+
+$('btnInicio').addEventListener('click', () => {
+  const t = +$('inT').value;
+  inicio = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  $('inicioTxt').textContent = `Inicio: ${inicio}`;
+  comprobarListo();
+});
+
+function construirTargets() {
+  const box = $('targets'); box.innerHTML = '';
+  TARGETS.forEach((tg, i) => {
+    const sel = tg.opciones && tg.opciones.length > 1
+      ? `<select data-i="${i}" onclick="event.stopPropagation()">${tg.opciones.map((o, j) =>
+          `<option value="${j}">${o.txt}</option>`).join('')}</select>` : '';
+    box.insertAdjacentHTML('beforeend', `
+      <div class="target" data-i="${i}" id="tg_${tg.id}">
+        <div class="dot" style="background:${tg.color}"></div>
+        <span class="nombre">${tg.nombre}</span>${sel}
+        <span class="estado" id="st_${tg.id}">pendiente</span>
+      </div>`);
+  });
+  box.querySelectorAll('.target').forEach(el =>
+    el.addEventListener('click', () => { targetActivo = +el.dataset.i; refrescarTargets(); }));
+  box.querySelectorAll('select').forEach(s =>
+    s.addEventListener('change', () => { TARGETS[+s.dataset.i].opcion = +s.value; }));
+  targetActivo = 0;
+  refrescarTargets();
+}
+
+function refrescarTargets() {
+  TARGETS.forEach((tg, i) => {
+    const el = $('tg_' + tg.id);
+    if (!el) return;
+    el.classList.toggle('activo', i === targetActivo);
+    el.classList.toggle('hecho', !!puntos[tg.id]);
+    $('st_' + tg.id).textContent = puntos[tg.id]
+      ? `✓ ${Math.round(puntos[tg.id].x)},${Math.round(puntos[tg.id].y)}` : 'pendiente';
+  });
+  dibujar();
+  comprobarListo();
+}
+
+$('lienzo').addEventListener('click', e => {
+  if (!frameImg) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * natW;
+  const y = (e.clientY - r.top) / r.height * natH;
+  const tg = TARGETS[targetActivo];
+  if (!tg) return;
+  puntos[tg.id] = { x, y };
+  if (tg.tipo === 'muestra' && muestrasT === null) muestrasT = +$('inT').value;
+  // avanzar al siguiente pendiente
+  const sig = TARGETS.findIndex((t2, i) => i > targetActivo && !puntos[t2.id]);
+  targetActivo = sig >= 0 ? sig : targetActivo;
+  refrescarTargets();
+});
+
+function dibujar() {
+  const cv = $('lienzo'), ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (frameImg) ctx.drawImage(frameImg, 0, 0, natW, natH);
+  TARGETS.forEach(tg => {
+    const p = puntos[tg.id]; if (!p) return;
+    if (tg.tipo === 'gradas') {
+      ctx.strokeStyle = tg.color; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
+      ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(natW, p.y); ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
+    ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = tg.color; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
+  });
+}
+
+// ── Homografía DLT: pista(m) → píxel, para derivar las 4 esquinas ─
+function solveH(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  for (let c = 0; c < 8; c++) {
+    let piv = c;
+    for (let r2 = c + 1; r2 < 8; r2++) if (Math.abs(A[r2][c]) > Math.abs(A[piv][c])) piv = r2;
+    [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+    for (let r2 = 0; r2 < 8; r2++) {
+      if (r2 === c || A[r2][c] === 0) continue;
+      const f = A[r2][c] / A[c][c];
+      for (let k = c; k < 8; k++) A[r2][k] -= f * A[c][k];
+      b[r2] -= f * b[c];
+    }
+  }
+  const h = b.map((v, i) => v / A[i][i]);
+  return (x, y) => {
+    const w = h[6] * x + h[7] * y + 1;
+    return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w];
+  };
+}
+
+function derivarEsquinas() {
+  const ids = ["p1", "p2", "p3", "p4"];
+  const src = [], dst = [];
+  for (const id of ids) {
+    const tg = TARGETS.find(t2 => t2.id === id);
+    const p = puntos[id];
+    if (!p) return null;
+    src.push(tg.opciones[tg.opcion || 0].court);
+    dst.push([p.x, p.y]);
+  }
+  const H = solveH(src, dst);
+  return [[0, 0], [40, 0], [40, 20], [0, 20]]
+    .map(([x, y]) => H(x, y).map(v => Math.round(v)));
+}
+
+// ── Paso 4: lanzar ───────────────────────────────────────────────
+const esClips = () => $('modoSel').value === 'clips';
+const conMov = () => esClips() && $('chkMov').checked;
+function setModo() {
+  const clips = esClips(), mov = conMov();
+  $('movRow').style.display = clips ? 'inline-flex' : 'none';
+  [...$('s3').children].forEach(el => {
+    if (el.tagName === 'H2' || el.id === 'modoRow') return;
+    el.style.display = (!clips || mov) ? '' : 'none';
+  });
+  // En modo movimientos solo hacen falta las camisetas: ocultar pista/gradas/colores
+  ["p1", "p2", "p3", "p4", "gradas"].forEach(id => {
+    const el = $('tg_' + id);
+    if (el) el.style.display = (clips && mov) ? 'none' : '';
+  });
+  if (clips && mov) {
+    const bi = $('btnInicio'); if (bi) bi.style.display = 'none';
+    const filas = $('s3').querySelectorAll('.row');
+    if (filas.length > 1) filas[filas.length - 1].style.display = 'none';  // colores
+  }
+  comprobarListo();
+}
+$('modoSel').addEventListener('change', setModo);
+$('chkMov').addEventListener('change', setModo);
+
+function comprobarListo() {
+  if (esClips()) {
+    const camisetasOK = !conMov() || ["ml1","ml2","mr1","mr2"].every(id => puntos[id]);
+    $('s4').classList.toggle('off', !(VIDEO_ID && camisetasOK));
+    return;
+  }
+  const pistaOK = ["p1", "p2", "p3", "p4"].every(id => puntos[id]);
+  const muestrasOK = ["ml1", "mr1", "gkl", "gkr"].every(id => puntos[id]);
+  const listo = pistaOK && muestrasOK && inicio;
+  $('s4').classList.toggle('off', !listo);
+}
+
+$('btnAnalizar').addEventListener('click', async () => {
+  if (esClips()) {
+    if (!conMov()) { lanzar({ modo: 'clips' }); return; }
+    const mu = [];
+    TARGETS.forEach(tg => {
+      if (tg.tipo === 'muestra' && puntos[tg.id])
+        mu.push(`${tg.clave}:${Math.round(puntos[tg.id].x)},${Math.round(puntos[tg.id].y)}`);
+    });
+    lanzar({ modo: 'clips_movimiento', muestras: mu.join(';'),
+             muestras_t: muestrasT ?? +$('inT').value });
+    return;
+  }
+  const esquinas = derivarEsquinas();
+  if (!esquinas) { alert('Faltan referencias de pista'); return; }
+  const corners = esquinas.map(([x, y]) => `${x},${y}`).join(';');
+  const mu = [];
+  TARGETS.forEach(tg => {
+    if (tg.tipo !== 'muestra' || !puntos[tg.id]) return;
+    mu.push(`${tg.clave}:${Math.round(puntos[tg.id].x)},${Math.round(puntos[tg.id].y)}`);
+  });
+  const params = {
+    local: $('cLocal').value, rival: $('cRival').value,
+    gklocal: $('cGkL').value, gkrival: $('cGkR').value,
+    corners, start: inicio,
+    muestras: mu.join(';'), muestras_t: muestrasT ?? +$('inT').value,
+  };
+  if (puntos.gradas) params.maxy = Math.round(puntos.gradas.y);
+  lanzar(params);
+});
+
+async function lanzar(params) {
+  $('btnAnalizar').disabled = true;
+  $('pbJob').style.display = 'block';
+  const r = await fetch(SRV + '/analizar', { method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ video_id: VIDEO_ID, params }) });
+  const d = await r.json();
+  if (d.error) { $('jobTxt').innerHTML = `<span class="err">${d.error}</span>`;
+    $('btnAnalizar').disabled = false; return; }
+  JOB = d.job_id;
+  const timer = setInterval(async () => {
+    const e = await (await fetch(SRV + '/estado/' + JOB)).json();
+    $('pbJobFill').style.width = e.progreso + '%';
+    $('pbJobFill').textContent = e.progreso + '%';
+    $('jobTxt').textContent = `${e.estado} — ${e.mensaje}`;
+    if (e.estado === 'completado') {
+      clearInterval(timer);
+      $('resultadoRow').style.display = 'flex';
+      $('lnkVisor').href = 'visor_scouting.html?srv=' + encodeURIComponent(SRV) +
+                            '&job=' + JOB + '&vid=' + encodeURIComponent(VIDEO_ID);
+      $('jobTxt').innerHTML = '<span class="ok">✅ Análisis completado. Ábrelo directamente en el Visor.</span>';
+    }
+    if (e.estado === 'error') {
+      clearInterval(timer);
+      $('jobTxt').innerHTML = `<span class="err">${e.mensaje}</span>`;
+      $('btnAnalizar').disabled = false;
+    }
+  }, 2000);
+}
+
+$('btnDescargar').addEventListener('click', async () => {
+  const r = await fetch(SRV + '/resultado/' + JOB);
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'analisis_' + VIDEO_ID + '.json';
+  a.click();
+});
+</script>
+</body>
+</html>

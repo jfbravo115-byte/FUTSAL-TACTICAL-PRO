@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scouting — Futsal Commander Pro</title>
+<style>
+  :root { --bg:#0A0B0E; --panel:#12141A; --border:rgba(255,255,255,0.08); --txt:#e2e8f0; --muted:#64748b; --blue:#3b82f6; --amber:#f59e0b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); font-family:'Inter',-apple-system,sans-serif; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; padding:20px; }
+  h1 { font-size:20px; font-weight:900; text-transform:uppercase; letter-spacing:0.18em; font-style:italic; text-align:center; }
+  h1 span { color:var(--blue); }
+  p.sub { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.12em; text-align:center; }
+  .cards { display:flex; gap:18px; flex-wrap:wrap; justify-content:center; }
+  a.card { display:flex; flex-direction:column; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border); border-radius:20px; padding:34px 40px; text-decoration:none; color:var(--txt); transition:all .15s; min-width:240px; }
+  a.card:hover { transform:translateY(-3px); }
+  a.card b { font-size:34px; }
+  a.card h2 { font-size:13px; font-weight:900; text-transform:uppercase; letter-spacing:0.12em; }
+  a.card small { color:var(--muted); font-size:10px; font-weight:700; text-align:center; line-height:1.5; }
+  a.card.visor:hover { border-color:var(--blue); }
+  a.card.visor h2 { color:var(--blue); }
+  a.card.informe:hover { border-color:var(--amber); }
+  a.card[href='analizar.html']:hover { border-color:#22c55e; }
+  a.card.informe h2 { color:var(--amber); }
+  footer { color:var(--muted); font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.1em; }
+</style>
+</head>
+<body>
+  <h1>Futsal Commander <span>Scouting</span></h1>
+  <p class="sub">Análisis de vídeo · Patrones de juego</p>
+  <div class="cards">
+    <a class="card visor" href="visor_scouting.html">
+      <b>🎬</b>
+      <h2>Visor de Scouting</h2>
+      <small>Vídeo local o YouTube<br>Etiquetar jugadas · Pista virtual</small>
+    </a>
+    <a class="card" href="analizar.html" style="order:-1">
+      <b>⚡</b>
+      <h2 style="color:#22c55e">Analizar Partido</h2>
+      <small>Enlace o archivo → calibración táctil<br>→ análisis automático</small>
+    </a>
+    <a class="card informe" href="informe_patrones.html">
+      <b>📈</b>
+      <h2>Informe de Patrones</h2>
+      <small>Cargar JSON etiquetados<br>Balón parado · Sistemas · Movimientos</small>
+    </a>
+  </div>
+  <footer>Juan Bravo · Preparación física y análisis</footer>
+</body>
+</html>

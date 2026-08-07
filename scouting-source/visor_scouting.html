@@ -842,6 +842,86 @@ function jugadorEnPunto(px, py) {  // devuelve el jugador cuyo foco (en el t act
   return mejor;
 }
 
+// ── Tracking real del motor: homografía inversa metros→fracción de pantalla ──
+// (equivalente a cv2.getPerspectiveTransform, resolviendo el sistema 8x8)
+function calcularHomografiaInversa(esquinasPx, vw, vh, largoM, anchoM) {
+  // fuente: rectángulo de pista en metros (0,0)-(L,0)-(L,W)-(0,W)
+  // destino: las 4 esquinas en fracción 0-1 de pantalla
+  const src = [[0, 0], [largoM, 0], [largoM, anchoM], [0, anchoM]];
+  const dst = esquinasPx.map(([px, py]) => [px / vw, py / vh]);
+  const A = [];
+  const b = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx, sy] = src[i], [dx, dy] = dst[i];
+    A.push([sx, sy, 1, 0, 0, 0, -sx * dx, -sy * dx]); b.push(dx);
+    A.push([0, 0, 0, sx, sy, 1, -sx * dy, -sy * dy]); b.push(dy);
+  }
+  // Eliminación gaussiana simple 8x8
+  for (let i = 0; i < 8; i++) {
+    let piv = i;
+    for (let r = i + 1; r < 8; r++) if (Math.abs(A[r][i]) > Math.abs(A[piv][i])) piv = r;
+    [A[i], A[piv]] = [A[piv], A[i]]; [b[i], b[piv]] = [b[piv], b[i]];
+    for (let r = 0; r < 8; r++) {
+      if (r === i) continue;
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < 8; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const h = A.map((row, i) => b[i] / row[i]);
+  return (mx, my) => {
+    const den = h[6] * mx + h[7] * my + 1;
+    return { x: (h[0] * mx + h[1] * my + h[2]) / den, y: (h[3] * mx + h[4] * my + h[5]) / den };
+  };
+}
+let _homInv = null, _homCalculada = false;
+function homografiaVisor() {
+  if (_homCalculada) return _homInv;
+  _homCalculada = true;
+  if (data && data.coordenadas === 'metros' && data.esquinas_px && data.pista && data.video) {
+    try {
+      _homInv = calcularHomografiaInversa(data.esquinas_px, data.video.w, data.video.h, data.pista.largo_m, data.pista.ancho_m);
+    } catch (e) { _homInv = null; }
+  }
+  return _homInv;
+}
+// Convierte una muestra {x,y} del JSON (metros o % frame) a fracción 0-1 de pantalla
+function muestraAFraccion(mx, my) {
+  if (data && data.coordenadas === 'metros') {
+    const h = homografiaVisor();
+    if (h) return h(mx, my);
+    return null;
+  }
+  return { x: mx / 100, y: my / 100 };
+}
+// Busca en data.muestras el track real más cercano a (px,py) en el tiempo actual,
+// y devuelve todos sus keyframes ya convertidos a fracción de pantalla.
+function trackRealCercano(px, py, tNow) {
+  if (!data || !data.muestras || !data.muestras.length) return null;
+  let muestraRef = data.muestras[0], mejorDt = Infinity;
+  for (const m of data.muestras) {
+    const dt = Math.abs(m.t - tNow);
+    if (dt < mejorDt) { mejorDt = dt; muestraRef = m; }
+  }
+  let mejorId = null, mejorD = 60 / Math.max(draw.width, draw.height) * 900 * escala();
+  mejorD = 0.05; // ~5% de la pantalla, en fracción 0-1
+  for (const j of (muestraRef.p || [])) {
+    const f = muestraAFraccion(j.x, j.y);
+    if (!f) continue;
+    const d = Math.hypot(f.x - px, f.y - py);
+    if (d < mejorD) { mejorD = d; mejorId = j.id; }
+  }
+  if (mejorId == null) return null;
+  const keys = [];
+  for (const m of data.muestras) {
+    const j = (m.p || []).find(jj => jj.id === mejorId);
+    if (!j) continue;
+    const f = muestraAFraccion(j.x, j.y);
+    if (f) keys.push({ t: m.t, x: f.x, y: f.y });
+  }
+  return keys.length ? keys : null;
+}
+
 draw.addEventListener('mousedown', e => {
   if (!tool) return;
   const p = ptDraw(e); x0 = p.x; y0 = p.y;
@@ -856,7 +936,13 @@ draw.addEventListener('mousedown', e => {
       else { k.push({ t: tNow, x: x0, y: y0 }); k.sort((a, b) => a.t - b.t); }
       $('tbCursor').textContent = `J${existente.n}: ${k.length} posiciones marcadas`;
     } else {
-      trazos.push({ tool: 'player', col: colorActivo, n: numJugador++, keys: [{ t: tNow, x: x0, y: y0 }] });
+      const keysReales = trackRealCercano(x0, y0, tNow);
+      if (keysReales) {
+        trazos.push({ tool: 'player', col: colorActivo, n: numJugador++, keys: keysReales });
+        $('tbCursor').textContent = `J${numJugador - 1}: seguimiento automático (${keysReales.length} puntos)`;
+      } else {
+        trazos.push({ tool: 'player', col: colorActivo, n: numJugador++, keys: [{ t: tNow, x: x0, y: y0 }] });
+      }
     }
     repintarTrazos(); return;
   }

@@ -886,13 +886,26 @@ function homografiaVisor() {
   return _homInv;
 }
 // Convierte una muestra {x,y} del JSON (metros o % frame) a fracción 0-1 de pantalla
+// Escala fracción-0-1-del-vídeo-nativo a fracción-0-1-del-canvas completo,
+// corrigiendo el letterboxing cuando el <video> no llena el canvas (object-fit:contain
+// con max-height dinámico deja franja vacía, normalmente debajo).
+function fraccionVideoACanvas(fx, fy) {
+  const vr = video.getBoundingClientRect(), dr = draw.getBoundingClientRect();
+  if (!vr.width || !vr.height || !dr.width || !dr.height) return { x: fx, y: fy };
+  const offX = (vr.left - dr.left) / dr.width, offY = (vr.top - dr.top) / dr.height;
+  const scaleX = vr.width / dr.width, scaleY = vr.height / dr.height;
+  return { x: offX + fx * scaleX, y: offY + fy * scaleY };
+}
 function muestraAFraccion(mx, my) {
+  let f;
   if (data && data.coordenadas === 'metros') {
     const h = homografiaVisor();
-    if (h) return h(mx, my);
-    return null;
+    if (!h) return null;
+    f = h(mx, my);
+  } else {
+    f = { x: mx / 100, y: my / 100 };
   }
-  return { x: mx / 100, y: my / 100 };
+  return fraccionVideoACanvas(f.x, f.y);
 }
 // Busca en data.muestras el track real más cercano a (px,py) en el tiempo actual,
 // y devuelve todos sus keyframes ya convertidos a fracción de pantalla.

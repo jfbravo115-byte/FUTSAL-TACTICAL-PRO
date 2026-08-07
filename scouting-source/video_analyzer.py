@@ -243,11 +243,12 @@ def classify_restart_zone(cx, cy, cfg, in_meters):
 
 # ── Analizador principal ──────────────────────────────────────────────────────
 class VideoAnalyzer:
-    def __init__(self, cfg, team_colors, homography=None):
+    def __init__(self, cfg, team_colors, homography=None, corners_px=None):
         self.cfg = cfg
         self.team_colors = team_colors
         self.refs = None  # referencias LAB (clasificador v10)
         self.H = homography
+        self.corners_px = corners_px  # esquinas originales en pixeles (para invertir H en el visor)
         self.model = YOLO(cfg["model_path"])
 
         self.in_meters = homography is not None
@@ -650,6 +651,7 @@ class VideoAnalyzer:
             "coordenadas": "metros" if self.in_meters else "porcentaje_frame",
             "pista": {"largo_m": self.cfg["pitch_len_m"],
                       "ancho_m": self.cfg["pitch_wid_m"]} if self.in_meters else None,
+            "esquinas_px": self.corners_px if self.in_meters else None,
             "resumen_eventos": dict(counts),
             "eventos": sorted(self.events, key=lambda e: e["t"]),
             "formaciones": self.formations,
@@ -718,7 +720,7 @@ def main():
         print("AVISO: sin --corners las posiciones serán % del frame (sin perspectiva).")
         print("       Para scouting fiable, calibra las 4 esquinas de la pista.")
 
-    analyzer = VideoAnalyzer(CFG, team_colors, homography=H)
+    analyzer = VideoAnalyzer(CFG, team_colors, homography=H, corners_px=corners if args.corners else None)
     if args.muestras:
         analyzer.refs = medir_referencias_lab(args.video, args.muestras_t, args.muestras)
         print("Clasificador v10 (cercania LAB) activo. Referencias medidas:")

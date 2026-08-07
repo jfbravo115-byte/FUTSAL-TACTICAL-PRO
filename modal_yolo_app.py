@@ -116,8 +116,15 @@ def download_video(url: str) -> str:
 @modal.asgi_app()
 def fastapi_app():
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
 
     api = FastAPI()
+    api.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     jobs_state: Dict[str, dict] = {}
 
     @api.get("/salud")

@@ -1,4 +1,4 @@
-// Services for analysis with Vast.ai
+// Services for analysis - calls Modal directly (no intermediate backend)
 
 export interface AnalysisJob {
   jobId: string;
@@ -20,15 +20,14 @@ export interface AnalysisConfig {
 }
 
 class AnalysisService {
+  private baseUrl: string = '';
+
   async checkServer(serverUrl: string): Promise<boolean> {
+    this.baseUrl = serverUrl.replace(/\/$/, '');
     try {
-      const res = await fetch('/api/check-server', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverUrl })
-      });
+      const res = await fetch(`${this.baseUrl}/salud`);
       const data = await res.json();
-      return data.connected;
+      return data.ok === true;
     } catch (e) {
       console.error('Server check failed:', e);
       return false;
@@ -36,28 +35,60 @@ class AnalysisService {
   }
 
   async startAnalysis(config: AnalysisConfig): Promise<string> {
-    const res = await fetch('/api/analyze-video', {
+    this.baseUrl = config.serverUrl.replace(/\/$/, '');
+
+    // Paso 1: descargar el vídeo en Modal
+    const dlRes = await fetch(`${this.baseUrl}/descargar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
+      body: JSON.stringify({ url: config.videoUrl })
     });
-    
-    if (!res.ok) {
-      throw new Error(`Analysis failed: ${res.statusText}`);
+    if (!dlRes.ok) {
+      throw new Error(`Descarga fallida: ${dlRes.statusText}`);
     }
-    
-    const { jobId } = await res.json();
-    return jobId;
+    const { video_id } = await dlRes.json();
+
+    // Paso 2: lanzar el análisis (YOLO tracking)
+    const anRes = await fetch(`${this.baseUrl}/analizar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_id,
+        params: {
+          modo: config.videoType,
+          local_color: config.calibration?.localColor || 'blue',
+          rival_color: config.calibration?.rivalColor || 'red'
+        }
+      })
+    });
+    if (!anRes.ok) {
+      throw new Error(`Análisis fallido: ${anRes.statusText}`);
+    }
+    const { job_id } = await anRes.json();
+    return job_id;
   }
 
   async getAnalysisStatus(jobId: string): Promise<AnalysisJob> {
-    const res = await fetch(`/api/analysis/${jobId}`);
-    
+    const res = await fetch(`${this.baseUrl}/estado/${jobId}`);
     if (!res.ok) {
       throw new Error(`Status check failed: ${res.statusText}`);
     }
-    
-    return res.json();
+    const data = await res.json();
+
+    const job: AnalysisJob = {
+      jobId,
+      status: data.estado === 'completed' ? 'completed' : (data.estado === 'error' ? 'error' : 'processing'),
+      progress: data.progreso
+    };
+
+    if (job.status === 'completed') {
+      const resultRes = await fetch(`${this.baseUrl}/resultado/${jobId}`);
+      if (resultRes.ok) {
+        job.result = await resultRes.json();
+      }
+    }
+
+    return job;
   }
 
   async pollAnalysis(
@@ -72,7 +103,7 @@ class AnalysisService {
       const timer = setInterval(async () => {
         try {
           const job = await this.getAnalysisStatus(jobId);
-          
+
           if (onProgress) {
             onProgress(job);
           }
@@ -95,25 +126,6 @@ class AnalysisService {
         }
       }, pollInterval);
     });
-  }
-
-  async getFrame(
-    serverUrl: string,
-    videoId: string,
-    timestamp: number = 30
-  ): Promise<string> {
-    const res = await fetch('/api/get-frame', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serverUrl, videoId, timestamp })
-    });
-
-    if (!res.ok) {
-      throw new Error(`Frame fetch failed: ${res.statusText}`);
-    }
-
-    const { frame } = await res.json();
-    return frame;
   }
 }
 

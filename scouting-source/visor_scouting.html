@@ -171,6 +171,7 @@
           <span class="tb-sep"></span>
           <button class="tb" id="drawUndo" title="Deshacer">⤺</button>
           <button class="tb" id="drawClear" title="Borrar todo">🗑</button>
+          <button class="tb" id="drawGroup" title="Agrupar 2-5 jugadores seleccionados (Shift+clic sobre sus fichas) en una Unidad Táctica">👥 Agrupar</button>
           <button class="tb" id="drawSave" title="Guardar este fotograma con los dibujos en la galería">💾 Guardar fotograma</button>
           <button class="tb" id="drawExport" title="Descargar este fotograma como PNG">📸 Descargar</button>
           <button class="tb" id="drawGallery" title="Ver todos los fotogramas guardados">🗂 Galería (<span id="galN">0</span>)</button>
@@ -748,8 +749,10 @@ const draw = $('draw');
 const dctx = draw.getContext('2d');
 let tool = null, colorActivo = '#f2c200', numJugador = 1;
 let dibujando = false, x0 = 0, y0 = 0, trazos = [];
-let fichaSel = null;        // ficha 'player' actualmente seleccionada (objeto de trazos)
+let fichaSel = null;        // ficha 'player' o unidad 'unit' seleccionada individualmente
 let arrastrandoFicha = false, dragBase = null; // {x,y} del punto de agarre al iniciar arrastre
+let multiSel = [];          // fichas 'player' marcadas para agrupar en una Unidad Táctica
+let numUnidad = 1;
 let conectDesde = null;  // para la herramienta "Unir" (pase entre jugadores)
 
 function mostrarAnalisisBar() { $('analisisBar').style.display = 'flex'; [50,300,700].forEach(ms=>setTimeout(ajustarDraw, ms)); }
@@ -807,7 +810,8 @@ document.querySelectorAll('.colbtn').forEach(b =>
   }));
 
 $('drawUndo').addEventListener('click', () => { trazos.pop(); repintarTrazos(); });
-$('drawClear').addEventListener('click', () => { trazos = []; numJugador = 1; conectDesde = null; repintarTrazos(); });
+$('drawClear').addEventListener('click', () => { trazos = []; numJugador = 1; conectDesde = null; multiSel.length = 0; fichaSel = null; repintarTrazos(); });
+$('drawGroup').addEventListener('click', crearUnidadDesdeSeleccion);
 $('drawExport').addEventListener('click', exportarImagen);
 
 // Coordenadas RELATIVAS (0..1): los dibujos se mantienen al cambiar de tamaño
@@ -962,6 +966,81 @@ function tramoPerdido(jug, t) {
   return false;
 }
 
+// ── Unidad Táctica: agrupa fichas 'player' ya existentes, sin duplicar tracking ──
+// La fuente de verdad sigue siendo cada ficha (trackId/keys); la unidad solo referencia
+// los objetos ya presentes en `trazos` (mismo patrón que pass.from/pass.to).
+
+// Interpola en METROS reales (sin proyectar a pantalla) la posición de un track_id en el
+// instante t. Eje X = longitudinal/profundidad, eje Y = lateral/anchura (confirmado en el
+// motor: pitch_len_m sobre X, pitch_wid_m sobre Y). Solo válido si coordenadas === 'metros'.
+function posicionMetrosEnT(trackId, t) {
+  if (!data || data.coordenadas !== 'metros' || !data.muestras) return null;
+  let antes = null, despues = null;
+  for (const m of data.muestras) {
+    const j = (m.p || []).find(jj => jj.id === trackId);
+    if (!j) continue;
+    if (m.t <= t) antes = { t: m.t, x: j.x, y: j.y };
+    else if (!despues) { despues = { t: m.t, x: j.x, y: j.y }; break; }
+  }
+  if (!antes && !despues) return null;
+  if (antes && !despues) return { x: antes.x, y: antes.y };
+  if (!antes && despues) return { x: despues.x, y: despues.y };
+  const f = (t - antes.t) / ((despues.t - antes.t) || 1);
+  return { x: antes.x + (despues.x - antes.x) * f, y: antes.y + (despues.y - antes.y) * f };
+}
+// Centroide en fracción de pantalla (incluye miembros con tracking perdido, mostrando su
+// última posición conocida — igual que sus propias fichas siguen visibles) + anchura/
+// profundidad en metros reales, excluyendo miembros perdidos EN ESE INSTANTE de la métrica
+// (no de la unidad: siguen siendo miembros, solo no cuentan para no medir con datos viejos).
+function metricasUnidad(unidad, t) {
+  const miembros = unidad.players.filter(p => trazos.includes(p)); // integridad referencial
+  const posiciones = miembros.map(p => ({ ficha: p, pantalla: posEnT(p, t), perdido: tramoPerdido(p, t) }))
+                              .filter(o => o.pantalla);
+  if (!posiciones.length) return null;
+  const cx = posiciones.reduce((s, o) => s + o.pantalla.x, 0) / posiciones.length;
+  const cy = posiciones.reduce((s, o) => s + o.pantalla.y, 0) / posiciones.length;
+  let anchura = null, profundidad = null;
+  if (data && data.coordenadas === 'metros') {
+    const validos = miembros.filter(p => !tramoPerdido(p, t))
+                             .map(p => posicionMetrosEnT(p.trackId, t))
+                             .filter(Boolean);
+    if (validos.length >= 2) {
+      const ys = validos.map(v => v.y), xs = validos.map(v => v.x);
+      anchura = Math.max(...ys) - Math.min(...ys);       // eje Y = lateral
+      profundidad = Math.max(...xs) - Math.min(...xs);   // eje X = longitudinal
+    }
+  }
+  return { centroide: { x: cx, y: cy }, anchura, profundidad, posiciones };
+}
+// Hit-test sobre el marcador de centroide de cada unidad visible (para seleccionarla).
+function unidadEnPunto(px, py) {
+  const tNow = P.time();
+  let mejor = null, dmin = 30 / draw.width;
+  for (const z of trazos) {
+    if (z.tool !== 'unit' || !z.visible) continue;
+    const m = metricasUnidad(z, tNow);
+    if (!m) continue;
+    const d = Math.hypot(m.centroide.x - px, m.centroide.y - py);
+    if (d < dmin) { dmin = d; mejor = z; }
+  }
+  return mejor;
+}
+function crearUnidadDesdeSeleccion() {
+  if (multiSel.length < 2 || multiSel.length > 5) {
+    $('tbCursor').textContent = `⚠️ selecciona entre 2 y 5 jugadores para agrupar (tienes ${multiSel.length})`;
+    return;
+  }
+  const unidad = {
+    tool: 'unit', id: 'unit-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: `Unidad ${numUnidad++}`, players: [...multiSel],
+    visible: true, showConnections: true, showCentroid: true, showMetrics: true
+  };
+  trazos.push(unidad);
+  multiSel.length = 0; fichaSel = unidad;
+  $('tbCursor').textContent = `${unidad.name} creada (${unidad.players.length} jugadores)`;
+  repintarTrazos();
+}
+
 draw.addEventListener('mousedown', e => {
   const p0 = ptDraw(e);
   // Selección de una ficha ya vinculada, incluso sin herramienta activa (para poder
@@ -969,6 +1048,18 @@ draw.addEventListener('mousedown', e => {
   if (!tool || tool === 'player') {
     const clic = jugadorEnPunto(p0.x, p0.y);
     if (clic) {
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        // Shift/Cmd/Ctrl + clic SOBRE una ficha existente = selección múltiple para
+        // agrupar (no interfiere con Shift+clic en vacío, que sigue siendo re-vinculación).
+        const i = multiSel.indexOf(clic);
+        if (i >= 0) multiSel.splice(i, 1); else multiSel.push(clic);
+        fichaSel = null;
+        $('tbCursor').textContent = multiSel.length
+          ? `${multiSel.length} jugador(es) seleccionados para agrupar: ${multiSel.map(f => 'J' + f.n).join(', ')}`
+          : 'selección múltiple vacía';
+        repintarTrazos();
+        return;
+      }
       fichaSel = clic;
       if (clic.trackId != null && clic.tracking) {
         arrastrandoFicha = true; dragBase = { x: p0.x, y: p0.y };
@@ -981,7 +1072,15 @@ draw.addEventListener('mousedown', e => {
       if (!tool) return;
     }
   }
-  if (!tool) return;
+  if (!tool) {
+    const clicUnidad = unidadEnPunto(p0.x, p0.y);
+    if (clicUnidad) {
+      fichaSel = clicUnidad;
+      $('tbCursor').textContent = `${clicUnidad.name} seleccionada (${clicUnidad.players.length} jugadores) · Delete para desagrupar`;
+      repintarTrazos();
+    }
+    return;
+  }
   x0 = p0.x; y0 = p0.y;
   if (tool === 'player') {
     const tNow = P.time();
@@ -1130,6 +1229,10 @@ function focoJugador(X, Y, s, col, num, opts) {
     dctx.setLineDash([3 * s, 3 * s]);
     dctx.beginPath(); dctx.ellipse(X, Y, rx + 6 * s, ry + 4 * s, 0, 0, Math.PI * 2); dctx.stroke();
     dctx.setLineDash([]);
+  } else if (opts.multiSel) {
+    // Marcado para agrupar: anillo amarillo continuo, distinto del blanco de selección única.
+    dctx.globalAlpha = 1; dctx.strokeStyle = '#facc15'; dctx.lineWidth = 2 * s;
+    dctx.beginPath(); dctx.ellipse(X, Y, rx + 6 * s, ry + 4 * s, 0, 0, Math.PI * 2); dctx.stroke();
   }
   dctx.globalAlpha = 1;
   // dos "puntas" laterales finas que cierran visualmente el foco (estilo target)
@@ -1154,15 +1257,71 @@ function focoJugador(X, Y, s, col, num, opts) {
   dctx.restore();
 }
 
+// Casco convexo simple (monotone chain) para dibujar las conexiones de una unidad como un
+// perímetro limpio, sin red completa ilegible entre todos los pares de jugadores.
+function cascoConvexo(puntos) {
+  const pts = [...puntos].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) return pts;
+  const cruz = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const inf = [];
+  for (const p of pts) { while (inf.length >= 2 && cruz(inf[inf.length - 2], inf[inf.length - 1], p) <= 0) inf.pop(); inf.push(p); }
+  const sup = [];
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (sup.length >= 2 && cruz(sup[sup.length - 2], sup[sup.length - 1], p) <= 0) sup.pop(); sup.push(p); }
+  inf.pop(); sup.pop();
+  return inf.concat(sup);
+}
+function pintarUnidad(unidad, s, W, H) {
+  const m = metricasUnidad(unidad, P.time());
+  if (!m) return;
+  const X = x => x * W, Y = y => y * H;
+  const col = (unidad.players[0] && unidad.players[0].col) || '#f2c200';
+  if (unidad.showConnections && m.posiciones.length >= 2) {
+    const puntos = m.posiciones.map(o => ({ x: X(o.pantalla.x), y: Y(o.pantalla.y) }));
+    const hull = puntos.length >= 3 ? cascoConvexo(puntos) : puntos;
+    dctx.save();
+    dctx.strokeStyle = col; dctx.globalAlpha = 0.5; dctx.lineWidth = 2 * s; dctx.setLineDash([6 * s, 4 * s]);
+    dctx.beginPath();
+    hull.forEach((p, i) => i ? dctx.lineTo(p.x, p.y) : dctx.moveTo(p.x, p.y));
+    if (hull.length >= 3) dctx.closePath();
+    dctx.stroke(); dctx.setLineDash([]);
+    dctx.restore();
+  }
+  if (unidad.showCentroid) {
+    const cx = X(m.centroide.x), cy = Y(m.centroide.y);
+    dctx.save();
+    dctx.fillStyle = col; dctx.globalAlpha = (unidad === fichaSel) ? 1 : 0.85;
+    dctx.beginPath(); dctx.arc(cx, cy, 6 * s, 0, Math.PI * 2); dctx.fill();
+    if (unidad === fichaSel) {
+      dctx.globalAlpha = 1; dctx.strokeStyle = '#fff'; dctx.lineWidth = 1.5 * s; dctx.setLineDash([3 * s, 3 * s]);
+      dctx.beginPath(); dctx.arc(cx, cy, 14 * s, 0, Math.PI * 2); dctx.stroke(); dctx.setLineDash([]);
+    }
+    dctx.restore();
+    dctx.save();
+    dctx.globalAlpha = 1; dctx.font = `700 ${Math.round(10 * s)}px Inter`; dctx.fillStyle = '#fff'; dctx.textAlign = 'center';
+    dctx.fillText(unidad.name, cx, cy - 12 * s);
+    dctx.restore();
+  }
+  if (unidad.showMetrics && (m.anchura != null || m.profundidad != null)) {
+    const cx = X(m.centroide.x), cy = Y(m.centroide.y);
+    dctx.save();
+    dctx.font = `600 ${Math.round(9 * s)}px Inter`; dctx.fillStyle = 'rgba(255,255,255,0.85)'; dctx.textAlign = 'center';
+    const txt = [];
+    if (m.anchura != null) txt.push(`anch ${m.anchura.toFixed(1)}m`);
+    if (m.profundidad != null) txt.push(`prof ${m.profundidad.toFixed(1)}m`);
+    dctx.fillText(txt.join(' · '), cx, cy + 20 * s);
+    dctx.restore();
+  }
+}
 function pintarUno(t) {
   const W = draw.width, H = draw.height, s = escala();
   const X = x => x * W, Y = y => y * H;
   const col = t.col || '#f2c200';
   dctx.strokeStyle = col; dctx.fillStyle = col; dctx.lineWidth = 4 * s; dctx.lineCap = 'round';
+  if (t.tool === 'unit') { pintarUnidad(t, s, W, H); return; }
   if (t.tool === 'player') {
     rastroJugador(t, s);
     const p = posEnT(t, P.time());
-    const opts = { seleccionado: t === fichaSel, perdido: t.trackId != null && tramoPerdido(t, P.time()) };
+    const opts = { seleccionado: t === fichaSel, multiSel: multiSel.includes(t), perdido: t.trackId != null && tramoPerdido(t, P.time()) };
     focoJugador(X(p.x), Y(p.y), s, col, t.n, opts);
     return;
   }
@@ -1267,10 +1426,25 @@ $('galDownloadAll')?.addEventListener('click', () => galeria.forEach((g, i) => s
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'Escape') { setTool(null); fichaSel = null; repintarTrazos(); return; }
+  if (e.key === 'Escape') { setTool(null); fichaSel = null; multiSel.length = 0; repintarTrazos(); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && fichaSel) {
-    trazos = trazos.filter(z => z !== fichaSel && !(z.tool === 'pass' && (z.from === fichaSel || z.to === fichaSel)));
-    $('tbCursor').textContent = `ficha eliminada`;
+    if (fichaSel.tool === 'unit') {
+      // Eliminar la agrupación no toca sus fichas ni sus tracks.
+      trazos = trazos.filter(z => z !== fichaSel);
+      $('tbCursor').textContent = `unidad desagrupada (jugadores intactos)`;
+    } else {
+      trazos = trazos.filter(z => z !== fichaSel && !(z.tool === 'pass' && (z.from === fichaSel || z.to === fichaSel)));
+      // Integridad referencial: sacar la ficha de cualquier unidad que la contenga;
+      // si una unidad queda con menos de 2 miembros, desaparece automáticamente.
+      for (const z of trazos) {
+        if (z.tool !== 'unit') continue;
+        const i = z.players.indexOf(fichaSel);
+        if (i >= 0) z.players.splice(i, 1);
+      }
+      trazos = trazos.filter(z => z.tool !== 'unit' || z.players.length >= 2);
+      const mi = multiSel.indexOf(fichaSel); if (mi >= 0) multiSel.splice(mi, 1);
+      $('tbCursor').textContent = `ficha eliminada`;
+    }
     fichaSel = null; repintarTrazos(); e.preventDefault(); return;
   }
   if (e.key.toLowerCase() === 't' && fichaSel && fichaSel.trackId != null) {

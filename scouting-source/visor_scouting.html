@@ -762,6 +762,18 @@ function ajustarDraw() {
   const w = dcanvas.clientWidth || dcanvas.parentElement.clientWidth || 900;
   const hh = dcanvas.clientHeight || dcanvas.parentElement.clientHeight || 500;
   if (w > 0 && hh > 0) { dcanvas.width = w; dcanvas.height = hh; }
+  // Un resize real puede cambiar la relación de aspecto del contenedor, no solo su
+  // escala — el letterboxing entre <video> y el canvas se recalcula de forma distinta.
+  // Las fichas vinculadas a track_id tienen sus posiciones "horneadas" en fracción de
+  // canvas en el momento de crearse; sin este refresco quedarían desalineadas tras un
+  // cambio real de forma (aunque sí sobrevivían a un simple escalado proporcional).
+  if (typeof trazos !== 'undefined' && typeof hornearKeysDesdeTrack === 'function') {
+    for (const t of trazos) {
+      if (t.tool === 'player' && t.trackId != null && t.tracking) {
+        t.keys = hornearKeysDesdeTrack(t.trackId, t.offset);
+      }
+    }
+  }
   repintarTrazos();
 }
 window.addEventListener('resize', ajustarDraw);

@@ -1269,7 +1269,7 @@ document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.key === 'Escape') { setTool(null); fichaSel = null; repintarTrazos(); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && fichaSel) {
-    trazos = trazos.filter(z => z !== fichaSel);
+    trazos = trazos.filter(z => z !== fichaSel && !(z.tool === 'pass' && (z.from === fichaSel || z.to === fichaSel)));
     $('tbCursor').textContent = `ficha eliminada`;
     fichaSel = null; repintarTrazos(); e.preventDefault(); return;
   }

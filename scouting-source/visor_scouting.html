@@ -997,8 +997,18 @@ function metricasUnidad(unidad, t) {
   const posiciones = miembros.map(p => ({ ficha: p, pantalla: posEnT(p, t), perdido: tramoPerdido(p, t) }))
                               .filter(o => o.pantalla);
   if (!posiciones.length) return null;
-  const cx = posiciones.reduce((s, o) => s + o.pantalla.x, 0) / posiciones.length;
-  const cy = posiciones.reduce((s, o) => s + o.pantalla.y, 0) / posiciones.length;
+  // Métricas tácticas (centroide, anchura, profundidad): solo miembros con posición
+  // actualmente válida. Un jugador con tracking perdido sigue siendo miembro de la
+  // unidad y su ficha se sigue dibujando (con estilo discontinuo), pero su última
+  // posición conocida no debe distorsionar ninguna métrica mientras no sea válida.
+  const posicionesValidas = posiciones.filter(o => !o.perdido);
+  let centroide = null;
+  if (posicionesValidas.length) {
+    centroide = {
+      x: posicionesValidas.reduce((s, o) => s + o.pantalla.x, 0) / posicionesValidas.length,
+      y: posicionesValidas.reduce((s, o) => s + o.pantalla.y, 0) / posicionesValidas.length
+    };
+  }
   let anchura = null, profundidad = null;
   if (data && data.coordenadas === 'metros') {
     const validos = miembros.filter(p => !tramoPerdido(p, t))
@@ -1010,7 +1020,7 @@ function metricasUnidad(unidad, t) {
       profundidad = Math.max(...xs) - Math.min(...xs);   // eje X = longitudinal
     }
   }
-  return { centroide: { x: cx, y: cy }, anchura, profundidad, posiciones };
+  return { centroide, anchura, profundidad, posiciones };
 }
 // Hit-test sobre el marcador de centroide de cada unidad visible (para seleccionarla).
 function unidadEnPunto(px, py) {
@@ -1019,7 +1029,7 @@ function unidadEnPunto(px, py) {
   for (const z of trazos) {
     if (z.tool !== 'unit' || !z.visible) continue;
     const m = metricasUnidad(z, tNow);
-    if (!m) continue;
+    if (!m || !m.centroide) continue;
     const d = Math.hypot(m.centroide.x - px, m.centroide.y - py);
     if (d < dmin) { dmin = d; mejor = z; }
   }
@@ -1286,7 +1296,7 @@ function pintarUnidad(unidad, s, W, H) {
     dctx.stroke(); dctx.setLineDash([]);
     dctx.restore();
   }
-  if (unidad.showCentroid) {
+  if (unidad.showCentroid && m.centroide) {
     const cx = X(m.centroide.x), cy = Y(m.centroide.y);
     dctx.save();
     dctx.fillStyle = col; dctx.globalAlpha = (unidad === fichaSel) ? 1 : 0.85;
@@ -1301,7 +1311,7 @@ function pintarUnidad(unidad, s, W, H) {
     dctx.fillText(unidad.name, cx, cy - 12 * s);
     dctx.restore();
   }
-  if (unidad.showMetrics && (m.anchura != null || m.profundidad != null)) {
+  if (unidad.showMetrics && m.centroide && (m.anchura != null || m.profundidad != null)) {
     const cx = X(m.centroide.x), cy = Y(m.centroide.y);
     dctx.save();
     dctx.font = `600 ${Math.round(9 * s)}px Inter`; dctx.fillStyle = 'rgba(255,255,255,0.85)'; dctx.textAlign = 'center';

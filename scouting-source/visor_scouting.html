@@ -748,6 +748,8 @@ const draw = $('draw');
 const dctx = draw.getContext('2d');
 let tool = null, colorActivo = '#f2c200', numJugador = 1;
 let dibujando = false, x0 = 0, y0 = 0, trazos = [];
+let fichaSel = null;        // ficha 'player' actualmente seleccionada (objeto de trazos)
+let arrastrandoFicha = false, dragBase = null; // {x,y} del punto de agarre al iniciar arrastre
 let conectDesde = null;  // para la herramienta "Unir" (pase entre jugadores)
 
 function mostrarAnalisisBar() { $('analisisBar').style.display = 'flex'; [50,300,700].forEach(ms=>setTimeout(ajustarDraw, ms)); }
@@ -907,54 +909,127 @@ function muestraAFraccion(mx, my) {
   }
   return fraccionVideoACanvas(f.x, f.y);
 }
-// Busca en data.muestras el track real más cercano a (px,py) en el tiempo actual,
-// y devuelve todos sus keyframes ya convertidos a fracción de pantalla.
-function trackRealCercano(px, py, tNow) {
+// Busca en data.muestras el track_id real más cercano a (px,py) en el tiempo actual.
+// Devuelve {trackId, team} o null si no hay ninguno dentro del umbral de distancia.
+function idTrackCercano(px, py, tNow) {
   if (!data || !data.muestras || !data.muestras.length) return null;
   let muestraRef = data.muestras[0], mejorDt = Infinity;
   for (const m of data.muestras) {
     const dt = Math.abs(m.t - tNow);
     if (dt < mejorDt) { mejorDt = dt; muestraRef = m; }
   }
-  let mejorId = null, mejorD = 60 / Math.max(draw.width, draw.height) * 900 * escala();
-  mejorD = 0.05; // ~5% de la pantalla, en fracción 0-1
+  let mejorId = null, mejorEq = null, mejorD = 0.05; // ~5% de la pantalla, en fracción 0-1: umbral máximo razonable
   for (const j of (muestraRef.p || [])) {
     const f = muestraAFraccion(j.x, j.y);
     if (!f) continue;
     const d = Math.hypot(f.x - px, f.y - py);
-    if (d < mejorD) { mejorD = d; mejorId = j.id; }
+    if (d < mejorD) { mejorD = d; mejorId = j.id; mejorEq = j.eq; }
   }
-  if (mejorId == null) return null;
+  return mejorId == null ? null : { trackId: mejorId, team: mejorEq };
+}
+// Genera los keyframes (keys) de una ficha vinculada a trackId a partir de data.muestras,
+// aplicando un offset manual opcional y manteniendo la identidad del track (sin reasignar id).
+// Gestión de huecos: si el track_id desaparece más de UMBRAL_GAP segundos, se inserta un
+// keyframe "plano" (misma posición) justo antes de que reaparezca, marcado perdido:true,
+// para que posEnT() mantenga la última posición conocida en vez de interpolar en línea recta
+// hacia el punto lejano de reaparición. No se reasigna nunca el track_id automáticamente.
+function hornearKeysDesdeTrack(trackId, offset) {
+  offset = offset || { x: 0, y: 0 };
+  const UMBRAL_GAP = 1.5; // segundos sin muestra del mismo id = hueco "largo"
   const keys = [];
+  let ultimo = null;
   for (const m of data.muestras) {
-    const j = (m.p || []).find(jj => jj.id === mejorId);
+    const j = (m.p || []).find(jj => jj.id === trackId);
     if (!j) continue;
     const f = muestraAFraccion(j.x, j.y);
-    if (f) keys.push({ t: m.t, x: f.x, y: f.y });
+    if (!f) continue;
+    const punto = { t: m.t, x: f.x + offset.x, y: f.y + offset.y };
+    if (ultimo && (m.t - ultimo.t) > UMBRAL_GAP) {
+      keys.push({ t: Math.max(ultimo.t + 0.01, m.t - 0.05), x: ultimo.x, y: ultimo.y, perdido: true });
+    }
+    keys.push(punto);
+    ultimo = punto;
   }
-  return keys.length ? keys : null;
+  return keys;
+}
+// ¿El instante t cae dentro de un tramo marcado como "perdido" (hueco largo) de esta ficha?
+function tramoPerdido(jug, t) {
+  const k = jug.keys;
+  if (!k || k.length < 2) return false;
+  for (let i = 0; i < k.length - 1; i++) {
+    if (t >= k[i].t && t <= k[i + 1].t) return !!(k[i].perdido || k[i + 1].perdido);
+  }
+  return false;
 }
 
 draw.addEventListener('mousedown', e => {
+  const p0 = ptDraw(e);
+  // Selección de una ficha ya vinculada, incluso sin herramienta activa (para poder
+  // arrastrarla/borrarla/des-vincularla sin forzar a reactivar "Seguir jugador" cada vez).
+  if (!tool || tool === 'player') {
+    const clic = jugadorEnPunto(p0.x, p0.y);
+    if (clic) {
+      fichaSel = clic;
+      if (clic.trackId != null && clic.tracking) {
+        arrastrandoFicha = true; dragBase = { x: p0.x, y: p0.y };
+        clic._offsetBase = { x: clic.offset.x, y: clic.offset.y };
+        $('tbCursor').textContent = `J${clic.n} seleccionado (track #${clic.trackId})`;
+      } else if (clic.trackId != null) {
+        $('tbCursor').textContent = `J${clic.n} seleccionado · tracking OFF (editable a mano, T para reactivar)`;
+      }
+      repintarTrazos();
+      if (!tool) return;
+    }
+  }
   if (!tool) return;
-  const p = ptDraw(e); x0 = p.x; y0 = p.y;
+  x0 = p0.x; y0 = p0.y;
   if (tool === 'player') {
     const tNow = P.time();
     const existente = jugadorEnPunto(x0, y0);
     if (existente) {
-      // Añadir/actualizar keyframe en el tiempo actual → el jugador se moverá hacia aquí
+      if (existente.trackId != null && existente.tracking) {
+        // Vinculada y con seguimiento activo: ya se seleccionó/preparó el arrastre arriba.
+        repintarTrazos(); return;
+      }
+      // Ficha manual (nunca vinculada, o con tracking desactivado con 'T'): edición directa
+      // de keyframes puntuales — comportamiento histórico intacto.
       const k = existente.keys;
       const i = k.findIndex(p => Math.abs(p.t - tNow) < 0.15);
       if (i >= 0) { k[i].x = x0; k[i].y = y0; }
       else { k.push({ t: tNow, x: x0, y: y0 }); k.sort((a, b) => a.t - b.t); }
-      $('tbCursor').textContent = `J${existente.n}: ${k.length} posiciones marcadas`;
+      $('tbCursor').textContent = `J${existente.n}: ${k.length} posiciones marcadas (manual)`;
     } else {
-      const keysReales = trackRealCercano(x0, y0, tNow);
-      if (keysReales) {
-        trazos.push({ tool: 'player', col: colorActivo, n: numJugador++, keys: keysReales });
-        $('tbCursor').textContent = `J${numJugador - 1}: seguimiento automático (${keysReales.length} puntos)`;
+      const encontrado = idTrackCercano(x0, y0, tNow);
+      // Shift+clic con una ficha ya seleccionada = re-vincularla a este jugador nuevo
+      // (en vez de crear una ficha adicional). Mismo id de anotación, nuevo track_id.
+      if (e.shiftKey && fichaSel && encontrado) {
+        fichaSel.trackId = encontrado.trackId;
+        fichaSel.team = encontrado.team;
+        fichaSel.tracking = true;
+        fichaSel.offset = { x: 0, y: 0 };
+        fichaSel.keys = hornearKeysDesdeTrack(encontrado.trackId, fichaSel.offset);
+        $('tbCursor').textContent = `J${fichaSel.n}: re-vinculado a track #${encontrado.trackId}`;
+        repintarTrazos(); return;
+      }
+      if (encontrado) {
+        const keys = hornearKeysDesdeTrack(encontrado.trackId, { x: 0, y: 0 });
+        if (keys.length) {
+          const ficha = {
+            tool: 'player', col: colorActivo, n: numJugador++,
+            id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            trackId: encontrado.trackId, team: encontrado.team,
+            createdAt: tNow, tracking: true, offset: { x: 0, y: 0 },
+            keys
+          };
+          trazos.push(ficha);
+          fichaSel = ficha;
+          $('tbCursor').textContent = `J${ficha.n}: vinculado a track #${encontrado.trackId} (seguimiento automático)`;
+        } else {
+          $('tbCursor').textContent = '⚠️ jugador detectado pero sin datos de recorrido suficientes';
+        }
       } else {
-        trazos.push({ tool: 'player', col: colorActivo, n: numJugador++, keys: [{ t: tNow, x: x0, y: y0 }] });
+        // Requisito explícito: si no hay jugador suficientemente próximo, NO vincular nada.
+        $('tbCursor').textContent = '❌ ningún jugador cerca de ese punto — prueba más cerca de sus pies';
       }
     }
     repintarTrazos(); return;
@@ -975,12 +1050,29 @@ draw.addEventListener('mousedown', e => {
   if (tool === 'free') trazos.push({ tool, pts: [{ x: x0, y: y0 }], col: colorActivo });
 });
 draw.addEventListener('mousemove', e => {
+  if (arrastrandoFicha && fichaSel) {
+    // Offset manual: nunca se reescriben las coordenadas del track real, solo se
+    // desplaza la ficha respecto a él (requisito: vínculo siempre por track_id).
+    const p = ptDraw(e);
+    fichaSel.offset = {
+      x: fichaSel._offsetBase.x + (p.x - dragBase.x),
+      y: fichaSel._offsetBase.y + (p.y - dragBase.y)
+    };
+    fichaSel.keys = hornearKeysDesdeTrack(fichaSel.trackId, fichaSel.offset);
+    repintarTrazos();
+    return;
+  }
   if (!dibujando) return;
   const p = ptDraw(e);
   if (tool === 'free') { trazos[trazos.length - 1].pts.push(p); repintarTrazos(); }
   else { repintarTrazos(); pintarUno({ tool, x0, y0, x1: p.x, y1: p.y, col: colorActivo }); }
 });
 draw.addEventListener('mouseup', e => {
+  if (arrastrandoFicha) {
+    arrastrandoFicha = false;
+    if (fichaSel) $('tbCursor').textContent = `J${fichaSel.n}: offset ajustado (sigue vinculado a track #${fichaSel.trackId})`;
+    return;
+  }
   if (!dibujando) return;
   dibujando = false;
   if (tool !== 'free' && tool !== 'player' && tool !== 'connect') {
@@ -1009,17 +1101,21 @@ function rastroJugador(jug, s) {
   jug.keys.forEach((k, i) => { const x = k.x * draw.width, y = k.y * draw.height; i ? dctx.lineTo(x, y) : dctx.moveTo(x, y); });
   dctx.stroke(); dctx.setLineDash([]); dctx.restore();
 }
-function focoJugador(X, Y, s, col, num) {
+function focoJugador(X, Y, s, col, num, opts) {
   // Marcador profesional (estilo broadcast): anillo de perspectiva ABIERTO que
   // rodea los pies sin tapar al jugador + etiqueta de número tipo "tag".
+  opts = opts || {};
   dctx.save();
+  if (opts.perdido) dctx.globalAlpha = 0.45; // tracking temporalmente perdido: última posición conocida
   const rx = 26 * s, ry = 10 * s;           // elipse a ras de suelo, más fina
   // sombra sutil de contacto en el césped
-  dctx.globalAlpha = 0.22; dctx.fillStyle = '#000';
+  const alphaBase = opts.perdido ? 0.45 : 1;
+  dctx.globalAlpha = 0.22 * alphaBase; dctx.fillStyle = '#000';
   dctx.beginPath(); dctx.ellipse(X, Y + 2 * s, rx, ry, 0, 0, Math.PI * 2); dctx.fill();
-  dctx.globalAlpha = 1;
+  dctx.globalAlpha = alphaBase;
   // anillo abierto (hueco arriba para no tapar el cuerpo del jugador)
   dctx.strokeStyle = col; dctx.lineWidth = 3 * s; dctx.lineCap = 'round';
+  if (opts.perdido) dctx.setLineDash([4 * s, 4 * s]); // discontinuo = posición no confirmada ahora mismo
   dctx.shadowColor = 'rgba(0,0,0,0.5)'; dctx.shadowBlur = 4 * s;
   dctx.beginPath();
   dctx.ellipse(X, Y, rx, ry, 0, Math.PI * 0.18, Math.PI * 0.82, true); // arco inferior
@@ -1027,7 +1123,15 @@ function focoJugador(X, Y, s, col, num) {
   dctx.beginPath();
   dctx.ellipse(X, Y, rx, ry, 0, Math.PI * 1.18, Math.PI * 1.82, true); // arco superior partido
   dctx.stroke();
-  dctx.shadowBlur = 0;
+  dctx.shadowBlur = 0; dctx.setLineDash([]);
+  if (opts.seleccionado) {
+    // Anillo exterior de selección, independiente del marcador de perspectiva.
+    dctx.globalAlpha = 1; dctx.strokeStyle = '#fff'; dctx.lineWidth = 1.5 * s;
+    dctx.setLineDash([3 * s, 3 * s]);
+    dctx.beginPath(); dctx.ellipse(X, Y, rx + 6 * s, ry + 4 * s, 0, 0, Math.PI * 2); dctx.stroke();
+    dctx.setLineDash([]);
+  }
+  dctx.globalAlpha = 1;
   // dos "puntas" laterales finas que cierran visualmente el foco (estilo target)
   dctx.restore();
   // Etiqueta de número: pastilla redondeada limpia, anclada arriba-derecha con conector
@@ -1055,7 +1159,13 @@ function pintarUno(t) {
   const X = x => x * W, Y = y => y * H;
   const col = t.col || '#f2c200';
   dctx.strokeStyle = col; dctx.fillStyle = col; dctx.lineWidth = 4 * s; dctx.lineCap = 'round';
-  if (t.tool === 'player') { rastroJugador(t, s); const p = posEnT(t, P.time()); focoJugador(X(p.x), Y(p.y), s, col, t.n); return; }
+  if (t.tool === 'player') {
+    rastroJugador(t, s);
+    const p = posEnT(t, P.time());
+    const opts = { seleccionado: t === fichaSel, perdido: t.trackId != null && tramoPerdido(t, P.time()) };
+    focoJugador(X(p.x), Y(p.y), s, col, t.n, opts);
+    return;
+  }
   if (t.tool === 'pass') {
     const pa = posEnT(t.from, P.time()), pb = posEnT(t.to, P.time());
     const ax = X(pa.x), ay = Y(pa.y), bx = X(pb.x), by = Y(pb.y);
@@ -1157,7 +1267,18 @@ $('galDownloadAll')?.addEventListener('click', () => galeria.forEach((g, i) => s
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'Escape') { setTool(null); return; }
+  if (e.key === 'Escape') { setTool(null); fichaSel = null; repintarTrazos(); return; }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && fichaSel) {
+    trazos = trazos.filter(z => z !== fichaSel);
+    $('tbCursor').textContent = `ficha eliminada`;
+    fichaSel = null; repintarTrazos(); e.preventDefault(); return;
+  }
+  if (e.key.toLowerCase() === 't' && fichaSel && fichaSel.trackId != null) {
+    fichaSel.tracking = !fichaSel.tracking;
+    if (fichaSel.tracking) fichaSel.keys = hornearKeysDesdeTrack(fichaSel.trackId, fichaSel.offset);
+    $('tbCursor').textContent = `J${fichaSel.n}: seguimiento ${fichaSel.tracking ? 'ACTIVADO' : 'DESACTIVADO (ahora editable a mano)'}`;
+    repintarTrazos(); return;
+  }
   const visibles = [...eventos.keys()].filter(k => filtroActivo.has(eventos[k].tipo));
   if (e.key === 'ArrowRight') {
     const next = visibles.find(k => k > selIdx); if (next !== undefined) selectEvent(next, true); e.preventDefault();

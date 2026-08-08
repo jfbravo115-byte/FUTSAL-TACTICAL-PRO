@@ -172,6 +172,7 @@
           <button class="tb" id="drawUndo" title="Deshacer">⤺</button>
           <button class="tb" id="drawClear" title="Borrar todo">🗑</button>
           <button class="tb" id="drawGroup" title="Agrupar 2-5 jugadores seleccionados (Shift+clic sobre sus fichas) en una Unidad Táctica">👥 Agrupar</button>
+          <button class="tb" id="btnDebugTactico" title="Modo depuración: muestra features y scores 3-1/4-0/2-2 de cada Unidad de 4 jugadores">🐞 Debug táctico</button>
           <button class="tb" id="drawSave" title="Guardar este fotograma con los dibujos en la galería">💾 Guardar fotograma</button>
           <button class="tb" id="drawExport" title="Descargar este fotograma como PNG">📸 Descargar</button>
           <button class="tb" id="drawGallery" title="Ver todos los fotogramas guardados">🗂 Galería (<span id="galN">0</span>)</button>
@@ -824,6 +825,11 @@ document.querySelectorAll('.colbtn').forEach(b =>
 $('drawUndo').addEventListener('click', () => { trazos.pop(); repintarTrazos(); });
 $('drawClear').addEventListener('click', () => { trazos = []; numJugador = 1; conectDesde = null; multiSel.length = 0; fichaSel = null; repintarTrazos(); });
 $('drawGroup').addEventListener('click', crearUnidadDesdeSeleccion);
+$('btnDebugTactico').addEventListener('click', () => {
+  debugTactico = !debugTactico;
+  $('btnDebugTactico').classList.toggle('on', debugTactico);
+  repintarTrazos();
+});
 $('drawExport').addEventListener('click', exportarImagen);
 
 // Coordenadas RELATIVAS (0..1): los dibujos se mantienen al cambiar de tamaño
@@ -1034,6 +1040,194 @@ function metricasUnidad(unidad, t) {
   }
   return { centroide, anchura, profundidad, posiciones };
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// Reconocimiento de Estructura Táctica v1 — 3-1 / 4-0 / 2-2 / TRANSICION / DESCONOCIDA
+// Solo para Unidades de EXACTAMENTE 4 jugadores de campo. Reutiliza metricasUnidad,
+// posicionMetrosEnT y tramoPerdido ya existentes — no duplica homografía ni tracking.
+// Capas: FEATURE EXTRACTION → INSTANT SCORES → TEMPORAL AGGREGATION → STATE/HYSTERESIS → RENDER
+// ══════════════════════════════════════════════════════════════════════════
+let debugTactico = false; // toggle global; activa el overlay de depuración
+
+const ESTRUCTURA_CFG = {
+  CLASIFICACION_VENTANA_S: 3.0,        // suavizado de scores antes de decidir
+  ROTACION_VENTANA_S: 2.0,             // ventana corta, solo evidencia de movilidad del 4-0
+  CONFIANZA_MINIMA: 0.55,              // score minimo para considerar un candidato viable
+  MARGEN_DOMINANCIA: 0.15,             // debe superar al segundo por esto para no ser TRANSICION
+  HISTERESIS_TIEMPO_MIN_S: 1.5,        // tiempo que un candidato nuevo debe dominar para confirmarse
+  TTL_PERDIDA_S: 2.0,                  // tiempo que se conserva el ultimo estado si faltan jugadores
+  MIN_INTERVALO_ACTUALIZACION_S: 0.15  // throttling: no recalcular en cada frame de RAF (hasta 60fps)
+};
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+// Posiciones en METROS reales de los miembros de la unidad con tracking valido en t
+// (mismo criterio que ya usa el centroide de metricasUnidad: excluye tramoPerdido).
+function posicionesMetrosValidas(unidad, t) {
+  const miembros = unidad.players.filter(p => trazos.includes(p));
+  const out = [];
+  for (const p of miembros) {
+    if (tramoPerdido(p, t)) continue;
+    const m = posicionMetrosEnT(p.trackId, t);
+    if (m) out.push({ trackId: p.trackId, x: m.x, y: m.y });
+  }
+  return out;
+}
+
+// FEATURE EXTRACTION — geometria pura de un instante, sin componente temporal.
+function extraerFeatures(posiciones) {
+  const n = posiciones.length;
+  const xs = posiciones.map(p => p.x), ys = posiciones.map(p => p.y);
+  const centroid = n ? { x: xs.reduce((a,b)=>a+b,0)/n, y: ys.reduce((a,b)=>a+b,0)/n } : null;
+  const width = n ? Math.max(...ys) - Math.min(...ys) : null;   // lateral (eje Y)
+  const depth = n ? Math.max(...xs) - Math.min(...xs) : null;   // longitudinal (eje X)
+
+  const porX = [...posiciones].sort((a,b) => a.x - b.x);
+  const longitudinalPositions = porX.map(p => p.x);
+  const longitudinalGaps = [];
+  for (let i = 0; i < longitudinalPositions.length - 1; i++) longitudinalGaps.push(longitudinalPositions[i+1] - longitudinalPositions[i]);
+
+  const porY = [...posiciones].sort((a,b) => a.y - b.y);
+  const lateralPositions = porY.map(p => p.y);
+  const lateralGaps = [];
+  for (let i = 0; i < lateralPositions.length - 1; i++) lateralGaps.push(lateralPositions[i+1] - lateralPositions[i]);
+
+  const pairDistances = [];
+  for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++) pairDistances.push(Math.hypot(posiciones[i].x-posiciones[j].x, posiciones[i].y-posiciones[j].y));
+
+  let outlierScore = 0, outlierEnExtremo = false, outlierIdx = -1;
+  if (longitudinalGaps.length) {
+    const sumaGaps = longitudinalGaps.reduce((a,b)=>a+b, 0) || 1;
+    outlierIdx = longitudinalGaps.indexOf(Math.max(...longitudinalGaps));
+    outlierScore = longitudinalGaps[outlierIdx] / sumaGaps;
+    outlierEnExtremo = (outlierIdx === 0 || outlierIdx === longitudinalGaps.length - 1);
+  }
+
+  let symmetryScore = null;
+  if (n && width) {
+    const desviaciones = ys.map(y => Math.abs(y - centroid.y));
+    const asimetria = desviaciones.reduce((a,b)=>a+b,0) / n / (width/2 || 1);
+    symmetryScore = Math.max(0, 1 - asimetria);
+  }
+
+  return { centroid, width, depth, longitudinalPositions, lateralPositions, longitudinalGaps, lateralGaps,
+           pairDistances, outlierScore, outlierEnExtremo, outlierIdx, symmetryScore, validPlayers: n };
+}
+
+// INSTANT SCORES — features del frame + ventana corta reciente (solo para movilidad 4-0).
+function scoresInstantaneos(features, historialCorto) {
+  const scores = { '3-1': 0, '4-0': 0, '2-2': 0 };
+  if (!features || features.validPlayers !== 4) return scores;
+  const { longitudinalGaps: g, depth, width, outlierScore, outlierEnExtremo } = features;
+  if (g.length !== 3 || !depth || depth <= 0) return scores;
+
+  const depthNorm = Math.min(1, depth / 15);
+  const widthNorm = Math.min(1, (width||0) / 12);
+
+  if (outlierEnExtremo) {
+    const idxOutlier = features.outlierIdx;
+    const otrosGaps = g.filter((_, i) => i !== idxOutlier);
+    const dispersionBase = otrosGaps.reduce((a,b)=>a+b, 0) / 2 / 10;
+    scores['3-1'] = clamp01(0.55*outlierScore + 0.30*(1-Math.min(1,dispersionBase)) + 0.15*widthNorm) * clamp01(0.4 + 0.6*depthNorm);
+  }
+  if (!outlierEnExtremo || features.outlierIdx === 1) {
+    const gapMedioRatio = g[1] / (g.reduce((a,b)=>a+b,0) || 1);
+    const dispersionPareja1 = g[0]/10, dispersionPareja2 = g[2]/10;
+    scores['2-2'] = clamp01(0.55*gapMedioRatio + 0.30*(1-Math.min(1,(dispersionPareja1+dispersionPareja2)/2)) + 0.15*widthNorm) * clamp01(0.4 + 0.6*depthNorm);
+  }
+  const equilibrio = 1 - outlierScore;
+  const ocupacion = clamp01(0.5*depthNorm + 0.5*widthNorm);
+  let movilidad = 0;
+  if (historialCorto && historialCorto.length >= 3) {
+    let cambios = 0;
+    for (let i = 1; i < historialCorto.length; i++) {
+      const a = historialCorto[i-1].orden, b = historialCorto[i].orden;
+      if (a && b && a.join(',') !== b.join(',')) cambios++;
+    }
+    movilidad = clamp01(cambios / (historialCorto.length - 1) * 2);
+  }
+  scores['4-0'] = clamp01(0.40*equilibrio + 0.25*ocupacion + 0.35*movilidad) * (equilibrio > 0.35 ? 1 : 0.3);
+  return scores;
+}
+
+// TEMPORAL AGGREGATION + STATE/HYSTERESIS — con estado, una instancia por unidad.
+function actualizarEstructuraUnidad(unidad, t) {
+  if (!unidad.estructura) {
+    unidad.estructura = { bufferFeatures: [], estadoActual: null, tiempoUltimaConfirmacion: null,
+      candidatoPendiente: null, tiempoInicioCandidato: null, ultimoTiempoValido: null,
+      ultimaConfianzaValida: null, historial: [], ultimaActualizacion: -Infinity, ultimoResultado: null };
+  }
+  const E = unidad.estructura, CFG = ESTRUCTURA_CFG;
+
+  if (Math.abs(t - E.ultimaActualizacion) < CFG.MIN_INTERVALO_ACTUALIZACION_S && E.ultimoResultado) return E.ultimoResultado;
+  E.ultimaActualizacion = t;
+
+  const posiciones = posicionesMetrosValidas(unidad, t);
+  if (posiciones.length !== 4) {
+    let estructuraFinal = 'DESCONOCIDA';
+    if (E.ultimoTiempoValido != null && (t - E.ultimoTiempoValido) <= CFG.TTL_PERDIDA_S && E.estadoActual) estructuraFinal = E.estadoActual;
+    const resultado = { estructura: estructuraFinal, confianza: E.ultimaConfianzaValida || 0, scores: {}, features: null, motivo: 'jugadores_insuficientes' };
+    E.ultimoResultado = resultado;
+    return resultado;
+  }
+  E.ultimoTiempoValido = t;
+
+  const features = extraerFeatures(posiciones);
+  const ordenActual = [...posiciones].sort((a,b)=>a.x-b.x).map(p=>p.trackId);
+  E.bufferFeatures.push({ t, features, orden: ordenActual });
+  const tCorte = t - CFG.CLASIFICACION_VENTANA_S;
+  E.bufferFeatures = E.bufferFeatures.filter(f => f.t >= tCorte);
+
+  const acumulado = { '3-1': 0, '4-0': 0, '2-2': 0 };
+  let cuenta = 0;
+  for (const f of E.bufferFeatures) {
+    const hCorta = E.bufferFeatures.filter(x => x.t >= f.t - CFG.ROTACION_VENTANA_S && x.t <= f.t);
+    const s = scoresInstantaneos(f.features, hCorta);
+    acumulado['3-1'] += s['3-1']; acumulado['4-0'] += s['4-0']; acumulado['2-2'] += s['2-2'];
+    cuenta++;
+  }
+  const scoresSuavizados = cuenta ? { '3-1': acumulado['3-1']/cuenta, '4-0': acumulado['4-0']/cuenta, '2-2': acumulado['2-2']/cuenta } : { '3-1':0,'4-0':0,'2-2':0 };
+
+  const entradas = Object.entries(scoresSuavizados).sort((a,b) => b[1]-a[1]);
+  const [nombreGanador, scoreGanador] = entradas[0];
+  const scoreSegundo = entradas[1][1];
+  let ganador = null;
+  if (scoreGanador >= CFG.CONFIANZA_MINIMA && (scoreGanador - scoreSegundo) >= CFG.MARGEN_DOMINANCIA) ganador = nombreGanador;
+
+  let estructuraMostrada;
+  if (E.estadoActual === null) {
+    if (ganador) {
+      E.estadoActual = ganador; E.tiempoUltimaConfirmacion = t;
+      E.historial.push({ t, from: null, to: ganador, confidence: +scoreGanador.toFixed(2) });
+      estructuraMostrada = ganador;
+    } else estructuraMostrada = 'TRANSICION';
+  } else if (ganador === E.estadoActual) {
+    E.candidatoPendiente = null; E.tiempoUltimaConfirmacion = t;
+    estructuraMostrada = E.estadoActual;
+  } else if (ganador) {
+    if (E.candidatoPendiente !== ganador) { E.candidatoPendiente = ganador; E.tiempoInicioCandidato = t; }
+    if ((t - E.tiempoInicioCandidato) >= CFG.HISTERESIS_TIEMPO_MIN_S) {
+      const anterior = E.estadoActual;
+      E.estadoActual = ganador; E.tiempoUltimaConfirmacion = t; E.candidatoPendiente = null;
+      E.historial.push({ t, from: anterior, to: ganador, confidence: +scoreGanador.toFixed(2) });
+      estructuraMostrada = ganador;
+    } else estructuraMostrada = 'TRANSICION';
+  } else {
+    E.candidatoPendiente = null;
+    estructuraMostrada = 'TRANSICION';
+  }
+
+  E.ultimaConfianzaValida = scoreGanador;
+  const confianzaMostrada = scoresSuavizados[estructuraMostrada] !== undefined ? scoresSuavizados[estructuraMostrada] : scoreGanador;
+  const resultado = {
+    estructura: estructuraMostrada, confianza: +confianzaMostrada.toFixed(2),
+    scores: { '3-1': +scoresSuavizados['3-1'].toFixed(2), '4-0': +scoresSuavizados['4-0'].toFixed(2), '2-2': +scoresSuavizados['2-2'].toFixed(2) },
+    features, motivo: null
+  };
+  E.ultimoResultado = resultado;
+  return resultado;
+}
+
 // Hit-test sobre el marcador de centroide de cada unidad visible (para seleccionarla).
 function unidadEnPunto(px, py) {
   const tNow = P.time();
@@ -1333,6 +1527,36 @@ function pintarUnidad(unidad, s, W, H) {
     dctx.fillText(txt.join(' · '), cx, cy + 20 * s);
     dctx.restore();
   }
+  if (unidad.players.length === 4) pintarEstructuraUnidad(unidad, m, s, W, H);
+}
+// RENDER — badge compacto siempre visible; overlay DEBUG solo si debugTactico esta activo.
+// Solo aplica a unidades de EXACTAMENTE 4 jugadores de campo (spec de v1).
+function pintarEstructuraUnidad(unidad, m, s, W, H) {
+  const resultado = actualizarEstructuraUnidad(unidad, P.time());
+  const X = x => x * W, Y = y => y * H;
+  const cx = m.centroide ? X(m.centroide.x) : W/2, cy = m.centroide ? Y(m.centroide.y) : H/2;
+
+  if (!debugTactico) {
+    dctx.save();
+    dctx.font = `700 ${Math.round(10*s)}px Inter`; dctx.textAlign = 'center';
+    dctx.fillStyle = (resultado.estructura === 'TRANSICION' || resultado.estructura === 'DESCONOCIDA') ? 'rgba(255,255,255,0.55)' : '#facc15';
+    const txt = resultado.estructura === 'TRANSICION' ? 'TRANSICIÓN'
+              : resultado.estructura === 'DESCONOCIDA' ? 'DESCONOCIDA'
+              : `${resultado.estructura} · ${Math.round(resultado.confianza*100)}%`;
+    dctx.fillText(txt, cx, cy + (unidad.showMetrics ? 34 : 20) * s);
+    dctx.restore();
+    return;
+  }
+  dctx.save();
+  dctx.font = `600 ${Math.round(8*s)}px monospace`; dctx.textAlign = 'left'; dctx.fillStyle = '#22c55e';
+  const sc = resultado.scores || {};
+  const lineas = [
+    `válidos: ${resultado.features ? resultado.features.validPlayers : 0}/4  ${resultado.motivo||''}`,
+    `3-1: ${(sc['3-1']??0).toFixed(2)}  4-0: ${(sc['4-0']??0).toFixed(2)}  2-2: ${(sc['2-2']??0).toFixed(2)}`,
+    `FINAL: ${resultado.estructura} (${Math.round(resultado.confianza*100)}%)`
+  ];
+  lineas.forEach((l,i) => dctx.fillText(l, cx + 22*s, cy - 8*s + i*11*s));
+  dctx.restore();
 }
 function pintarUno(t) {
   const W = draw.width, H = draw.height, s = escala();

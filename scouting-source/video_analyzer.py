@@ -48,6 +48,24 @@ from ultralytics import YOLO
 
 
 # ── Clasificador v10: por cercania de color (espacio LAB) ────────────────────
+def _serializar_refs(refs):
+    if refs is None:
+        return None
+    try:
+        import numpy as _np
+        def conv(v):
+            if isinstance(v, _np.ndarray):
+                return v.tolist()
+            if isinstance(v, dict):
+                return {k: conv(vv) for k, vv in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [conv(x) for x in v]
+            return v
+        return conv(refs)
+    except Exception:
+        return None
+
+
 def medir_referencias_lab(video_path, t_s, muestras_str):
     """muestras_str: 'local:x,y;local:x,y;rival:x,y;gklocal:x,y;gkrival:x,y'
     Mide el color LAB mediano de cada camiseta en el frame indicado."""
@@ -334,7 +352,8 @@ class VideoAnalyzer:
                 conf=self.cfg["conf_threshold"],
                 classes=[self.cfg["person_class_id"]],
                 device=self.cfg["device"],
-                tracker="bytetrack.yaml",
+                tracker="/workspace/botsort_gmc_none.yaml",
+                imgsz=1280,
             )
 
             tracks = self._extract_tracks(results, frame, t_video)
@@ -660,6 +679,14 @@ class VideoAnalyzer:
             "pista": {"largo_m": self.cfg["pitch_len_m"],
                       "ancho_m": self.cfg["pitch_wid_m"]} if self.in_meters else None,
             "esquinas_px": self.corners_px if self.in_meters else None,
+            "calibracion": {
+                "esquinas_px": self.corners_px if self.in_meters else None,
+                "muestras_t": getattr(self, "_calib_muestras_t", None),
+                "muestras": getattr(self, "_calib_muestras_raw", None),
+                "local": getattr(self, "_calib_local", None),
+                "rival": getattr(self, "_calib_rival", None),
+                "refs_lab": _serializar_refs(getattr(self, "refs", None)),
+            },
             "resumen_eventos": dict(counts),
             "eventos": sorted(self.events, key=lambda e: e["t"]),
             "formaciones": self.formations,
@@ -731,6 +758,10 @@ def main():
     analyzer = VideoAnalyzer(CFG, team_colors, homography=H, corners_px=corners if args.corners else None)
     if args.muestras:
         analyzer.refs = medir_referencias_lab(args.video, args.muestras_t, args.muestras)
+        analyzer._calib_muestras_t = args.muestras_t
+        analyzer._calib_muestras_raw = args.muestras
+        analyzer._calib_local = args.local
+        analyzer._calib_rival = args.rival
         print("Clasificador v10 (cercania LAB) activo. Referencias medidas:")
         for k, v in analyzer.refs.items():
             print(f"  {k}: LAB=({v[0]:.0f}, {v[1]:.0f}, {v[2]:.0f})")

@@ -380,11 +380,14 @@ class VideoAnalyzer:
                 cx, cy = px_to_court(self.H, foot_x, foot_y)
                 # Descartar detecciones claramente fuera de pista (gradas, banquillos)
                 L, W = self.cfg["pitch_len_m"], self.cfg["pitch_wid_m"]
-                if not (-4.0 <= cx <= L + 4.0 and -4.0 <= cy <= W + 4.0):
+                ROI_MARGIN_M = 0.5  # ROI v1 validado: antes 4.0
+                if not (-ROI_MARGIN_M <= cx <= L + ROI_MARGIN_M and -ROI_MARGIN_M <= cy <= W + ROI_MARGIN_M):
                     continue
+                en_borde = cx < 0.0 or cx > L or cy < 0.0 or cy > W
                 cx = min(max(cx, 0.0), L)
                 cy = min(max(cy, 0.0), W)
             else:
+                en_borde = False
                 h, w = frame.shape[:2]
                 cx = foot_x / w * 100.0
                 cy = foot_y / h * 100.0
@@ -406,7 +409,10 @@ class VideoAnalyzer:
                 self.gk_xs[base_team].append(cx)
                 stable_team = base_team
 
-            tracks.append({"id": int(tid), "x": cx, "y": cy, "team": stable_team, "gk": is_gk})
+            track_dict = {"id": int(tid), "x": cx, "y": cy, "team": stable_team, "gk": is_gk}
+            if en_borde:
+                track_dict["borde"] = True
+            tracks.append(track_dict)
 
             gx, gy = self._grid_cell(cx, cy)
             if stable_team in self.heat_team:
@@ -560,13 +566,15 @@ class VideoAnalyzer:
         return {"posible_portero_jugador": bool(none_left or none_right)}
 
     def _store_sample(self, tracks, t):
+        def _punto(tr):
+            p = {"id": tr["id"], "x": round(tr["x"], 1),
+                 "y": round(tr["y"], 1), "eq": tr["team"][0]}
+            if tr.get("borde"):
+                p["borde"] = True
+            return p
         self.samples.append({
             "t": round(t, 1),
-            "p": [
-                {"id": tr["id"], "x": round(tr["x"], 1),
-                 "y": round(tr["y"], 1), "eq": tr["team"][0]}  # l/r/d
-                for tr in tracks
-            ],
+            "p": [_punto(tr) for tr in tracks],
         })
 
     def _store_formation(self, tracks, t):

@@ -123,7 +123,7 @@ def classify_team_lab(frame_bgr, x1, y1, x2, y2, refs, max_dist=45.0):
 # ── Configuración ─────────────────────────────────────────────────────────────
 CFG = {
     "model_path": "yolov8s.pt",     # offline: podemos permitirnos el modelo "s"
-    "conf_threshold": 0.35,
+    "conf_threshold": 0.10,
     "person_class_id": 0,
     "device": 0,
 
@@ -352,7 +352,7 @@ class VideoAnalyzer:
                 conf=self.cfg["conf_threshold"],
                 classes=[self.cfg["person_class_id"]],
                 device=self.cfg["device"],
-                tracker="/workspace/botsort_gmc_none.yaml",
+                tracker="/workspace/botsort_lowconf_recovery.yaml",
                 imgsz=1280,
             )
 

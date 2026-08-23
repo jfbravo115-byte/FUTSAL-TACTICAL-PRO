@@ -165,6 +165,14 @@ let targetActivo = 0;
 // ── Paso 1: servidor ─────────────────────────────────────────────
 // Recordar la URL del servidor entre sesiones
 try { const u = localStorage.getItem('srv_url'); if (u) $('inServer').value = u; } catch (e) {}
+  try {
+    const qp = new URLSearchParams(location.search);
+    const srvParam = qp.get("srv");
+    if (srvParam) {
+      $("inServer").value = srvParam;
+      setTimeout(() => { $("btnConectar").click(); }, 300);
+    }
+  } catch (e) {}
 $('btnConectar').addEventListener('click', async () => {
   SRV = $('inServer').value.trim().replace(/\/+$/, '');
   if (!SRV.startsWith('http')) { $('srvEstado').innerHTML = '<span class="err">URL no válida</span>'; return; }

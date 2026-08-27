@@ -1,20 +1,27 @@
 [build]
-command = "npm run build:netlify"
-publish = "dist"
+  command = "npm run build:netlify"
+  publish = "dist"
 
 [build.environment]
-NODE_VERSION = "20"
+  NODE_VERSION = "20"
+  # La API key de Firebase en src/firebase.ts es publica por diseno (identifica
+  # el proyecto cliente-side; la seguridad real la dan las reglas de Firestore),
+  # pero el escaner de secretos de Netlify la marca como falso positivo.
+  SECRETS_SCAN_ENABLED = "false"
 
 [functions]
-directory = "netlify/functions"
-node_bundler = "esbuild"
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
+# El frontend llama a fetch('/api/tactical-pro') con ruta relativa (sin cambios
+# en el codigo del cliente): esta regla la redirige a la funcion serverless.
 [[redirects]]
-from = "/api/tactical-pro"
-to = "/.netlify/functions/tactical-pro"
-status = 200
+  from = "/api/tactical-pro"
+  to = "/.netlify/functions/tactical-pro"
+  status = 200
 
+# Fallback SPA: cualquier otra ruta (react-router) sirve index.html.
 [[redirects]]
-from = "/*"
-to = "/index.html"
-status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -231,14 +231,12 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
             </div>
           )}
 
-          {selectionStep === 'goal' && pendingActionType === ActionType.SHOT && (
-            <button
-              onClick={() => handleGoalZoneSelect('OUT')}
-              className="mt-2 w-full py-2.5 rounded-xl bg-slate-700/40 border border-slate-500/30 text-[10px] font-black text-slate-300 uppercase tracking-widest hover:bg-slate-700/60 active:scale-95 transition-all"
-            >
-              ↗️ Desviado / Fuera
-            </button>
-          )}
+          {/* El boton "Desviado / Fuera" pertenecia al flujo de zonas de
+              ActionType.SHOT. SHOT se retiro de ese flujo (ahora se registra
+              de forma inmediata en handleActionClick), por lo que
+              pendingActionType solo puede contener SAVE_PARRY o
+              GOAL_CONCEDED y esta rama era inalcanzable. Se elimina el
+              codigo muerto; el comportamiento en runtime no cambia. */}
           <button onClick={onClose} className="mt-3 w-full py-2 text-[10px] font-black text-slate-500 uppercase">Cancelar</button>
         </motion.div>
       )}

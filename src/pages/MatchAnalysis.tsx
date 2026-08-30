@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { getPartido } from '../services/partidosService';
 import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -30,9 +29,8 @@ export default function MatchAnalysis() {
   useEffect(() => {
     if (!matchId) return;
     const fetch = async () => {
-      const d = await getDoc(doc(db, 'partidos', matchId));
-      if (d.exists()) {
-        const matchData = { id: d.id, ...d.data() } as SavedMatch;
+      const matchData = await getPartido(matchId);
+      if (matchData) {
         setMatch(matchData);
         // Auto-generate Tactical PRO if not already available
         if (!matchData.tacticalAnalysis) {

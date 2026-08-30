@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, orderBy, where, limit, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { listPartidos, deletePartidos } from '../services/partidosService';
 import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
@@ -44,13 +43,7 @@ export default function Dashboard() {
     if (!user) { setFetching(false); return; }
     const fetchMatches = async () => {
       try {
-        const q = query(
-          collection(db, 'partidos'),
-          orderBy('timestamp', 'desc'),
-          limit(50)
-        );
-        const sn = await getDocs(q);
-        const list = sn.docs.map(d => ({ id: d.id, ...d.data() } as SavedMatch));
+        const list = await listPartidos();
         setMatches(list);
       } catch (err) {
         console.error(err);
@@ -73,7 +66,7 @@ export default function Dashboard() {
     if (selected.size === 0) return;
     setDeleting(true);
     try {
-      await Promise.all([...selected].map(id => deleteDoc(doc(db, 'partidos', id))));
+      await deletePartidos([...selected]);
       setMatches(prev => prev.filter(m => !selected.has(m.id)));
       setSelected(new Set());
       setSelectMode(false);

@@ -62,6 +62,11 @@ export type PlayerStats = {
   shotsOffTarget: number;
   saves: number;
   conceded: number;
+  stealsWithPossession?: number;
+  stealsClearance?: number;
+  lossesBadPass?: number;
+  lossesBadDribble?: number;
+  lossesBadControl?: number;
 };
 
 export type Player = {

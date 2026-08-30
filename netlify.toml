@@ -20,6 +20,18 @@
   to = "/.netlify/functions/tactical-pro"
   status = 200
 
+
+# CRUD de Partidos — Netlify Database (@netlify/database, NETLIFY_DB_URL)
+[[redirects]]
+  from = "/api/partidos/*"
+  to = "/.netlify/functions/partidos"
+  status = 200
+
+[[redirects]]
+  from = "/api/partidos"
+  to = "/.netlify/functions/partidos"
+  status = 200
+
 # Fallback SPA: cualquier otra ruta (react-router) sirve index.html.
 [[redirects]]
   from = "/*"

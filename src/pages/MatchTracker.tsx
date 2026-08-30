@@ -65,8 +65,7 @@ import { TacticalReportModal } from "../components/TacticalReportModal";
 
 import Markdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
-import { collection, addDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { savePartido, getPartido } from "../services/partidosService";
 
 
 
@@ -1319,7 +1318,7 @@ export default function MatchTracker() {
             timestamp: new Date().toISOString(),
             tacticalAnalysis: data.analysis,
           }));
-          await addDoc(collection(db, 'partidos'), cleanData);
+          await savePartido(cleanData);
         } catch (saveErr) {
           console.warn('No se pudo guardar en Firestore:', saveErr);
         }
@@ -1509,7 +1508,7 @@ export default function MatchTracker() {
     // Auto-save to Firestore
     try {
       const cleanData = JSON.parse(JSON.stringify(finalMatchData));
-      await addDoc(collection(db, 'partidos'), cleanData);
+      await savePartido(cleanData);
       console.log('✅ Partido guardado automáticamente');
     } catch (err) {
       console.warn('⚠️ No se pudo guardar el partido:', err);
@@ -1634,10 +1633,8 @@ export default function MatchTracker() {
       sessionStorage.removeItem('pendingPDFExport');
       // Load match from Firestore and trigger export
       const loadAndExport = async () => {
-        const { getDoc, doc } = await import('firebase/firestore');
-        const d = await getDoc(doc(db, 'partidos', matchId));
-        if (!d.exists()) return;
-        const savedMatch = { id: d.id, ...d.data() } as any;
+        const savedMatch = await getPartido(matchId);
+        if (!savedMatch) return;
         // Restore match data
         setMatchData(savedMatch);
         setReportType(type === 'team' ? 'TEAM' : Role.GOALKEEPER);
@@ -2676,7 +2673,7 @@ export default function MatchTracker() {
               Nueva Acción
             </button>
             <button
-              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id, isOpponent, {})}
+              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id)}
               className={`py-2.5 ${isOpponent ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} ${isOpponent ? 'text-red-300' : 'text-amber-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
             >
               Parada

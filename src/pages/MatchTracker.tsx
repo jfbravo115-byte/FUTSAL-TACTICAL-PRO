@@ -2676,7 +2676,7 @@ export default function MatchTracker() {
               Nueva Acción
             </button>
             <button
-              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id, isOpponent, {})}
+              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id)}
               className={`py-2.5 ${isOpponent ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} ${isOpponent ? 'text-red-300' : 'text-amber-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
             >
               Parada

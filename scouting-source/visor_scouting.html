@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visor de Scouting — Futsal Commander Pro</title>
+<style>
+  :root {
+    --bg: #0A0B0E; --panel: #12141A; --panel2: #1A1D26; --border: rgba(255,255,255,0.08);
+    --txt: #e2e8f0; --muted: #64748b; --blue: #3b82f6; --red: #ef4444; --green: #22c55e;
+    --amber: #f59e0b; --cyan: #06b6d4; --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--txt); font-family: 'Inter', -apple-system, sans-serif; min-height: 100vh; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: var(--panel); }
+  header h1 { font-size: 15px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; font-style: italic; }
+  header h1 span { color: var(--blue); }
+  .loaders { display: flex; gap: 8px; flex-wrap: wrap; }
+  .loadbtn { position: relative; overflow: hidden; background: var(--panel2); border: 1px solid var(--border); color: var(--txt); padding: 8px 14px; border-radius: 10px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; transition: all .15s; }
+  .loadbtn:hover { border-color: var(--blue); color: var(--blue); }
+  .loadbtn.ok { border-color: var(--green); color: var(--green); }
+  .loadbtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  #inYT { background: var(--panel2); border: 1px solid var(--border); color: var(--txt); padding: 8px 12px; border-radius: 10px; font-size: 11px; outline: none; width: 220px; }
+  #inYT:focus { border-color: var(--red); }
+  #ytwrap { position: relative; width: 100%; aspect-ratio: 16/9; max-height: 60vh; background: #000; }
+  #ytwrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+  main { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px 22px; max-width: 1600px; margin: 0 auto; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+
+  .videowrap { position:relative; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  video { width: 100%; display: block; background: #000; max-height: 60vh; }
+  .placeholder { aspect-ratio: 16/9; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+  .placeholder b { font-size: 34px; }
+
+  /* Línea temporal */
+  .timeline { padding: 4px 2px 8px; }
+  .tl-ev { position:absolute; top:2px; width:4px; height:22px; border-radius:2px; transform:translateX(-2px); cursor:pointer; opacity:0.8; }
+  .tl-ev:hover { opacity:1; width:6px; }
+  .tl-ev.sel { outline:2px solid #fff; opacity:1; }
+  .tl-track { position: relative; height: 42px; background: var(--panel2); border-radius: 10px; border: 1px solid var(--border); cursor: pointer; }
+  .tl-cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; z-index: 5; pointer-events: none; box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+  .tl-ev { position: absolute; top: 4px; bottom: 4px; width: 8px; border-radius: 3px; cursor: pointer; transition: transform .1s; transform: translateX(-50%); }
+  .tl-ev:hover { transform: translateX(-50%) scaleY(1.15) scaleX(1.5); z-index: 4; }
+  .tl-ev.sel { outline: 2px solid #fff; z-index: 4; }
+  .tl-labels { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); font-family: monospace; margin-top: 4px; }
+
+  /* Pista virtual sincronizada */
+  .pitchcard { margin: 0 16px 16px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+  .pitchcard h3, .panel h3 { font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.2em; color: var(--muted); margin-bottom: 8px; }
+  canvas { width: 100%; border-radius: 8px; display: block; }
+
+  /* Panel derecho */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 90px); overflow-y: auto; }
+  .filters { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); padding: 4px 9px; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+  .chip.on { color: #fff; border-color: currentColor; }
+  .evlist { display: flex; flex-direction: column; gap: 6px; }
+  .ev { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 9px 11px; cursor: pointer; transition: all .12s; display: flex; flex-direction: column; gap: 6px; }
+  .ev:hover { border-color: rgba(255,255,255,0.25); }
+  .ev.sel { border-color: var(--blue); background: rgba(59,130,246,0.08); }
+  .ev-top { display: flex; align-items: center; gap: 8px; }
+  .ev-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+  .ev-t { font-family: monospace; font-size: 11px; font-weight: 800; color: var(--amber); }
+  .ev-tipo { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; flex: 1; }
+  .ev-extra { font-size: 8px; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+  .ev-edit { display: none; gap: 6px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--border); padding-top: 7px; }
+  .ev.sel .ev-edit { display: flex; }
+  .ev-edit select, .ev-edit input[type=text] { background: var(--bg); color: var(--txt); border: 1px solid var(--border); border-radius: 8px; padding: 5px 7px; font-size: 10px; font-weight: 700; outline: none; }
+  .ev-edit input[type=text] { flex: 1; min-width: 90px; }
+  .ev-clave { background: rgba(234,179,8,0.1); color: #a16207; border: 1px solid rgba(234,179,8,0.3); border-radius: 8px; padding: 5px 8px; font-size: 9px; font-weight: 900; cursor: pointer; }
+  .ev-clave.on { background: rgba(234,179,8,0.3); color: #fde047; }
+  .tagrow { display: flex; gap: 4px; flex-wrap: wrap; width: 100%; }
+  .tag { font-size: 8px; font-weight: 900; padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+  .tag.on { background: rgba(59,130,246,0.25); color: #93c5fd; border-color: #3b82f6; }
+  .ev-del { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 5px 8px; font-size: 9px; font-weight: 900; cursor: pointer; text-transform: uppercase; }
+  .minipitch-wrap { width: 100%; display: flex; flex-direction: column; gap: 3px; }
+  .minipitch { border-radius: 8px; cursor: crosshair; width: 100%; max-width: 260px; display: block; }
+  .minipitch-hint { font-size: 8px; color: var(--muted); text-transform: uppercase; font-weight: 800; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 18px; font-weight: 900; }
+  .stat span { font-size: 8px; color: var(--muted); text-transform: uppercase; font-weight: 800; letter-spacing: 0.06em; }
+  .btnrow { display: flex; gap: 6px; }
+  .btn { flex: 1; background: var(--panel2); border: 1px solid var(--border); color: var(--txt); padding: 9px; border-radius: 10px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+  .btn.primary { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: var(--blue); }
+  .btn:hover { filter: brightness(1.25); }
+  .heatwrap { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hint { font-size: 9px; color: var(--muted); line-height: 1.5; }
+  kbd { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 9px; font-family: monospace; }
+  
+  
+  
+  
+  
+  
+  
+  .drawlayer.activo { pointer-events:auto; cursor:crosshair; }
+  .colbtn { width:20px; height:20px; border-radius:50%; border:2px solid var(--border); cursor:pointer; padding:0; }
+  .colbtn.on { border-color:#fff; box-shadow:0 0 0 2px var(--blue); }
+
+  /* Barra de telestración: overlay FIJO sobre el vídeo, siempre visible */
+  .videowrap { position: relative; }
+  .videowrap:fullscreen { background:#000; display:flex; align-items:center; justify-content:center; }
+  .videowrap:fullscreen video { max-height:100vh; max-width:100vw; }
+  .telebar { display:flex; flex-direction:column; gap:6px;
+    background:#12141a; border:1px solid rgba(255,255,255,0.15);
+    border-radius:12px; padding:10px 12px; margin-top:8px; }
+  .tb-row { display:flex; gap:5px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .tb { background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12);
+    color:#e2e8f0; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800;
+    cursor:pointer; white-space:nowrap; }
+  .tb:hover { background:rgba(255,255,255,0.18); }
+  .tb.tool.on { background:#f2c200; color:#000; border-color:#f2c200; }
+  .tb-sep { width:1px; height:20px; background:rgba(255,255,255,0.15); margin:0 3px; }
+  .tb-cursor { font-family:monospace; font-size:10px; color:#94a3b8; margin-left:4px; }
+  .colbtn { width:22px; height:22px; border-radius:50%; border:2px solid rgba(255,255,255,0.3); cursor:pointer; padding:0; }
+  .colbtn.on { border-color:#fff; box-shadow:0 0 0 2px #f2c200; }
+  .videoinner { position:relative; width:100%; aspect-ratio:16/9; background:#000; }
+  .videoinner video { display:block; width:100%; height:100%; object-fit:contain; }
+  .drawlayer { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+  .drawlayer.activo { pointer-events:auto; cursor:crosshair; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Visor de <span>Scouting</span> · Futsal Commander Pro</h1>
+  <div class="loaders">
+    <label class="loadbtn" id="btnVideo">🎬 Vídeo local<input type="file" accept="video/*" id="inVideo"></label>
+    <input type="text" id="inYT" placeholder="…o pega un enlace de YouTube">
+    <button class="loadbtn" id="btnYT">▶️ YouTube</button>
+    <label class="loadbtn" id="btnJson">📊 Análisis JSON<input type="file" accept=".json,application/json" id="inJson"></label>
+  </div>
+</header>
+
+<main>
+  <!-- Columna izquierda: vídeo + timeline + pista -->
+  <div>
+    <div class="videowrap">
+      <div class="placeholder" id="ph"><b>🎬</b>Carga el vídeo del partido (archivo o YouTube) y el JSON de análisis</div>
+      <div class="videoinner" id="videoinner" style="display:none">
+        <video id="video" playsinline></video>
+        <canvas id="draw" class="drawlayer"></canvas>
+      </div>
+      <div id="ytwrap" style="display:none"><div id="ytmount"></div></div>
+      <div id="analisisBar" class="telebar" style="display:none">
+        <div class="tb-row">
+          <button class="tb" data-rate="0.25">0.25×</button>
+          <button class="tb" data-rate="0.5">0.5×</button>
+          <button class="tb on" data-rate="1">1×</button>
+          <span class="tb-sep"></span>
+          <button class="tb" id="fprev" title="Fotograma atrás (,)">◀|</button>
+          <button class="tb" id="fnext" title="Fotograma adelante (.)">|▶</button>
+          <button class="tb" id="btnLoop" title="Repetir la jugada en bucle">🔁</button>
+          <span class="tb-sep"></span>
+          <button class="tb" id="btnFS" title="Pantalla completa">⛶ Ampliar</button>
+        </div>
+        <div class="tb-row">
+          <button class="tb tool" data-tool="player" title="Marcar/seguir jugador: púlsalo, avanza el vídeo y vuelve a marcarlo en su nueva posición">◎ Seguir jugador</button>
+          <button class="tb tool" data-tool="connect" title="Unir dos jugadores; la línea los sigue">↔ Unir</button>
+          <button class="tb tool" data-tool="arrow" title="Flecha de pase/movimiento">➤ Flecha</button>
+          <button class="tb tool" data-tool="curve" title="Pase curvo">↝ Curva</button>
+          <button class="tb tool" data-tool="zone" title="Sombrear zona">▨ Zona</button>
+          <button class="tb tool" data-tool="free" title="Dibujo libre">✎ Libre</button>
+          <span class="tb-sep"></span>
+          <button class="colbtn on" data-col="#f2c200" style="background:#f2c200"></button>
+          <button class="colbtn" data-col="#2196f3" style="background:#2196f3"></button>
+          <button class="colbtn" data-col="#ef4444" style="background:#ef4444"></button>
+          <button class="colbtn" data-col="#22c55e" style="background:#22c55e"></button>
+          <button class="colbtn" data-col="#ffffff" style="background:#ffffff"></button>
+          <span class="tb-sep"></span>
+          <button class="tb" id="drawUndo" title="Deshacer">⤺</button>
+          <button class="tb" id="drawClear" title="Borrar todo">🗑</button>
+          <button class="tb" id="drawGroup" title="Agrupar 2-5 jugadores seleccionados (Shift+clic sobre sus fichas) en una Unidad Táctica">👥 Agrupar</button>
+          <button class="tb" id="btnDebugTactico" title="Modo depuración: muestra features y scores 3-1/4-0/2-2 de cada Unidad de 4 jugadores">🐞 Debug táctico</button>
+          <button class="tb" id="drawSave" title="Guardar este fotograma con los dibujos en la galería">💾 Guardar fotograma</button>
+          <button class="tb" id="drawExport" title="Descargar este fotograma como PNG">📸 Descargar</button>
+          <button class="tb" id="drawGallery" title="Ver todos los fotogramas guardados">🗂 Galería (<span id="galN">0</span>)</button>
+          <span class="tb-cursor" id="tbCursor"></span>
+        </div>
+      </div>
+      <div class="timeline">
+        <div id="tltrack" style="position:relative; height:26px; background:rgba(255,255,255,0.06); border-radius:8px; cursor:pointer; margin-top:8px;">
+          <div id="tlcursor" style="position:absolute; top:-2px; width:2px; height:30px; background:#fff; left:0;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--muted); margin-top:3px;">
+          <span>0:00</span><span id="tlmid"></span><span id="tlend"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="galModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100; overflow:auto; padding:20px;">
+    <div style="max-width:1000px; margin:0 auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="color:#fff; margin:0;">🗂 Fotogramas guardados</h2>
+        <div>
+          <button class="tb" id="galDownloadAll" title="Descargar todos">⬇ Descargar todos</button>
+          <button class="tb" id="galClose">✕ Cerrar</button>
+        </div>
+      </div>
+      <div id="galGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px;"></div>
+      <p style="color:#94a3b8; font-size:12px; margin-top:16px;">Los fotogramas se guardan en este navegador. Para el informe: descárgalos y añádelos donde quieras, o mételos en tu carpeta del rival.</p>
+    </div>
+  </div>
+
+  <!-- Columna derecha -->
+  <div class="panel" id="panel" style="display:none">
+    <div class="stats" id="stats"></div>
+    <div>
+      <h3>Filtrar por tipo</h3>
+      <div class="filters" id="filters"></div>
+    </div>
+    <div>
+      <h3>Eventos detectados <span class="hint">(toca para saltar · reetiqueta si hace falta)</span></h3>
+      <div class="evlist" id="evlist"></div>
+    </div>
+    <div>
+      <h3>Mapas de calor por equipo</h3>
+      <div class="heatwrap">
+        <div><canvas id="heatL" width="300" height="160"></canvas></div>
+        <div><canvas id="heatR" width="300" height="160"></canvas></div>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="btnAdd">➕ Añadir evento aquí</button>
+      <button class="btn primary" id="btnExport">💾 Exportar JSON corregido</button>
+    </div>
+    <p class="hint">Atajos: <kbd>←</kbd>/<kbd>→</kbd> evento anterior/siguiente · <kbd>espacio</kbd> play/pausa · <kbd>J</kbd>/<kbd>L</kbd> −5 s/+5 s</p>
+  </div>
+</main>
+
+<script>
+// Almacenamiento persistente compatible: usa window.storage si existe (artifacts),
+// si no, cae a localStorage (web normal como Netlify).
+if (typeof window.storage === 'undefined' || !window.storage) {
+  window.storage = {
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch(e){} return Promise.resolve(); },
+    get: (k) => { try { const v = localStorage.getItem(k); return Promise.resolve(v ? {value:v} : null); } catch(e){ return Promise.resolve(null);} },
+  };
+}
+
+console.log('%cVISOR v-TRACKING-2 ✔ pizarra pro: focos+unir+ampliar+exportar', 'color:#22c55e;font-weight:900');
+'use strict';
+// ────────────────────────────────────────────────────────────────
+const TIPOS = {
+  saque_centro:      { label: 'Saque centro',    color: '#22c55e' },
+  saque_esquina:     { label: 'Córner',          color: '#a855f7' },
+  saque_banda_baja:  { label: 'Banda baja',      color: '#06b6d4' },
+  saque_banda_media: { label: 'Banda media',     color: '#0ea5e9' },
+  saque_banda_alta:  { label: 'Banda alta',      color: '#3b82f6' },
+  saque_porteria:    { label: 'Saque portería',  color: '#f59e0b' },
+  clip:              { label: 'Clip',            color: '#eab308' },
+  portero_jugador:   { label: 'Portero-jugador', color: '#c084fc' },
+  robo_presion:      { label: 'Robo en presión', color: '#4ade80' },
+  tiro_a_puerta:     { label: 'Tiro a puerta',   color: '#fb7185' },
+  parada:            { label: 'Parada portero',  color: '#38bdf8' },
+  tiempo_muerto:     { label: 'Tiempo muerto',   color: '#94a3b8' },
+  falta:             { label: 'Falta',           color: '#f97316' },
+  penalti:           { label: 'Penalti',         color: '#ef4444' },
+  doble_penalti:     { label: 'Doble penalti',   color: '#dc2626' },
+  gol:               { label: 'Gol',             color: '#16a34a' },
+  superioridad:      { label: 'Superioridad',    color: '#e879f9' },
+  reanudacion_otra:  { label: 'Otra',            color: '#64748b' },
+};
+const SACA = { '': '—', local: 'Local', rival: 'Rival' };
+
+let data = null;          // JSON de análisis
+let eventos = [];         // copia editable
+let selIdx = -1;
+let filtroActivo = new Set(Object.keys(TIPOS));
+let videoOK = false, jsonOK = false;
+let mode = 'none';        // 'file' | 'yt'
+let ytPlayer = null, ytApiLoaded = false;
+
+const $ = id => document.getElementById(id);
+const video = $('video');
+const fmt = t => `${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+
+// ── Abstracción de reproductor: mismo API para archivo local y YouTube ──
+const P = {
+  time:    () => mode === 'yt' ? (ytPlayer?.getCurrentTime?.() || 0) : (video.currentTime || 0),
+  seek:    t  => { if (mode === 'yt') ytPlayer?.seekTo?.(t, true); else video.currentTime = t; },
+  play:    () => { if (mode === 'yt') ytPlayer?.playVideo?.(); else video.play(); },
+  pause:   () => { if (mode === 'yt') ytPlayer?.pauseVideo?.(); else video.pause(); },
+  paused:  () => mode === 'yt' ? (ytPlayer?.getPlayerState?.() !== 1) : video.paused,
+  duration:() => {
+    if (mode === 'yt') return ytPlayer?.getDuration?.() || 0;
+    return (video.duration && isFinite(video.duration)) ? video.duration : 0;
+  },
+  rate: r => {
+    if (mode === 'yt') ytPlayer?.setPlaybackRate?.(r);
+    else video.playbackRate = r;
+  },
+  frame: dir => {  // avanzar/retroceder ~1 fotograma (1/25 s)
+    P.pause();
+    P.seek(Math.max(0, P.time() + dir / 25));
+  },
+};
+let bucleJugada = null;  // {t0, t1} para repetir en bucle la jugada seleccionada
+
+// Bucle único de refresco (cursor de timeline + pista virtual)
+setInterval(() => {
+  if (mode === 'none') return;
+  const t = P.time();
+  if (bucleJugada && t >= bucleJugada.t1) P.seek(bucleJugada.t0);
+  { const c=$('tlcursor'); if(c) c.style.left = (t / dur() * 100) + '%'; }
+  drawPitch(t);
+  if (trazos.some(z => z.tool === 'player' && z.keys && z.keys.length > 1) || conectDesde) repintarTrazos();
+}, 80);
+
+// Repintado fluido de los focos mientras el vídeo se reproduce
+function loopTracking() {
+  if (typeof trazos !== 'undefined' && !P.paused() &&
+      trazos.some(z => z.tool === 'player' && z.keys && z.keys.length > 1)) {
+    repintarTrazos();
+  }
+  requestAnimationFrame(loopTracking);
+}
+requestAnimationFrame(loopTracking);
+
+// ── Carga de YouTube ─────────────────────────────────────────────
+function parseYouTubeId(url) {
+  const patterns = [
+    /(?:youtube\.com\/watch\?.*v=)([\w-]{11})/,
+    /(?:youtu\.be\/)([\w-]{11})/,
+    /(?:youtube\.com\/(?:shorts|live|embed)\/)([\w-]{11})/,
+  ];
+  for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
+  return null;
+}
+
+function loadYouTube(url) {
+  const id = parseYouTubeId(url.trim());
+  if (!id) { alert('Enlace de YouTube no reconocido. Formatos válidos: youtube.com/watch?v=… o youtu.be/…'); return; }
+  if (location.protocol === 'file:') {
+    alert('El reproductor de YouTube no funciona abriendo el visor como archivo local.\n\nSube el visor a Netlify (o sírvelo en local) y ábrelo desde su URL web. El modo de vídeo local sí funciona con archivo.');
+    return;
+  }
+  video.pause(); $('videoinner').style.display = 'none'; video.style.display = 'none';
+  $('ph').style.display = 'none';
+  if($('ytwrap')) $('ytwrap').style.display = 'block';
+  videoOK = true; setTimeout(mostrarAnalisisBar, 300);
+
+  const create = () => {
+    if (ytPlayer) { ytPlayer.loadVideoById(id); mode = 'yt'; onPlayerReady(); return; }
+    ytPlayer = new YT.Player('ytmount', {
+      videoId: id,
+      playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+      events: { onReady: () => { mode = 'yt'; onPlayerReady(); } },
+    });
+  };
+
+  if (ytApiLoaded && window.YT?.Player) { create(); return; }
+  window.onYouTubeIframeAPIReady = () => { ytApiLoaded = true; create(); };
+  const s = document.createElement('script');
+  s.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(s);
+}
+
+function onPlayerReady() {
+  $('btnYT').classList.add('ok');
+  videoOK = true; setTimeout(mostrarAnalisisBar, 200);
+  buildTimeline();
+  maybeReady();
+}
+
+$('btnYT').addEventListener('click', () => loadYouTube($('inYT').value));
+
+// ── Auto-carga desde la pantalla Analizar Partido (?srv&job&vid) ──
+(async function autoCarga() {
+  const q = new URLSearchParams(location.search);
+  const srv = q.get('srv'), job = q.get('job'), vid = q.get('vid');
+  if (!srv || !job) return;
+  try {
+    const r = await fetch(srv.replace(/\/+$/, '') + '/resultado/' + job);
+    if (!r.ok) throw new Error('resultado no disponible');
+    data = await r.json();
+    eventos = (data.eventos || []).map(ev => ({ ...ev, saca: ev.saca || '', nota: ev.nota || '' }));
+    $('btnJson').classList.add('ok'); jsonOK = true; maybeReady();
+  } catch (e) {
+    alert('No se pudo cargar el análisis desde el servidor: ' + e.message);
+    return;
+  }
+  if (vid) {
+    if (vid.startsWith('yt_')) {
+      $('inYT').value = 'https://youtu.be/' + vid.slice(3);
+      loadYouTube($('inYT').value);
+    } else {
+      video.src = srv.replace(/\/+$/, '') + '/video/' + vid;
+      if($('ytwrap')) $('ytwrap').style.display = 'none';
+      $('videoinner').style.display = 'block'; video.style.display = 'block'; $('ph').style.display = 'none';
+      $('btnVideo').classList.add('ok'); videoOK = true; mode = 'file'; setTimeout(mostrarAnalisisBar, 200);
+    }
+  }
+})();
+$('inYT').addEventListener('keydown', e => { if (e.key === 'Enter') loadYouTube($('inYT').value); });
+
+// ── Carga de archivos ────────────────────────────────────────────
+$('inVideo').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  // Safari a veces congela el primer fotograma de MP4 locales via blob
+  const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+  if (isSafari) {
+    alert('AVISO: Safari puede mostrar el vídeo congelado con archivos locales.\n\nSi la imagen no se mueve, abre este visor con Google Chrome — ahí funciona correctamente.');
+  }
+  video.src = URL.createObjectURL(f);
+  if (ytPlayer) { ytPlayer.pauseVideo?.(); }
+  if($('ytwrap')) $('ytwrap').style.display = 'none';
+  $('videoinner').style.display = 'block'; video.style.display = 'block'; $('ph').style.display = 'none';
+  $('btnVideo').classList.add('ok'); videoOK = true; mode = 'file';
+  video.play().catch(()=>{});
+  setTimeout(mostrarAnalisisBar, 300); maybeReady();
+});
+$('inJson').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      data = JSON.parse(r.result);
+      eventos = (data.eventos || []).map(ev => ({ ...ev, saca: ev.saca || '', nota: ev.nota || '' }));
+      $('btnJson').classList.add('ok'); jsonOK = true; maybeReady();
+    } catch (err) { alert('JSON inválido: ' + err.message); }
+  };
+  r.readAsText(f);
+});
+function maybeReady() {
+  if (!jsonOK) return;
+  $('panel').style.display = 'flex';
+  { const w=$('tlwrap'); if(w) w.style.display = 'block'; }
+  { const p=$('pitchcard'); if(p) p.style.display = 'block'; }
+  buildFilters(); renderAll(); drawHeatmaps();
+}
+
+// ── Timeline ─────────────────────────────────────────────────────
+function dur() { return P.duration() || (data?.video?.duracion_s || 600); }
+function buildTimeline() {
+  const track = $('tltrack'); if(!track) return;
+  track.querySelectorAll('.tl-ev').forEach(n => n.remove());
+  const D = dur();
+  eventos.forEach((ev, i) => {
+    if (!filtroActivo.has(ev.tipo)) return;
+    const m = document.createElement('div');
+    m.className = 'tl-ev' + (i === selIdx ? ' sel' : '');
+    m.style.left = (ev.t / D * 100) + '%';
+    m.style.background = (TIPOS[ev.tipo] || TIPOS.reanudacion_otra).color;
+    m.title = `${ev.t_min} · ${(TIPOS[ev.tipo]||{}).label || ev.tipo}`;
+    m.addEventListener('click', e => { e.stopPropagation(); selectEvent(i, true); });
+    track.appendChild(m);
+  });
+  { const e=$('tlend'); if(e) e.textContent = fmt(D); }
+  { const m=$('tlmid'); if(m) m.textContent = fmt(D / 2); }
+}
+if($('tltrack')) $('tltrack').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  P.seek((e.clientX - r.left) / r.width * dur());
+});
+video.addEventListener('loadedmetadata', buildTimeline);
+
+// ── Lista de eventos ─────────────────────────────────────────────
+function renderList() {
+  const list = $('evlist'); list.innerHTML = '';
+  eventos.forEach((ev, i) => {
+    if (!filtroActivo.has(ev.tipo)) return;
+    const conf = TIPOS[ev.tipo] || TIPOS.reanudacion_otra;
+    const d = document.createElement('div');
+    d.className = 'ev' + (i === selIdx ? ' sel' : '');
+    const extras = [];
+    if (ev.saca) extras.push('saca ' + SACA[ev.saca]);
+    if (ev.posible_tras_gol) extras.push('¿tras gol?');
+    if (ev.equipo) extras.push(ev.equipo + (ev.duracion_s ? ` · ${ev.duracion_s}s` : ''));
+    if (ev.detalle && ev.detalle !== 'campo_abierto') extras.push(ev.detalle.replace(/_/g, ' '));
+    if (ev.nota) extras.push('📝 ' + ev.nota);
+    d.innerHTML = `
+      <div class="ev-top">
+        <div class="ev-dot" style="background:${conf.color}"></div>
+        <span class="ev-t">${ev.t_min}</span>
+        <span class="ev-tipo" style="color:${conf.color}">${conf.label}</span>
+        <span class="ev-extra">${extras.join(' · ')}</span>
+      </div>
+      <div class="ev-edit">
+        <select data-i="${i}" data-k="tipo">${Object.entries(TIPOS).map(([k,v]) =>
+          `<option value="${k}" ${k===ev.tipo?'selected':''}>${v.label}</option>`).join('')}</select>
+        <select data-i="${i}" data-k="saca">${Object.entries(SACA).map(([k,v]) =>
+          `<option value="${k}" ${k===ev.saca?'selected':''}>Saca: ${v}</option>`).join('')}</select>
+        <input type="text" placeholder="Nota táctica..." value="${ev.nota.replace(/"/g,'&quot;')}" data-i="${i}" data-k="nota">
+        <button class="ev-clave ${ev.clave ? 'on' : ''}" data-i="${i}">⭐ Clave</button>
+        <div class="tagrow">${['GOL','CASI GOL','ROBO','PÉRDIDA','2º PALO','1er TOQUE','PRESIÓN ALTA'].map(tg =>
+          `<span class="tag ${(ev.tags||[]).includes(tg) ? 'on' : ''}" data-i="${i}" data-tag="${tg}">${tg}</span>`).join('')}</div>
+        <button class="ev-del" data-i="${i}">Borrar</button>
+        <div class="minipitch-wrap">
+          <canvas class="minipitch" data-i="${i}" width="260" height="140"></canvas>
+          <span class="minipitch-hint">📍 Toca la pista para fijar dónde fue el saque</span>
+        </div>
+      </div>`;
+    d.addEventListener('click', e => {
+      if (e.target.closest('.ev-edit')) return;
+      selectEvent(i, true);
+    });
+    list.appendChild(d);
+  });
+  list.querySelectorAll('select, input[type=text]').forEach(el => {
+    el.addEventListener('change', e => {
+      const i = +e.target.dataset.i, k = e.target.dataset.k;
+      eventos[i][k] = e.target.value;
+      renderAll();
+    });
+    el.addEventListener('click', e => e.stopPropagation());
+  });
+  // Mini-pista del evento seleccionado: fija la posición real del saque
+  list.querySelectorAll('.minipitch').forEach(cv => {
+    const i = +cv.dataset.i;
+    drawMiniPitch(cv, eventos[i]);
+    cv.addEventListener('click', e => {
+      e.stopPropagation();
+      const r = cv.getBoundingClientRect();
+      const L = data?.pista?.largo_m || 100, W = data?.pista?.ancho_m || 100;
+      const pad = 6;
+      const px = (e.clientX - r.left) / r.width * cv.width;
+      const py = (e.clientY - r.top) / r.height * cv.height;
+      const x = Math.min(L, Math.max(0, (px - pad) / (cv.width - pad * 2) * L));
+      const y = Math.min(W, Math.max(0, (py - pad) / (cv.height - pad * 2) * W));
+      eventos[i].cluster = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+      eventos[i].cluster_manual = true;
+      drawMiniPitch(cv, eventos[i]);
+    });
+  });
+  list.querySelectorAll('.ev-clave').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const i = +el.dataset.i;
+      eventos[i].clave = !eventos[i].clave;
+      el.classList.toggle('on', eventos[i].clave);
+    });
+  });
+  list.querySelectorAll('.tag').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const i = +el.dataset.i, tg = el.dataset.tag;
+      const ev = eventos[i];
+      ev.tags = ev.tags || [];
+      const p = ev.tags.indexOf(tg);
+      if (p >= 0) ev.tags.splice(p, 1); else ev.tags.push(tg);
+      el.classList.toggle('on', p < 0);
+    });
+  });
+  list.querySelectorAll('.ev-del').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      eventos.splice(+e.target.dataset.i, 1);
+      if (selIdx >= eventos.length) selIdx = -1;
+      renderAll();
+    });
+  });
+}
+
+function selectEvent(i, jump) {
+  selIdx = i;
+  if (jump && videoOK) {
+    const ev = eventos[i];
+    P.seek(Math.max(0, (ev.parado_desde ?? ev.t) - 3)); // 3 s antes del parón
+    P.play();
+  }
+  renderAll();
+  const node = $('evlist').children[[...eventos.keys()].filter(k => filtroActivo.has(eventos[k].tipo)).indexOf(i)];
+  if (node) node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ── Filtros y stats ──────────────────────────────────────────────
+function buildFilters() {
+  const box = $('filters'); box.innerHTML = '';
+  const presentes = new Set(eventos.map(e => e.tipo));
+  Object.entries(TIPOS).forEach(([k, v]) => {
+    if (!presentes.has(k)) return;
+    const c = document.createElement('div');
+    c.className = 'chip on'; c.textContent = v.label; c.style.color = v.color;
+    c.addEventListener('click', () => {
+      if (filtroActivo.has(k)) { filtroActivo.delete(k); c.classList.remove('on'); c.style.color = ''; }
+      else { filtroActivo.add(k); c.classList.add('on'); c.style.color = v.color; }
+      renderAll();
+    });
+    box.appendChild(c);
+  });
+}
+function renderStats() {
+  const box = $('stats'); box.innerHTML = '';
+  const counts = {};
+  eventos.forEach(e => counts[e.tipo] = (counts[e.tipo] || 0) + 1);
+  const items = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  items.forEach(([k, n]) => {
+    const conf = TIPOS[k] || TIPOS.reanudacion_otra;
+    box.insertAdjacentHTML('beforeend',
+      `<div class="stat"><b style="color:${conf.color}">${n}</b><span>${conf.label}</span></div>`);
+  });
+}
+function renderAll() { buildTimeline(); renderList(); renderStats(); }
+
+// ── Pista virtual sincronizada con el vídeo ──────────────────────
+function drawPitch(t) {
+  const _mp = document.querySelector('.minipitch'); if(!_mp && !$('draw')) return;
+  if (!data?.muestras?.length) return;
+  const cv = $('pitch'); if(!cv) return; const ctx = cv.getContext('2d');
+  const L = data.pista?.largo_m || 100, W = data.pista?.ancho_m || 100;
+  const pad = 20, sw = cv.width - pad * 2, sh = cv.height - pad * 2;
+  const X = x => pad + x / L * sw, Y = y => pad + y / W * sh;
+
+  // fondo pista
+  ctx.fillStyle = '#166534'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2;
+  ctx.strokeRect(pad, pad, sw, sh);
+  ctx.beginPath(); ctx.moveTo(X(L/2), pad); ctx.lineTo(X(L/2), pad + sh); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L/2), Y(W/2), sh * 0.18, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(0), Y(W/2), sh * 0.3, -Math.PI/2, Math.PI/2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L), Y(W/2), sh * 0.3, Math.PI/2, Math.PI*1.5); ctx.stroke();
+
+  // Muestras que rodean al instante t (búsqueda binaria) + INTERPOLACIÓN:
+  // los puntos se deslizan entre muestras en vez de saltar, y los jugadores
+  // que entran/salen de la detección se pintan tenues para evitar parpadeo.
+  const ms = data.muestras;
+  let lo = 0, hi = ms.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; (ms[mid].t < t) ? lo = mid + 1 : hi = mid; }
+  const s1 = ms[lo], s0 = lo > 0 ? ms[lo - 1] : null;
+  if (!s1 || (s0 && (t < s0.t - 3)) || t > s1.t + 3) {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '12px monospace';
+    ctx.fillText('sin datos en este instante', pad + 8, pad + 18);
+    return;
+  }
+  const colDe = eq => eq === 'l' ? '#3b82f6' : eq === 'r' ? '#ef4444' : '#94a3b8';
+  const punto = (x, y, col, alfa) => {
+    ctx.globalAlpha = alfa;
+    ctx.beginPath(); ctx.arc(X(x), Y(y), 9, 0, Math.PI * 2);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+  if (s0 && s1.t > s0.t && t >= s0.t && t <= s1.t && (s1.t - s0.t) <= 1.5) {
+    const f = (t - s0.t) / (s1.t - s0.t);
+    const en0 = new Map(s0.p.map(p => [p.id, p]));
+    const en1 = new Map(s1.p.map(p => [p.id, p]));
+    s1.p.forEach(p1 => {
+      const p0 = en0.get(p1.id);
+      if (p0) {
+        punto(p0.x + (p1.x - p0.x) * f, p0.y + (p1.y - p0.y) * f, colDe(p1.eq), 1);
+      } else {
+        punto(p1.x, p1.y, colDe(p1.eq), 0.35 + 0.65 * f);   // entrando: aparece gradualmente
+      }
+    });
+    s0.p.forEach(p0 => {
+      if (!en1.has(p0.id)) punto(p0.x, p0.y, colDe(p0.eq), 0.65 * (1 - f));  // saliendo: se desvanece
+    });
+  } else {
+    const m = (s0 && Math.abs(s0.t - t) < Math.abs(s1.t - t)) ? s0 : s1;
+    m.p.forEach(p => punto(p.x, p.y, colDe(p.eq), 1));
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '11px monospace';
+  ctx.fillText(fmt(t), pad + 6, cv.height - 6);
+}
+
+// ── Mini-pista del editor de eventos ─────────────────────────────
+function drawMiniPitch(cv, ev) {
+  const ctx = cv.getContext('2d');
+  const L = data?.pista?.largo_m || 100, W = data?.pista?.ancho_m || 100;
+  const pad = 6, sw = cv.width - pad * 2, sh = cv.height - pad * 2;
+  const X = x => pad + x / L * sw, Y = y => pad + y / W * sh;
+  ctx.fillStyle = '#166534'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(pad, pad, sw, sh);
+  ctx.beginPath(); ctx.moveTo(X(L/2), pad); ctx.lineTo(X(L/2), pad + sh); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L/2), Y(W/2), sh * 0.18, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(0), Y(W/2), sh * 0.3, -Math.PI/2, Math.PI/2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L), Y(W/2), sh * 0.3, Math.PI/2, Math.PI*1.5); ctx.stroke();
+  if (ev?.cluster) {
+    ctx.beginPath(); ctx.arc(X(ev.cluster.x), Y(ev.cluster.y), 7, 0, Math.PI * 2);
+    ctx.fillStyle = ev.cluster_manual ? '#22c55e' : '#f59e0b'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+}
+
+// ── Heatmaps ─────────────────────────────────────────────────────
+function drawHeat(canvasId, grid, baseColor, titulo) {
+  const cv = $(canvasId), ctx = cv.getContext('2d');
+  ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (!grid) return;
+  const rows = grid.length, cols = grid[0].length;
+  const maxV = Math.max(1, ...grid.flat());
+  const cw = cv.width / cols, ch = (cv.height - 16) / rows;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const v = grid[r][c] / maxV;
+    if (v > 0.02) {
+      ctx.fillStyle = baseColor + Math.round(Math.min(0.85, v) * 255).toString(16).padStart(2, '0');
+      ctx.fillRect(c * cw, 16 + r * ch, cw - 1, ch - 1);
+    }
+  }
+  ctx.fillStyle = '#94a3b8'; ctx.font = '900 10px Inter, sans-serif';
+  ctx.fillText(titulo.toUpperCase(), 4, 11);
+}
+function drawHeatmaps() {
+  drawHeat('heatL', data?.heatmap_equipos?.local, '#3b82f6', 'Local');
+  drawHeat('heatR', data?.heatmap_equipos?.rival, '#ef4444', 'Rival');
+}
+
+// ── Añadir evento manual y exportar ──────────────────────────────
+$('btnAdd').addEventListener('click', () => {
+  const t = P.time() || 0;
+  const nuevo = { tipo: 'reanudacion_otra', detalle: 'manual', t: Math.round(t * 10) / 10,
+                  t_min: fmt(t), parado_desde: Math.round(t * 10) / 10, saca: '', nota: '' };
+  eventos.push(nuevo);
+  eventos.sort((a, b) => a.t - b.t);
+  selIdx = eventos.indexOf(nuevo);
+  renderAll();
+});
+function construirCorregido() {
+  const out = { ...data, eventos: eventos.map(ev => { const c = { ...ev }; if (!c.saca) delete c.saca; if (!c.nota) delete c.nota; return c; }) };
+  const counts = {}; out.eventos.forEach(e => counts[e.tipo] = (counts[e.tipo] || 0) + 1);
+  out.resumen_eventos = counts;
+  out._corregido_en = Date.now();
+  return out;
+}
+$('btnExport').addEventListener('click', async () => {
+  const out = construirCorregido();
+  // 1) Guardar en almacenamiento compartido → el informe lo lee sin descargar/subir
+  try { if (window.storage) await window.storage.set('analisis_corregido', JSON.stringify(out), false); } catch (e) {}
+  // 2) Descargar también (por si quiere archivarlo)
+  const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'analisis_corregido.json';
+  a.click();
+  const btn = $('btnExport');
+  const txt = btn.textContent;
+  btn.textContent = '✓ Guardado — ábrelo en el Informe';
+  setTimeout(() => btn.textContent = txt, 2500);
+});
+// Botón directo: guardar corrección y abrir el informe
+if (!document.getElementById('btnAlInforme')) {
+  const b = document.createElement('button');
+  b.id = 'btnAlInforme'; b.className = 'btn primary'; b.textContent = '📊 Enviar al Informe';
+  b.style.marginLeft = '6px';
+  b.addEventListener('click', async () => {
+    try { if (window.storage) await window.storage.set('analisis_corregido', JSON.stringify(construirCorregido()), false); } catch (e) {}
+    const srv = new URLSearchParams(location.search).get('srv') || '';
+    location.href = 'informe_patrones.html?corr=1' + (srv ? '&srv=' + encodeURIComponent(srv) : '');
+  });
+  $('btnExport').insertAdjacentElement('afterend', b);
+}
+
+// ── Atajos de teclado ────────────────────────────────────────────
+// ── Telestración / pizarra pro ───────────────────────────────────
+const draw = $('draw');
+const dctx = draw.getContext('2d');
+let tool = null, colorActivo = '#f2c200', numJugador = 1;
+let dibujando = false, x0 = 0, y0 = 0, trazos = [];
+let fichaSel = null;        // ficha 'player' o unidad 'unit' seleccionada individualmente
+let arrastrandoFicha = false, dragBase = null; // {x,y} del punto de agarre al iniciar arrastre
+let multiSel = [];          // fichas 'player' marcadas para agrupar en una Unidad Táctica
+let numUnidad = 1;
+let conectDesde = null;  // para la herramienta "Unir" (pase entre jugadores)
+
+function mostrarAnalisisBar() { $('analisisBar').style.display = 'flex'; [50,300,700].forEach(ms=>setTimeout(ajustarDraw, ms)); }
+function ajustarDraw() {
+  const dcanvas = document.getElementById('draw');
+  if (!dcanvas) return;
+  const w = dcanvas.clientWidth || dcanvas.parentElement.clientWidth || 900;
+  const hh = dcanvas.clientHeight || dcanvas.parentElement.clientHeight || 500;
+  if (w > 0 && hh > 0) { dcanvas.width = w; dcanvas.height = hh; }
+  // Un resize real puede cambiar la relación de aspecto del contenedor, no solo su
+  // escala — el letterboxing entre <video> y el canvas se recalcula de forma distinta.
+  // Las fichas vinculadas a track_id tienen sus posiciones "horneadas" en fracción de
+  // canvas en el momento de crearse; sin este refresco quedarían desalineadas tras un
+  // cambio real de forma (aunque sí sobrevivían a un simple escalado proporcional).
+  if (typeof trazos !== 'undefined' && typeof hornearKeysDesdeTrack === 'function') {
+    for (const t of trazos) {
+      if (t.tool === 'player' && t.trackId != null && t.tracking) {
+        t.keys = hornearKeysDesdeTrack(t.trackId, t.offset);
+      }
+    }
+  }
+  repintarTrazos();
+}
+window.addEventListener('resize', ajustarDraw);
+document.addEventListener('fullscreenchange', () => setTimeout(ajustarDraw, 150));
+
+// Velocidad
+document.querySelectorAll('.tb[data-rate]').forEach(b =>
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.tb[data-rate]').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); P.rate(+b.dataset.rate);
+  }));
+$('fprev').addEventListener('click', () => P.frame(-1));
+$('fnext').addEventListener('click', () => P.frame(1));
+$('btnLoop').addEventListener('click', () => {
+  const b = $('btnLoop');
+  if (bucleJugada) { bucleJugada = null; b.classList.remove('on'); return; }
+  const ev = eventos[selIdx]; if (!ev) return;
+  const c = ev.parado_desde ?? ev.t;
+  bucleJugada = { t0: Math.max(0, c - 3), t1: c + 8 };
+  b.classList.add('on'); P.seek(bucleJugada.t0); P.play();
+});
+
+// Pantalla completa (la barra va DENTRO del videowrap → sigue visible)
+$('btnFS').addEventListener('click', () => {
+  const wrap = draw.parentElement;
+  if (!document.fullscreenElement) wrap.requestFullscreen?.();
+  else document.exitFullscreen?.();
+});
+
+// Selección de herramienta: al pulsar una, se activa; al re-pulsarla, se suelta
+function setTool(name) {
+  tool = name;
+  conectDesde = null;
+  document.querySelectorAll('.tb.tool').forEach(x => x.classList.toggle('on', x.dataset.tool === name && name !== null));
+  draw.classList.toggle('activo', name !== null);
+  $('tbCursor').textContent = name ? ('herramienta: ' + name + ' · Esc para soltar') : '';
+}
+document.querySelectorAll('.tb.tool').forEach(b =>
+  b.addEventListener('click', () => setTool(tool === b.dataset.tool ? null : b.dataset.tool)));
+
+// Colores
+document.querySelectorAll('.colbtn').forEach(b =>
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.colbtn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); colorActivo = b.dataset.col;
+  }));
+
+$('drawUndo').addEventListener('click', () => { trazos.pop(); repintarTrazos(); });
+$('drawClear').addEventListener('click', () => { trazos = []; numJugador = 1; conectDesde = null; multiSel.length = 0; fichaSel = null; repintarTrazos(); });
+$('drawGroup').addEventListener('click', crearUnidadDesdeSeleccion);
+$('btnDebugTactico').addEventListener('click', () => {
+  debugTactico = !debugTactico;
+  $('btnDebugTactico').classList.toggle('on', debugTactico);
+  repintarTrazos();
+});
+$('drawExport').addEventListener('click', exportarImagen);
+
+// Coordenadas RELATIVAS (0..1): los dibujos se mantienen al cambiar de tamaño
+function ptDraw(e) {
+  const r = draw.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+const escala = () => draw.width / 900;
+
+// ── Tracking temporal: cada jugador guarda posiciones en el tiempo (keyframes) ──
+// Al reproducir, el foco se interpola a la posición correspondiente al tiempo actual.
+function posEnT(jug, t) {
+  const k = jug.keys;
+  if (!k || !k.length) return { x: jug.x, y: jug.y };
+  if (k.length === 1 || t <= k[0].t) return { x: k[0].x, y: k[0].y };
+  if (t >= k[k.length - 1].t) return { x: k[k.length - 1].x, y: k[k.length - 1].y };
+  for (let i = 0; i < k.length - 1; i++) {
+    if (t >= k[i].t && t <= k[i + 1].t) {
+      const f = (t - k[i].t) / ((k[i + 1].t - k[i].t) || 1);
+      return { x: k[i].x + (k[i + 1].x - k[i].x) * f, y: k[i].y + (k[i + 1].y - k[i].y) * f };
+    }
+  }
+  return { x: k[k.length - 1].x, y: k[k.length - 1].y };
+}
+function jugadorEnPunto(px, py) {  // devuelve el jugador cuyo foco (en el t actual) está cerca
+  const tNow = P.time();
+  const jug = trazos.filter(z => z.tool === 'player');
+  let mejor = null, dmin = 55 * escala();
+  jug.forEach(j => {
+    const p = posEnT(j, tNow);
+    const d = Math.hypot((p.x - px) * draw.width, (p.y - py) * draw.height);
+    if (d < dmin) { dmin = d; mejor = j; }
+  });
+  return mejor;
+}
+
+// ── Tracking real del motor: homografía inversa metros→fracción de pantalla ──
+// (equivalente a cv2.getPerspectiveTransform, resolviendo el sistema 8x8)
+function calcularHomografiaInversa(esquinasPx, vw, vh, largoM, anchoM) {
+  // fuente: rectángulo de pista en metros (0,0)-(L,0)-(L,W)-(0,W)
+  // destino: las 4 esquinas en fracción 0-1 de pantalla
+  const src = [[0, 0], [largoM, 0], [largoM, anchoM], [0, anchoM]];
+  const dst = esquinasPx.map(([px, py]) => [px / vw, py / vh]);
+  const A = [];
+  const b = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx, sy] = src[i], [dx, dy] = dst[i];
+    A.push([sx, sy, 1, 0, 0, 0, -sx * dx, -sy * dx]); b.push(dx);
+    A.push([0, 0, 0, sx, sy, 1, -sx * dy, -sy * dy]); b.push(dy);
+  }
+  // Eliminación gaussiana simple 8x8
+  for (let i = 0; i < 8; i++) {
+    let piv = i;
+    for (let r = i + 1; r < 8; r++) if (Math.abs(A[r][i]) > Math.abs(A[piv][i])) piv = r;
+    [A[i], A[piv]] = [A[piv], A[i]]; [b[i], b[piv]] = [b[piv], b[i]];
+    for (let r = 0; r < 8; r++) {
+      if (r === i) continue;
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < 8; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const h = A.map((row, i) => b[i] / row[i]);
+  return (mx, my) => {
+    const den = h[6] * mx + h[7] * my + 1;
+    return { x: (h[0] * mx + h[1] * my + h[2]) / den, y: (h[3] * mx + h[4] * my + h[5]) / den };
+  };
+}
+let _homInv = null, _homCalculada = false;
+function homografiaVisor() {
+  if (_homCalculada) return _homInv;
+  _homCalculada = true;
+  if (data && data.coordenadas === 'metros' && data.esquinas_px && data.pista && data.video) {
+    try {
+      _homInv = calcularHomografiaInversa(data.esquinas_px, data.video.w, data.video.h, data.pista.largo_m, data.pista.ancho_m);
+    } catch (e) { _homInv = null; }
+  }
+  return _homInv;
+}
+// Convierte una muestra {x,y} del JSON (metros o % frame) a fracción 0-1 de pantalla
+// Escala fracción-0-1-del-vídeo-nativo a fracción-0-1-del-canvas completo,
+// corrigiendo el letterboxing cuando el <video> no llena el canvas (object-fit:contain
+// con max-height dinámico deja franja vacía, normalmente debajo).
+function fraccionVideoACanvas(fx, fy) {
+  const vr = video.getBoundingClientRect(), dr = draw.getBoundingClientRect();
+  if (!vr.width || !vr.height || !dr.width || !dr.height) return { x: fx, y: fy };
+  const offX = (vr.left - dr.left) / dr.width, offY = (vr.top - dr.top) / dr.height;
+  const scaleX = vr.width / dr.width, scaleY = vr.height / dr.height;
+  return { x: offX + fx * scaleX, y: offY + fy * scaleY };
+}
+function muestraAFraccion(mx, my) {
+  let f;
+  if (data && data.coordenadas === 'metros') {
+    const h = homografiaVisor();
+    if (!h) return null;
+    f = h(mx, my);
+  } else {
+    f = { x: mx / 100, y: my / 100 };
+  }
+  return fraccionVideoACanvas(f.x, f.y);
+}
+// Busca en data.muestras el track_id real más cercano a (px,py) en el tiempo actual.
+// Devuelve {trackId, team} o null si no hay ninguno dentro del umbral de distancia.
+function idTrackCercano(px, py, tNow) {
+  if (!data || !data.muestras || !data.muestras.length) return null;
+  let muestraRef = data.muestras[0], mejorDt = Infinity;
+  for (const m of data.muestras) {
+    const dt = Math.abs(m.t - tNow);
+    if (dt < mejorDt) { mejorDt = dt; muestraRef = m; }
+  }
+  let mejorId = null, mejorEq = null, mejorD = 0.05; // ~5% de la pantalla, en fracción 0-1: umbral máximo razonable
+  for (const j of (muestraRef.p || [])) {
+    const f = muestraAFraccion(j.x, j.y);
+    if (!f) continue;
+    const d = Math.hypot(f.x - px, f.y - py);
+    if (d < mejorD) { mejorD = d; mejorId = j.id; mejorEq = j.eq; }
+  }
+  return mejorId == null ? null : { trackId: mejorId, team: mejorEq };
+}
+// Genera los keyframes (keys) de una ficha vinculada a trackId a partir de data.muestras,
+// aplicando un offset manual opcional y manteniendo la identidad del track (sin reasignar id).
+// Gestión de huecos: si el track_id desaparece más de UMBRAL_GAP segundos, se inserta un
+// keyframe "plano" (misma posición) justo antes de que reaparezca, marcado perdido:true,
+// para que posEnT() mantenga la última posición conocida en vez de interpolar en línea recta
+// hacia el punto lejano de reaparición. No se reasigna nunca el track_id automáticamente.
+function hornearKeysDesdeTrack(trackId, offset) {
+  offset = offset || { x: 0, y: 0 };
+  const UMBRAL_GAP = 1.5; // segundos sin muestra del mismo id = hueco "largo"
+  const keys = [];
+  let ultimo = null;
+  for (const m of data.muestras) {
+    const j = (m.p || []).find(jj => jj.id === trackId);
+    if (!j) continue;
+    const f = muestraAFraccion(j.x, j.y);
+    if (!f) continue;
+    const punto = { t: m.t, x: f.x + offset.x, y: f.y + offset.y };
+    if (ultimo && (m.t - ultimo.t) > UMBRAL_GAP) {
+      keys.push({ t: Math.max(ultimo.t + 0.01, m.t - 0.05), x: ultimo.x, y: ultimo.y, perdido: true });
+    }
+    keys.push(punto);
+    ultimo = punto;
+  }
+  return keys;
+}
+// ¿El instante t cae dentro de un tramo marcado como "perdido" (hueco largo) de esta ficha?
+function tramoPerdido(jug, t) {
+  const k = jug.keys;
+  if (!k || k.length < 2) return false;
+  for (let i = 0; i < k.length - 1; i++) {
+    if (t >= k[i].t && t <= k[i + 1].t) return !!(k[i].perdido || k[i + 1].perdido);
+  }
+  return false;
+}
+
+// ── Unidad Táctica: agrupa fichas 'player' ya existentes, sin duplicar tracking ──
+// La fuente de verdad sigue siendo cada ficha (trackId/keys); la unidad solo referencia
+// los objetos ya presentes en `trazos` (mismo patrón que pass.from/pass.to).
+
+// Interpola en METROS reales (sin proyectar a pantalla) la posición de un track_id en el
+// instante t. Eje X = longitudinal/profundidad, eje Y = lateral/anchura (confirmado en el
+// motor: pitch_len_m sobre X, pitch_wid_m sobre Y). Solo válido si coordenadas === 'metros'.
+function posicionMetrosEnT(trackId, t) {
+  if (!data || data.coordenadas !== 'metros' || !data.muestras) return null;
+  let antes = null, despues = null;
+  for (const m of data.muestras) {
+    const j = (m.p || []).find(jj => jj.id === trackId);
+    if (!j) continue;
+    if (m.t <= t) antes = { t: m.t, x: j.x, y: j.y };
+    else if (!despues) { despues = { t: m.t, x: j.x, y: j.y }; break; }
+  }
+  if (!antes && !despues) return null;
+  if (antes && !despues) return { x: antes.x, y: antes.y };
+  if (!antes && despues) return { x: despues.x, y: despues.y };
+  const f = (t - antes.t) / ((despues.t - antes.t) || 1);
+  return { x: antes.x + (despues.x - antes.x) * f, y: antes.y + (despues.y - antes.y) * f };
+}
+// Centroide en fracción de pantalla (incluye miembros con tracking perdido, mostrando su
+// última posición conocida — igual que sus propias fichas siguen visibles) + anchura/
+// profundidad en metros reales, excluyendo miembros perdidos EN ESE INSTANTE de la métrica
+// (no de la unidad: siguen siendo miembros, solo no cuentan para no medir con datos viejos).
+function metricasUnidad(unidad, t) {
+  const miembros = unidad.players.filter(p => trazos.includes(p)); // integridad referencial
+  const posiciones = miembros.map(p => ({ ficha: p, pantalla: posEnT(p, t), perdido: tramoPerdido(p, t) }))
+                              .filter(o => o.pantalla);
+  if (!posiciones.length) return null;
+  // Métricas tácticas (centroide, anchura, profundidad): solo miembros con posición
+  // actualmente válida. Un jugador con tracking perdido sigue siendo miembro de la
+  // unidad y su ficha se sigue dibujando (con estilo discontinuo), pero su última
+  // posición conocida no debe distorsionar ninguna métrica mientras no sea válida.
+  const posicionesValidas = posiciones.filter(o => !o.perdido);
+  let centroide = null;
+  if (posicionesValidas.length) {
+    centroide = {
+      x: posicionesValidas.reduce((s, o) => s + o.pantalla.x, 0) / posicionesValidas.length,
+      y: posicionesValidas.reduce((s, o) => s + o.pantalla.y, 0) / posicionesValidas.length
+    };
+  }
+  let anchura = null, profundidad = null;
+  if (data && data.coordenadas === 'metros') {
+    const validos = miembros.filter(p => !tramoPerdido(p, t))
+                             .map(p => posicionMetrosEnT(p.trackId, t))
+                             .filter(Boolean);
+    if (validos.length >= 2) {
+      const ys = validos.map(v => v.y), xs = validos.map(v => v.x);
+      anchura = Math.max(...ys) - Math.min(...ys);       // eje Y = lateral
+      profundidad = Math.max(...xs) - Math.min(...xs);   // eje X = longitudinal
+    }
+  }
+  return { centroide, anchura, profundidad, posiciones };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Reconocimiento de Estructura Táctica v1 — 3-1 / 4-0 / 2-2 / TRANSICION / DESCONOCIDA
+// Solo para Unidades de EXACTAMENTE 4 jugadores de campo. Reutiliza metricasUnidad,
+// posicionMetrosEnT y tramoPerdido ya existentes — no duplica homografía ni tracking.
+// Capas: FEATURE EXTRACTION → INSTANT SCORES → TEMPORAL AGGREGATION → STATE/HYSTERESIS → RENDER
+// ══════════════════════════════════════════════════════════════════════════
+let debugTactico = false; // toggle global; activa el overlay de depuración
+
+const ESTRUCTURA_CFG = {
+  CLASIFICACION_VENTANA_S: 3.0,        // suavizado de scores antes de decidir
+  ROTACION_VENTANA_S: 2.0,             // ventana corta, solo evidencia de movilidad del 4-0
+  CONFIANZA_MINIMA: 0.55,              // score minimo para considerar un candidato viable
+  MARGEN_DOMINANCIA: 0.15,             // debe superar al segundo por esto para no ser TRANSICION
+  HISTERESIS_TIEMPO_MIN_S: 1.5,        // tiempo que un candidato nuevo debe dominar para confirmarse
+  TTL_PERDIDA_S: 2.0,                  // tiempo que se conserva el ultimo estado si faltan jugadores
+  MIN_INTERVALO_ACTUALIZACION_S: 0.15  // throttling: no recalcular en cada frame de RAF (hasta 60fps)
+};
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+// Posiciones en METROS reales de los miembros de la unidad con tracking valido en t
+// (mismo criterio que ya usa el centroide de metricasUnidad: excluye tramoPerdido).
+function posicionesMetrosValidas(unidad, t) {
+  const miembros = unidad.players.filter(p => trazos.includes(p));
+  const out = [];
+  for (const p of miembros) {
+    if (tramoPerdido(p, t)) continue;
+    const m = posicionMetrosEnT(p.trackId, t);
+    if (m) out.push({ trackId: p.trackId, x: m.x, y: m.y });
+  }
+  return out;
+}
+
+// FEATURE EXTRACTION — geometria pura de un instante, sin componente temporal.
+function extraerFeatures(posiciones) {
+  const n = posiciones.length;
+  const xs = posiciones.map(p => p.x), ys = posiciones.map(p => p.y);
+  const centroid = n ? { x: xs.reduce((a,b)=>a+b,0)/n, y: ys.reduce((a,b)=>a+b,0)/n } : null;
+  const width = n ? Math.max(...ys) - Math.min(...ys) : null;   // lateral (eje Y)
+  const depth = n ? Math.max(...xs) - Math.min(...xs) : null;   // longitudinal (eje X)
+
+  const porX = [...posiciones].sort((a,b) => a.x - b.x);
+  const longitudinalPositions = porX.map(p => p.x);
+  const longitudinalGaps = [];
+  for (let i = 0; i < longitudinalPositions.length - 1; i++) longitudinalGaps.push(longitudinalPositions[i+1] - longitudinalPositions[i]);
+
+  const porY = [...posiciones].sort((a,b) => a.y - b.y);
+  const lateralPositions = porY.map(p => p.y);
+  const lateralGaps = [];
+  for (let i = 0; i < lateralPositions.length - 1; i++) lateralGaps.push(lateralPositions[i+1] - lateralPositions[i]);
+
+  const pairDistances = [];
+  for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++) pairDistances.push(Math.hypot(posiciones[i].x-posiciones[j].x, posiciones[i].y-posiciones[j].y));
+
+  let outlierScore = 0, outlierEnExtremo = false, outlierIdx = -1;
+  if (longitudinalGaps.length) {
+    const sumaGaps = longitudinalGaps.reduce((a,b)=>a+b, 0) || 1;
+    outlierIdx = longitudinalGaps.indexOf(Math.max(...longitudinalGaps));
+    outlierScore = longitudinalGaps[outlierIdx] / sumaGaps;
+    outlierEnExtremo = (outlierIdx === 0 || outlierIdx === longitudinalGaps.length - 1);
+  }
+
+  let symmetryScore = null;
+  if (n && width) {
+    const desviaciones = ys.map(y => Math.abs(y - centroid.y));
+    const asimetria = desviaciones.reduce((a,b)=>a+b,0) / n / (width/2 || 1);
+    symmetryScore = Math.max(0, 1 - asimetria);
+  }
+
+  return { centroid, width, depth, longitudinalPositions, lateralPositions, longitudinalGaps, lateralGaps,
+           pairDistances, outlierScore, outlierEnExtremo, outlierIdx, symmetryScore, validPlayers: n };
+}
+
+// INSTANT SCORES — features del frame + ventana corta reciente (solo para movilidad 4-0).
+function scoresInstantaneos(features, historialCorto) {
+  const scores = { '3-1': 0, '4-0': 0, '2-2': 0 };
+  if (!features || features.validPlayers !== 4) return scores;
+  const { longitudinalGaps: g, depth, width, outlierScore, outlierEnExtremo } = features;
+  if (g.length !== 3 || !depth || depth <= 0) return scores;
+
+  const depthNorm = Math.min(1, depth / 15);
+  const widthNorm = Math.min(1, (width||0) / 12);
+
+  if (outlierEnExtremo) {
+    const idxOutlier = features.outlierIdx;
+    const otrosGaps = g.filter((_, i) => i !== idxOutlier);
+    const dispersionBase = otrosGaps.reduce((a,b)=>a+b, 0) / 2 / 10;
+    scores['3-1'] = clamp01(0.55*outlierScore + 0.30*(1-Math.min(1,dispersionBase)) + 0.15*widthNorm) * clamp01(0.4 + 0.6*depthNorm);
+  }
+  if (!outlierEnExtremo || features.outlierIdx === 1) {
+    const gapMedioRatio = g[1] / (g.reduce((a,b)=>a+b,0) || 1);
+    const dispersionPareja1 = g[0]/10, dispersionPareja2 = g[2]/10;
+    scores['2-2'] = clamp01(0.55*gapMedioRatio + 0.30*(1-Math.min(1,(dispersionPareja1+dispersionPareja2)/2)) + 0.15*widthNorm) * clamp01(0.4 + 0.6*depthNorm);
+  }
+  const equilibrio = 1 - outlierScore;
+  const ocupacion = clamp01(0.5*depthNorm + 0.5*widthNorm);
+  let movilidad = 0;
+  if (historialCorto && historialCorto.length >= 3) {
+    let cambios = 0;
+    for (let i = 1; i < historialCorto.length; i++) {
+      const a = historialCorto[i-1].orden, b = historialCorto[i].orden;
+      if (a && b && a.join(',') !== b.join(',')) cambios++;
+    }
+    movilidad = clamp01(cambios / (historialCorto.length - 1) * 2);
+  }
+  scores['4-0'] = clamp01(0.40*equilibrio + 0.25*ocupacion + 0.35*movilidad) * (equilibrio > 0.35 ? 1 : 0.3);
+  return scores;
+}
+
+// TEMPORAL AGGREGATION + STATE/HYSTERESIS — con estado, una instancia por unidad.
+function actualizarEstructuraUnidad(unidad, t) {
+  if (!unidad.estructura) {
+    unidad.estructura = { bufferFeatures: [], estadoActual: null, tiempoUltimaConfirmacion: null,
+      candidatoPendiente: null, tiempoInicioCandidato: null, ultimoTiempoValido: null,
+      ultimaConfianzaValida: null, historial: [], ultimaActualizacion: -Infinity, ultimoResultado: null };
+  }
+  const E = unidad.estructura, CFG = ESTRUCTURA_CFG;
+
+  if (Math.abs(t - E.ultimaActualizacion) < CFG.MIN_INTERVALO_ACTUALIZACION_S && E.ultimoResultado) return E.ultimoResultado;
+  E.ultimaActualizacion = t;
+
+  const posiciones = posicionesMetrosValidas(unidad, t);
+  if (posiciones.length !== 4) {
+    let estructuraFinal = 'DESCONOCIDA';
+    if (E.ultimoTiempoValido != null && (t - E.ultimoTiempoValido) <= CFG.TTL_PERDIDA_S && E.estadoActual) estructuraFinal = E.estadoActual;
+    const resultado = { estructura: estructuraFinal, confianza: E.ultimaConfianzaValida || 0, scores: {}, features: null, motivo: 'jugadores_insuficientes' };
+    E.ultimoResultado = resultado;
+    return resultado;
+  }
+  E.ultimoTiempoValido = t;
+
+  const features = extraerFeatures(posiciones);
+  const ordenActual = [...posiciones].sort((a,b)=>a.x-b.x).map(p=>p.trackId);
+  E.bufferFeatures.push({ t, features, orden: ordenActual });
+  const tCorte = t - CFG.CLASIFICACION_VENTANA_S;
+  E.bufferFeatures = E.bufferFeatures.filter(f => f.t >= tCorte);
+
+  const acumulado = { '3-1': 0, '4-0': 0, '2-2': 0 };
+  let cuenta = 0;
+  for (const f of E.bufferFeatures) {
+    const hCorta = E.bufferFeatures.filter(x => x.t >= f.t - CFG.ROTACION_VENTANA_S && x.t <= f.t);
+    const s = scoresInstantaneos(f.features, hCorta);
+    acumulado['3-1'] += s['3-1']; acumulado['4-0'] += s['4-0']; acumulado['2-2'] += s['2-2'];
+    cuenta++;
+  }
+  const scoresSuavizados = cuenta ? { '3-1': acumulado['3-1']/cuenta, '4-0': acumulado['4-0']/cuenta, '2-2': acumulado['2-2']/cuenta } : { '3-1':0,'4-0':0,'2-2':0 };
+
+  const entradas = Object.entries(scoresSuavizados).sort((a,b) => b[1]-a[1]);
+  const [nombreGanador, scoreGanador] = entradas[0];
+  const scoreSegundo = entradas[1][1];
+  let ganador = null;
+  if (scoreGanador >= CFG.CONFIANZA_MINIMA && (scoreGanador - scoreSegundo) >= CFG.MARGEN_DOMINANCIA) ganador = nombreGanador;
+
+  let estructuraMostrada;
+  if (E.estadoActual === null) {
+    if (ganador) {
+      E.estadoActual = ganador; E.tiempoUltimaConfirmacion = t;
+      E.historial.push({ t, from: null, to: ganador, confidence: +scoreGanador.toFixed(2) });
+      estructuraMostrada = ganador;
+    } else estructuraMostrada = 'TRANSICION';
+  } else if (ganador === E.estadoActual) {
+    E.candidatoPendiente = null; E.tiempoUltimaConfirmacion = t;
+    estructuraMostrada = E.estadoActual;
+  } else if (ganador) {
+    if (E.candidatoPendiente !== ganador) { E.candidatoPendiente = ganador; E.tiempoInicioCandidato = t; }
+    if ((t - E.tiempoInicioCandidato) >= CFG.HISTERESIS_TIEMPO_MIN_S) {
+      const anterior = E.estadoActual;
+      E.estadoActual = ganador; E.tiempoUltimaConfirmacion = t; E.candidatoPendiente = null;
+      E.historial.push({ t, from: anterior, to: ganador, confidence: +scoreGanador.toFixed(2) });
+      estructuraMostrada = ganador;
+    } else estructuraMostrada = 'TRANSICION';
+  } else {
+    E.candidatoPendiente = null;
+    estructuraMostrada = 'TRANSICION';
+  }
+
+  E.ultimaConfianzaValida = scoreGanador;
+  const confianzaMostrada = scoresSuavizados[estructuraMostrada] !== undefined ? scoresSuavizados[estructuraMostrada] : scoreGanador;
+  const resultado = {
+    estructura: estructuraMostrada, confianza: +confianzaMostrada.toFixed(2),
+    scores: { '3-1': +scoresSuavizados['3-1'].toFixed(2), '4-0': +scoresSuavizados['4-0'].toFixed(2), '2-2': +scoresSuavizados['2-2'].toFixed(2) },
+    features, motivo: null
+  };
+  E.ultimoResultado = resultado;
+  return resultado;
+}
+
+// Hit-test sobre el marcador de centroide de cada unidad visible (para seleccionarla).
+function unidadEnPunto(px, py) {
+  const tNow = P.time();
+  let mejor = null, dmin = 30 / draw.width;
+  for (const z of trazos) {
+    if (z.tool !== 'unit' || !z.visible) continue;
+    const m = metricasUnidad(z, tNow);
+    if (!m || !m.centroide) continue;
+    const d = Math.hypot(m.centroide.x - px, m.centroide.y - py);
+    if (d < dmin) { dmin = d; mejor = z; }
+  }
+  return mejor;
+}
+function crearUnidadDesdeSeleccion() {
+  if (multiSel.length < 2 || multiSel.length > 5) {
+    $('tbCursor').textContent = `⚠️ selecciona entre 2 y 5 jugadores para agrupar (tienes ${multiSel.length})`;
+    return;
+  }
+  const unidad = {
+    tool: 'unit', id: 'unit-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: `Unidad ${numUnidad++}`, players: [...multiSel],
+    visible: true, showConnections: true, showCentroid: true, showMetrics: true
+  };
+  trazos.push(unidad);
+  multiSel.length = 0; fichaSel = unidad;
+  $('tbCursor').textContent = `${unidad.name} creada (${unidad.players.length} jugadores)`;
+  repintarTrazos();
+}
+
+draw.addEventListener('mousedown', e => {
+  const p0 = ptDraw(e);
+  // Selección de una ficha ya vinculada, incluso sin herramienta activa (para poder
+  // arrastrarla/borrarla/des-vincularla sin forzar a reactivar "Seguir jugador" cada vez).
+  if (!tool || tool === 'player') {
+    const clic = jugadorEnPunto(p0.x, p0.y);
+    if (clic) {
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        // Shift/Cmd/Ctrl + clic SOBRE una ficha existente = selección múltiple para
+        // agrupar (no interfiere con Shift+clic en vacío, que sigue siendo re-vinculación).
+        const i = multiSel.indexOf(clic);
+        if (i >= 0) multiSel.splice(i, 1); else multiSel.push(clic);
+        fichaSel = null;
+        $('tbCursor').textContent = multiSel.length
+          ? `${multiSel.length} jugador(es) seleccionados para agrupar: ${multiSel.map(f => 'J' + f.n).join(', ')}`
+          : 'selección múltiple vacía';
+        repintarTrazos();
+        return;
+      }
+      fichaSel = clic;
+      if (clic.trackId != null && clic.tracking) {
+        arrastrandoFicha = true; dragBase = { x: p0.x, y: p0.y };
+        clic._offsetBase = { x: clic.offset.x, y: clic.offset.y };
+        $('tbCursor').textContent = `J${clic.n} seleccionado (track #${clic.trackId})`;
+      } else if (clic.trackId != null) {
+        $('tbCursor').textContent = `J${clic.n} seleccionado · tracking OFF (editable a mano, T para reactivar)`;
+      }
+      repintarTrazos();
+      if (!tool) return;
+    }
+  }
+  if (!tool) {
+    const clicUnidad = unidadEnPunto(p0.x, p0.y);
+    if (clicUnidad) {
+      fichaSel = clicUnidad;
+      $('tbCursor').textContent = `${clicUnidad.name} seleccionada (${clicUnidad.players.length} jugadores) · Delete para desagrupar`;
+      repintarTrazos();
+    }
+    return;
+  }
+  x0 = p0.x; y0 = p0.y;
+  if (tool === 'player') {
+    const tNow = P.time();
+    const existente = jugadorEnPunto(x0, y0);
+    if (existente) {
+      if (existente.trackId != null && existente.tracking) {
+        // Vinculada y con seguimiento activo: ya se seleccionó/preparó el arrastre arriba.
+        repintarTrazos(); return;
+      }
+      // Ficha manual (nunca vinculada, o con tracking desactivado con 'T'): edición directa
+      // de keyframes puntuales — comportamiento histórico intacto.
+      const k = existente.keys;
+      const i = k.findIndex(p => Math.abs(p.t - tNow) < 0.15);
+      if (i >= 0) { k[i].x = x0; k[i].y = y0; }
+      else { k.push({ t: tNow, x: x0, y: y0 }); k.sort((a, b) => a.t - b.t); }
+      $('tbCursor').textContent = `J${existente.n}: ${k.length} posiciones marcadas (manual)`;
+    } else {
+      const encontrado = idTrackCercano(x0, y0, tNow);
+      // Shift+clic con una ficha ya seleccionada = re-vincularla a este jugador nuevo
+      // (en vez de crear una ficha adicional). Mismo id de anotación, nuevo track_id.
+      if (e.shiftKey && fichaSel && encontrado) {
+        fichaSel.trackId = encontrado.trackId;
+        fichaSel.team = encontrado.team;
+        fichaSel.tracking = true;
+        fichaSel.offset = { x: 0, y: 0 };
+        fichaSel.keys = hornearKeysDesdeTrack(encontrado.trackId, fichaSel.offset);
+        $('tbCursor').textContent = `J${fichaSel.n}: re-vinculado a track #${encontrado.trackId}`;
+        repintarTrazos(); return;
+      }
+      if (encontrado) {
+        const keys = hornearKeysDesdeTrack(encontrado.trackId, { x: 0, y: 0 });
+        if (keys.length) {
+          const ficha = {
+            tool: 'player', col: colorActivo, n: numJugador++,
+            id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            trackId: encontrado.trackId, team: encontrado.team,
+            createdAt: tNow, tracking: true, offset: { x: 0, y: 0 },
+            keys
+          };
+          trazos.push(ficha);
+          fichaSel = ficha;
+          $('tbCursor').textContent = `J${ficha.n}: vinculado a track #${encontrado.trackId} (seguimiento automático)`;
+        } else {
+          $('tbCursor').textContent = '⚠️ jugador detectado pero sin datos de recorrido suficientes';
+        }
+      } else {
+        // Requisito explícito: si no hay jugador suficientemente próximo, NO vincular nada.
+        $('tbCursor').textContent = '❌ ningún jugador cerca de ese punto — prueba más cerca de sus pies';
+      }
+    }
+    repintarTrazos(); return;
+  }
+  if (tool === 'connect') {
+    const j = jugadorEnPunto(x0, y0);
+    if (!j) return;
+    if (!conectDesde) { conectDesde = j; $('tbCursor').textContent = 'ahora pincha el jugador que RECIBE'; }
+    else {
+      if (j !== conectDesde)
+        trazos.push({ tool: 'pass', from: conectDesde, to: j, col: colorActivo });
+      conectDesde = null; $('tbCursor').textContent = 'herramienta: unir · Esc para soltar';
+      repintarTrazos();
+    }
+    return;
+  }
+  dibujando = true;
+  if (tool === 'free') trazos.push({ tool, pts: [{ x: x0, y: y0 }], col: colorActivo });
+});
+draw.addEventListener('mousemove', e => {
+  if (arrastrandoFicha && fichaSel) {
+    // Offset manual: nunca se reescriben las coordenadas del track real, solo se
+    // desplaza la ficha respecto a él (requisito: vínculo siempre por track_id).
+    const p = ptDraw(e);
+    fichaSel.offset = {
+      x: fichaSel._offsetBase.x + (p.x - dragBase.x),
+      y: fichaSel._offsetBase.y + (p.y - dragBase.y)
+    };
+    fichaSel.keys = hornearKeysDesdeTrack(fichaSel.trackId, fichaSel.offset);
+    repintarTrazos();
+    return;
+  }
+  if (!dibujando) return;
+  const p = ptDraw(e);
+  if (tool === 'free') { trazos[trazos.length - 1].pts.push(p); repintarTrazos(); }
+  else { repintarTrazos(); pintarUno({ tool, x0, y0, x1: p.x, y1: p.y, col: colorActivo }); }
+});
+draw.addEventListener('mouseup', e => {
+  if (arrastrandoFicha) {
+    arrastrandoFicha = false;
+    if (fichaSel) $('tbCursor').textContent = `J${fichaSel.n}: offset ajustado (sigue vinculado a track #${fichaSel.trackId})`;
+    return;
+  }
+  if (!dibujando) return;
+  dibujando = false;
+  if (tool !== 'free' && tool !== 'player' && tool !== 'connect') {
+    const p = ptDraw(e); trazos.push({ tool, x0, y0, x1: p.x, y1: p.y, col: colorActivo });
+  }
+});
+
+function cabezaFlecha(x1, y1, ang, col, s = 1) {
+  // Punta estilizada (más larga y fina, tipo broadcast) con muesca trasera
+  dctx.fillStyle = col;
+  const len = 15 * s, spr = 0.28;
+  dctx.beginPath();
+  dctx.moveTo(x1, y1);
+  dctx.lineTo(x1 - len * Math.cos(ang - spr), y1 - len * Math.sin(ang - spr));
+  dctx.lineTo(x1 - len * 0.62 * Math.cos(ang), y1 - len * 0.62 * Math.sin(ang)); // muesca
+  dctx.lineTo(x1 - len * Math.cos(ang + spr), y1 - len * Math.sin(ang + spr));
+  dctx.closePath(); dctx.fill();
+}
+function rastroJugador(jug, s) {
+  // Estela tenue por donde ha pasado el jugador (sus keyframes)
+  if (!jug.keys || jug.keys.length < 2) return;
+  dctx.save();
+  dctx.strokeStyle = (jug.col || '#f2c200'); dctx.globalAlpha = 0.35;
+  dctx.lineWidth = 2.5 * s; dctx.setLineDash([5 * s, 5 * s]);
+  dctx.beginPath();
+  jug.keys.forEach((k, i) => { const x = k.x * draw.width, y = k.y * draw.height; i ? dctx.lineTo(x, y) : dctx.moveTo(x, y); });
+  dctx.stroke(); dctx.setLineDash([]); dctx.restore();
+}
+function focoJugador(X, Y, s, col, num, opts) {
+  // Marcador profesional (estilo broadcast): anillo de perspectiva ABIERTO que
+  // rodea los pies sin tapar al jugador + etiqueta de número tipo "tag".
+  opts = opts || {};
+  dctx.save();
+  if (opts.perdido) dctx.globalAlpha = 0.45; // tracking temporalmente perdido: última posición conocida
+  const rx = 26 * s, ry = 10 * s;           // elipse a ras de suelo, más fina
+  // sombra sutil de contacto en el césped
+  const alphaBase = opts.perdido ? 0.45 : 1;
+  dctx.globalAlpha = 0.22 * alphaBase; dctx.fillStyle = '#000';
+  dctx.beginPath(); dctx.ellipse(X, Y + 2 * s, rx, ry, 0, 0, Math.PI * 2); dctx.fill();
+  dctx.globalAlpha = alphaBase;
+  // anillo abierto (hueco arriba para no tapar el cuerpo del jugador)
+  dctx.strokeStyle = col; dctx.lineWidth = 3 * s; dctx.lineCap = 'round';
+  if (opts.perdido) dctx.setLineDash([4 * s, 4 * s]); // discontinuo = posición no confirmada ahora mismo
+  dctx.shadowColor = 'rgba(0,0,0,0.5)'; dctx.shadowBlur = 4 * s;
+  dctx.beginPath();
+  dctx.ellipse(X, Y, rx, ry, 0, Math.PI * 0.18, Math.PI * 0.82, true); // arco inferior
+  dctx.stroke();
+  dctx.beginPath();
+  dctx.ellipse(X, Y, rx, ry, 0, Math.PI * 1.18, Math.PI * 1.82, true); // arco superior partido
+  dctx.stroke();
+  dctx.shadowBlur = 0; dctx.setLineDash([]);
+  if (opts.seleccionado) {
+    // Anillo exterior de selección, independiente del marcador de perspectiva.
+    dctx.globalAlpha = 1; dctx.strokeStyle = '#fff'; dctx.lineWidth = 1.5 * s;
+    dctx.setLineDash([3 * s, 3 * s]);
+    dctx.beginPath(); dctx.ellipse(X, Y, rx + 6 * s, ry + 4 * s, 0, 0, Math.PI * 2); dctx.stroke();
+    dctx.setLineDash([]);
+  } else if (opts.multiSel) {
+    // Marcado para agrupar: anillo amarillo continuo, distinto del blanco de selección única.
+    dctx.globalAlpha = 1; dctx.strokeStyle = '#facc15'; dctx.lineWidth = 2 * s;
+    dctx.beginPath(); dctx.ellipse(X, Y, rx + 6 * s, ry + 4 * s, 0, 0, Math.PI * 2); dctx.stroke();
+  }
+  dctx.globalAlpha = 1;
+  // dos "puntas" laterales finas que cierran visualmente el foco (estilo target)
+  dctx.restore();
+  // Etiqueta de número: pastilla redondeada limpia, anclada arriba-derecha con conector
+  dctx.save();
+  const lx = X + rx * 0.9, ly = Y - ry - 16 * s, rw = 20 * s, rh = 15 * s;
+  dctx.strokeStyle = 'rgba(0,0,0,0.35)'; dctx.lineWidth = 1 * s;
+  dctx.beginPath(); dctx.moveTo(X, Y - ry); dctx.lineTo(lx, ly + rh); dctx.stroke();
+  dctx.fillStyle = col;
+  const rr = 4 * s, x0 = lx - rw/2, y0 = ly;
+  dctx.beginPath();
+  dctx.moveTo(x0 + rr, y0);
+  dctx.arcTo(x0 + rw, y0, x0 + rw, y0 + rh, rr);
+  dctx.arcTo(x0 + rw, y0 + rh, x0, y0 + rh, rr);
+  dctx.arcTo(x0, y0 + rh, x0, y0, rr);
+  dctx.arcTo(x0, y0, x0 + rw, y0, rr);
+  dctx.closePath(); dctx.fill();
+  dctx.fillStyle = (col === '#ffffff' || col === '#fde047' || col === '#f2c200') ? '#111' : '#fff';
+  dctx.font = `800 ${Math.round(11 * s)}px Inter`; dctx.textAlign = 'center'; dctx.textBaseline = 'middle';
+  dctx.fillText(String(num), lx, ly + rh/2 + 0.5);
+  dctx.restore();
+}
+
+// Casco convexo simple (monotone chain) para dibujar las conexiones de una unidad como un
+// perímetro limpio, sin red completa ilegible entre todos los pares de jugadores.
+function cascoConvexo(puntos) {
+  const pts = [...puntos].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) return pts;
+  const cruz = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const inf = [];
+  for (const p of pts) { while (inf.length >= 2 && cruz(inf[inf.length - 2], inf[inf.length - 1], p) <= 0) inf.pop(); inf.push(p); }
+  const sup = [];
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (sup.length >= 2 && cruz(sup[sup.length - 2], sup[sup.length - 1], p) <= 0) sup.pop(); sup.push(p); }
+  inf.pop(); sup.pop();
+  return inf.concat(sup);
+}
+function pintarUnidad(unidad, s, W, H) {
+  const m = metricasUnidad(unidad, P.time());
+  if (!m) return;
+  const X = x => x * W, Y = y => y * H;
+  const col = (unidad.players[0] && unidad.players[0].col) || '#f2c200';
+  if (unidad.showConnections && m.posiciones.length >= 2) {
+    const puntos = m.posiciones.map(o => ({ x: X(o.pantalla.x), y: Y(o.pantalla.y) }));
+    const hull = puntos.length >= 3 ? cascoConvexo(puntos) : puntos;
+    dctx.save();
+    dctx.strokeStyle = col; dctx.globalAlpha = 0.5; dctx.lineWidth = 2 * s; dctx.setLineDash([6 * s, 4 * s]);
+    dctx.beginPath();
+    hull.forEach((p, i) => i ? dctx.lineTo(p.x, p.y) : dctx.moveTo(p.x, p.y));
+    if (hull.length >= 3) dctx.closePath();
+    dctx.stroke(); dctx.setLineDash([]);
+    dctx.restore();
+  }
+  if (unidad.showCentroid && m.centroide) {
+    const cx = X(m.centroide.x), cy = Y(m.centroide.y);
+    dctx.save();
+    dctx.fillStyle = col; dctx.globalAlpha = (unidad === fichaSel) ? 1 : 0.85;
+    dctx.beginPath(); dctx.arc(cx, cy, 6 * s, 0, Math.PI * 2); dctx.fill();
+    if (unidad === fichaSel) {
+      dctx.globalAlpha = 1; dctx.strokeStyle = '#fff'; dctx.lineWidth = 1.5 * s; dctx.setLineDash([3 * s, 3 * s]);
+      dctx.beginPath(); dctx.arc(cx, cy, 14 * s, 0, Math.PI * 2); dctx.stroke(); dctx.setLineDash([]);
+    }
+    dctx.restore();
+    dctx.save();
+    dctx.globalAlpha = 1; dctx.font = `700 ${Math.round(10 * s)}px Inter`; dctx.fillStyle = '#fff'; dctx.textAlign = 'center';
+    dctx.fillText(unidad.name, cx, cy - 12 * s);
+    dctx.restore();
+  }
+  if (unidad.showMetrics && m.centroide && (m.anchura != null || m.profundidad != null)) {
+    const cx = X(m.centroide.x), cy = Y(m.centroide.y);
+    dctx.save();
+    dctx.font = `600 ${Math.round(9 * s)}px Inter`; dctx.fillStyle = 'rgba(255,255,255,0.85)'; dctx.textAlign = 'center';
+    const txt = [];
+    if (m.anchura != null) txt.push(`anch ${m.anchura.toFixed(1)}m`);
+    if (m.profundidad != null) txt.push(`prof ${m.profundidad.toFixed(1)}m`);
+    dctx.fillText(txt.join(' · '), cx, cy + 20 * s);
+    dctx.restore();
+  }
+  if (unidad.players.length === 4) pintarEstructuraUnidad(unidad, m, s, W, H);
+}
+// RENDER — badge compacto siempre visible; overlay DEBUG solo si debugTactico esta activo.
+// Solo aplica a unidades de EXACTAMENTE 4 jugadores de campo (spec de v1).
+function pintarEstructuraUnidad(unidad, m, s, W, H) {
+  const resultado = actualizarEstructuraUnidad(unidad, P.time());
+  const X = x => x * W, Y = y => y * H;
+  const cx = m.centroide ? X(m.centroide.x) : W/2, cy = m.centroide ? Y(m.centroide.y) : H/2;
+
+  if (!debugTactico) {
+    dctx.save();
+    dctx.font = `700 ${Math.round(10*s)}px Inter`; dctx.textAlign = 'center';
+    dctx.fillStyle = (resultado.estructura === 'TRANSICION' || resultado.estructura === 'DESCONOCIDA') ? 'rgba(255,255,255,0.55)' : '#facc15';
+    const txt = resultado.estructura === 'TRANSICION' ? 'TRANSICIÓN'
+              : resultado.estructura === 'DESCONOCIDA' ? 'DESCONOCIDA'
+              : `${resultado.estructura} · ${Math.round(resultado.confianza*100)}%`;
+    dctx.fillText(txt, cx, cy + (unidad.showMetrics ? 34 : 20) * s);
+    dctx.restore();
+    return;
+  }
+  dctx.save();
+  dctx.font = `600 ${Math.round(8*s)}px monospace`; dctx.textAlign = 'left'; dctx.fillStyle = '#22c55e';
+  const sc = resultado.scores || {};
+  const lineas = [
+    `válidos: ${resultado.features ? resultado.features.validPlayers : 0}/4  ${resultado.motivo||''}`,
+    `3-1: ${(sc['3-1']??0).toFixed(2)}  4-0: ${(sc['4-0']??0).toFixed(2)}  2-2: ${(sc['2-2']??0).toFixed(2)}`,
+    `FINAL: ${resultado.estructura} (${Math.round(resultado.confianza*100)}%)`
+  ];
+  lineas.forEach((l,i) => dctx.fillText(l, cx + 22*s, cy - 8*s + i*11*s));
+  dctx.restore();
+}
+function pintarUno(t) {
+  const W = draw.width, H = draw.height, s = escala();
+  const X = x => x * W, Y = y => y * H;
+  const col = t.col || '#f2c200';
+  dctx.strokeStyle = col; dctx.fillStyle = col; dctx.lineWidth = 4 * s; dctx.lineCap = 'round';
+  if (t.tool === 'unit') { pintarUnidad(t, s, W, H); return; }
+  if (t.tool === 'player') {
+    rastroJugador(t, s);
+    const p = posEnT(t, P.time());
+    const opts = { seleccionado: t === fichaSel, multiSel: multiSel.includes(t), perdido: t.trackId != null && tramoPerdido(t, P.time()) };
+    focoJugador(X(p.x), Y(p.y), s, col, t.n, opts);
+    return;
+  }
+  if (t.tool === 'pass') {
+    const pa = posEnT(t.from, P.time()), pb = posEnT(t.to, P.time());
+    const ax = X(pa.x), ay = Y(pa.y), bx = X(pb.x), by = Y(pb.y);
+    const d = Math.hypot(bx - ax, by - ay) || 1;
+    const ux = (bx - ax) / d, uy = (by - ay) / d;
+    const x0b = ax + ux * 38 * s, y0b = ay + uy * 16 * s;
+    const x1b = bx - ux * 42 * s, y1b = by - uy * 18 * s;
+    dctx.lineWidth = 3 * s; dctx.lineCap = 'round';
+    dctx.beginPath(); dctx.moveTo(x0b, y0b); dctx.lineTo(x1b, y1b); dctx.stroke();
+    dctx.fillStyle = col;
+    dctx.beginPath(); dctx.arc(x0b, y0b, 3 * s, 0, Math.PI * 2); dctx.fill();
+    cabezaFlecha(x1b, y1b, Math.atan2(y1b - y0b, x1b - x0b), col, s); return;
+  }
+  if (t.tool === 'free') {
+    dctx.beginPath(); t.pts.forEach((p, i) => i ? dctx.lineTo(X(p.x), Y(p.y)) : dctx.moveTo(X(p.x), Y(p.y))); dctx.stroke(); return;
+  }
+  if (t.tool === 'zone') {
+    const x = X(Math.min(t.x0, t.x1)), y = Y(Math.min(t.y0, t.y1));
+    const w = X(Math.abs(t.x1 - t.x0)), h = Y(Math.abs(t.y1 - t.y0));
+    dctx.globalAlpha = 0.22; dctx.fillRect(x, y, w, h); dctx.globalAlpha = 1;
+    dctx.setLineDash([8 * s, 6 * s]); dctx.lineWidth = 2.5 * s; dctx.strokeRect(x, y, w, h); dctx.setLineDash([]); return;
+  }
+  if (t.tool === 'curve') {
+    const ax = X(t.x0), ay = Y(t.y0), bx = X(t.x1), by = Y(t.y1);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2, dx = bx - ax, dy = by - ay;
+    const cx = mx - dy * 0.3, cy = my + dx * 0.3;
+    dctx.beginPath(); dctx.moveTo(ax, ay); dctx.quadraticCurveTo(cx, cy, bx, by); dctx.stroke();
+    cabezaFlecha(bx, by, Math.atan2(by - cy, bx - cx), col, s); return;
+  }
+  dctx.beginPath(); dctx.moveTo(X(t.x0), Y(t.y0)); dctx.lineTo(X(t.x1), Y(t.y1)); dctx.stroke();
+  if (t.tool === 'arrow') cabezaFlecha(X(t.x1), Y(t.y1), Math.atan2(Y(t.y1) - Y(t.y0), X(t.x1) - X(t.x0)), col, s);
+}
+function repintarTrazos() {
+  dctx.clearRect(0, 0, draw.width, draw.height);
+  trazos.forEach(pintarUno);
+  if (conectDesde) {
+    const s = escala(); const p = posEnT(conectDesde, P.time());
+    const cx = p.x * draw.width, cy = p.y * draw.height;
+    dctx.strokeStyle = '#fff'; dctx.lineWidth = 2 * s; dctx.setLineDash([4 * s, 4 * s]);
+    dctx.beginPath();
+    dctx.ellipse(cx, cy, 30 * s, 12 * s, 0, 0, Math.PI * 2);
+    dctx.stroke(); dctx.setLineDash([]);
+  }
+}
+
+function capturarFrame() {
+  const out = document.createElement('canvas');
+  out.width = draw.width; out.height = draw.height;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#0f172a'; octx.fillRect(0, 0, out.width, out.height);
+  if (mode === 'file' && video.videoWidth) { try { octx.drawImage(video, 0, 0, out.width, out.height); } catch (e) {} }
+  else { octx.fillStyle = '#94a3b8'; octx.font = '14px Inter'; octx.textAlign = 'center';
+         octx.fillText('(Usa vídeo local para incluir el fotograma; YouTube no lo permite)', out.width / 2, 24); }
+  octx.drawImage(draw, 0, 0);
+  return out.toDataURL('image/png');
+}
+let galeria = [];  // fotogramas guardados en esta sesión
+function descargarDataURL(dataURL, nombre) {
+  const a = document.createElement('a'); a.href = dataURL; a.download = nombre; a.click();
+}
+function exportarImagen() {
+  descargarDataURL(capturarFrame(), 'pizarra_' + fmt(P.time()).replace(':', '-') + '.png');
+}
+function guardarFrame() {
+  const dataURL = capturarFrame();
+  const min = fmt(P.time());
+  galeria.push({ dataURL, min, ev: eventos[selIdx]?.t_min || '', tipo: eventos[selIdx]?.tipo || '' });
+  const gn = $('galN'); if (gn) gn.textContent = galeria.length;
+  const btn = $('drawSave'); if (btn) { btn.textContent = '✓ Guardado'; setTimeout(() => btn.innerHTML = '💾 Guardar fotograma', 1200); }
+  // Persistir en el navegador
+  try { if (window.storage) window.storage.set('galeria_scouting', JSON.stringify(galeria), false); } catch (e) {}
+}
+function abrirGaleria() {
+  const grid = $('galGrid'); grid.innerHTML = '';
+  if (!galeria.length) { grid.innerHTML = '<p style="color:#94a3b8;">Aún no has guardado ningún fotograma. Dibuja sobre una jugada y pulsa 💾 Guardar fotograma.</p>'; }
+  galeria.forEach((g, i) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#12141a; border:1px solid rgba(255,255,255,0.15); border-radius:10px; overflow:hidden;';
+    card.innerHTML = `<img src="${g.dataURL}" style="width:100%; display:block;">
+      <div style="padding:8px; font-size:11px; color:#e2e8f0;">
+        <b>${g.min}</b> ${g.tipo ? '· ' + g.tipo : ''}
+        <div style="margin-top:6px; display:flex; gap:6px;">
+          <button class="tb" data-dl="${i}" style="font-size:10px;">⬇ Descargar</button>
+          <button class="tb" data-del="${i}" style="font-size:10px;">🗑</button>
+        </div>
+      </div>`;
+    grid.appendChild(card);
+  });
+  grid.querySelectorAll('[data-dl]').forEach(b => b.addEventListener('click', () => descargarDataURL(galeria[+b.dataset.dl].dataURL, 'pizarra_' + galeria[+b.dataset.dl].min.replace(':', '-') + '.png')));
+  grid.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => { galeria.splice(+b.dataset.del, 1); $('galN').textContent = galeria.length; try{ if(window.storage) window.storage.set('galeria_scouting', JSON.stringify(galeria), false);}catch(e){} abrirGaleria(); }));
+  $('galModal').style.display = 'block';
+}
+$('drawSave')?.addEventListener('click', guardarFrame);
+$('drawGallery')?.addEventListener('click', abrirGaleria);
+$('galClose')?.addEventListener('click', () => $('galModal').style.display = 'none');
+$('galDownloadAll')?.addEventListener('click', () => galeria.forEach((g, i) => setTimeout(() => descargarDataURL(g.dataURL, `pizarra_${i+1}_${g.min.replace(':','-')}.png`), i * 300)));
+// Restaurar galería guardada
+(async () => { try { if (window.storage) { const r = await window.storage.get('galeria_scouting', false); if (r && r.value) { galeria = JSON.parse(r.value); const gn=$('galN'); if(gn) gn.textContent = galeria.length; } } } catch (e) {} })();
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'Escape') { setTool(null); fichaSel = null; multiSel.length = 0; repintarTrazos(); return; }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && fichaSel) {
+    if (fichaSel.tool === 'unit') {
+      // Eliminar la agrupación no toca sus fichas ni sus tracks.
+      trazos = trazos.filter(z => z !== fichaSel);
+      $('tbCursor').textContent = `unidad desagrupada (jugadores intactos)`;
+    } else {
+      trazos = trazos.filter(z => z !== fichaSel && !(z.tool === 'pass' && (z.from === fichaSel || z.to === fichaSel)));
+      // Integridad referencial: sacar la ficha de cualquier unidad que la contenga;
+      // si una unidad queda con menos de 2 miembros, desaparece automáticamente.
+      for (const z of trazos) {
+        if (z.tool !== 'unit') continue;
+        const i = z.players.indexOf(fichaSel);
+        if (i >= 0) z.players.splice(i, 1);
+      }
+      trazos = trazos.filter(z => z.tool !== 'unit' || z.players.length >= 2);
+      const mi = multiSel.indexOf(fichaSel); if (mi >= 0) multiSel.splice(mi, 1);
+      $('tbCursor').textContent = `ficha eliminada`;
+    }
+    fichaSel = null; repintarTrazos(); e.preventDefault(); return;
+  }
+  if (e.key.toLowerCase() === 't' && fichaSel && fichaSel.trackId != null) {
+    fichaSel.tracking = !fichaSel.tracking;
+    if (fichaSel.tracking) fichaSel.keys = hornearKeysDesdeTrack(fichaSel.trackId, fichaSel.offset);
+    $('tbCursor').textContent = `J${fichaSel.n}: seguimiento ${fichaSel.tracking ? 'ACTIVADO' : 'DESACTIVADO (ahora editable a mano)'}`;
+    repintarTrazos(); return;
+  }
+  const visibles = [...eventos.keys()].filter(k => filtroActivo.has(eventos[k].tipo));
+  if (e.key === 'ArrowRight') {
+    const next = visibles.find(k => k > selIdx); if (next !== undefined) selectEvent(next, true); e.preventDefault();
+  } else if (e.key === 'ArrowLeft') {
+    const prev = [...visibles].reverse().find(k => k < selIdx); if (prev !== undefined) selectEvent(prev, true); e.preventDefault();
+  } else if (e.key === ' ') {
+    P.paused() ? P.play() : P.pause(); e.preventDefault();
+  } else if (e.key.toLowerCase() === 'j') { P.seek(P.time() - 5);
+  } else if (e.key.toLowerCase() === 'l') { P.seek(P.time() + 5);
+  } else if (e.key === ',') { P.frame(-1); e.preventDefault();
+  } else if (e.key === '.') { P.frame(1); e.preventDefault(); }
+});
+</script>
+</body>
+</html>

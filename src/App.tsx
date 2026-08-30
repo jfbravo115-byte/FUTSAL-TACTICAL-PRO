@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import MatchAnalysis from './pages/MatchAnalysis';
 import TacticalBoard from './pages/TacticalBoard';
 import LiveTracking from './pages/LiveTracking';
+import VideoAnalyzer from './pages/VideoAnalyzer';
 
 // En un arranque fresco de la app (cerrar y reabrir la PWA), iOS restaura la
 // última URL visitada (p.ej. /match). Esto fuerza a empezar siempre en la
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/analysis/:matchId" element={<MatchAnalysis />} />
           <Route path="/tactical-board" element={<TacticalBoard />} />
           <Route path="/live-tracking" element={<LiveTracking />} />
+          <Route path="/analizar" element={<VideoAnalyzer />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

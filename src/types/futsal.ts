@@ -62,6 +62,13 @@ export type PlayerStats = {
   shotsOffTarget: number;
   saves: number;
   conceded: number;
+  // Desglose granular de steals/losses. Opcionales: los partidos guardados en
+  // Firestore antes de introducir este desglose no los contienen.
+  stealsWithPossession?: number;
+  stealsClearance?: number;
+  lossesBadPass?: number;
+  lossesBadDribble?: number;
+  lossesBadControl?: number;
 };
 
 export type Player = {

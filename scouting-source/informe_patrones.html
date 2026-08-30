@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Informe de Patrones — Futsal Commander Pro</title>
+<style>
+  :root {
+    --bg: #0A0B0E; --panel: #12141A; --panel2: #1A1D26; --border: rgba(255,255,255,0.08);
+    --txt: #e2e8f0; --muted: #64748b; --blue: #3b82f6; --red: #ef4444; --green: #22c55e;
+    --amber: #f59e0b; --cyan: #06b6d4; --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--txt); font-family: 'Inter', -apple-system, sans-serif; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: var(--panel); }
+  header h1 { font-size: 15px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; font-style: italic; }
+  header h1 span { color: var(--amber); }
+  .loadbtn { position: relative; overflow: hidden; background: var(--panel2); border: 1px solid var(--border); color: var(--txt); padding: 8px 14px; border-radius: 10px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; }
+  .loadbtn:hover { border-color: var(--amber); color: var(--amber); }
+  .loadbtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .btn { background: var(--panel2); border: 1px solid var(--border); color: var(--txt); padding: 8px 14px; border-radius: 10px; font-size: 10px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+  .btn.primary { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.4); color: var(--amber); }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+  .empty { text-align: center; padding: 80px 20px; color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+  .empty b { display: block; font-size: 40px; margin-bottom: 10px; }
+
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px; }
+  section h2 { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.2em; color: var(--amber); margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  h4 { font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; color: var(--muted); margin: 12px 0 6px; }
+
+  .filechips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .filechip { background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 10px; font-weight: 800; display: flex; gap: 8px; align-items: center; }
+  .filechip i { font-style: normal; color: var(--muted); font-size: 9px; }
+  .filechip button { background: none; border: none; color: var(--red); cursor: pointer; font-weight: 900; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .statrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; text-align: center; min-width: 90px; flex: 1; }
+  .stat b { display: block; font-size: 22px; font-weight: 900; }
+  .stat span { font-size: 8px; color: var(--muted); text-transform: uppercase; font-weight: 800; letter-spacing: 0.06em; }
+
+  .bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .bar label { width: 110px; font-size: 9px; font-weight: 900; text-transform: uppercase; color: var(--muted); text-align: right; flex-shrink: 0; }
+  .bar .track { flex: 1; height: 16px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 6px; font-size: 9px; font-weight: 900; color: #000; min-width: 20px; }
+
+  canvas { width: 100%; border-radius: 10px; display: block; background: #166534; }
+  .evrow { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 11px; flex-wrap: wrap; }
+  .evrow:last-child { border-bottom: none; }
+  .evrow .t { font-family: monospace; font-weight: 800; color: var(--amber); }
+  .evrow .src { font-size: 9px; color: var(--muted); }
+  .evrow .nota { color: var(--cyan); font-style: italic; }
+  .tag { font-size: 8px; font-weight: 900; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid currentColor; }
+  .hint { font-size: 9px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+
+  @media print {
+    body { background: #fff; color: #111; }
+    header .loaders, .filechip button { display: none !important; }
+    section { border-color: #ccc; break-inside: avoid; }
+    :root { --panel: #fff; --panel2: #f3f4f6; --txt: #111; --muted: #555; --border: #ddd; }
+  }
+  .pat { font-size: 10.5px; color: var(--txt); padding: 3px 0; border-bottom: 1px dashed var(--border); }
+  .navrow { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .navbtn { background: rgba(59,130,246,0.12); border: 1px solid #3b82f6; color: #93c5fd; border-radius: 10px; padding: 8px 16px; font-weight: 900; cursor: pointer; font-size: 12px; }
+  .navbtn:hover { filter: brightness(1.4); }
+  .navbtn.alt { border-color: var(--border); color: var(--muted); font-size: 10px; }
+  .navlabel { font-weight: 900; font-size: 12px; min-width: 180px; }
+  .filters .chip { cursor: pointer; border: 1px solid rgba(59,130,246,0.5); background: rgba(59,130,246,0.07); border-radius: 999px; padding: 5px 11px; }
+  .filters .chip:hover { filter: brightness(1.5); }
+  .filters .chip.on { border-color: #4ade80; background: rgba(74,222,128,0.15); }
+  .minigrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+  .minibox { display: flex; flex-direction: column; gap: 2px; }
+  .minibox canvas { width: 100%; border-radius: 8px; }
+  .minibox span { font-size: 9px; color: var(--muted); font-weight: 800; }
+  .chip.fg { cursor:pointer; border:1px solid var(--border); border-radius:999px; padding:5px 11px; }
+  .chip.fg.on { border-color:#fde047; background:rgba(234,179,8,0.15); color:#fde047; }
+  .seqhead { font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:2px 0 6px; }
+  .paso { display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px dashed var(--border); font-size:11.5px; }
+  .paso .pn { display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--blue); color:#fff; align-items:center; justify-content:center; font-size:10px; font-weight:900; flex-shrink:0; }
+  .paso .sim { font-size:9px; color:#67e8f9; font-weight:800; width:auto; min-width:56px; }
+  .paso .pt { font-family:monospace; color:var(--muted); width:34px; }
+  .paso .prol { font-weight:900; color:#fde047; min-width:70px; }
+  .paso .pac { flex:1; }
+  .paso .pz { font-size:9px; color:var(--muted); font-family:monospace; }
+  .interline { font-size:10px; color:#fb7185; margin-top:6px; font-weight:800; }
+  details.jseq { border:1px solid var(--border); border-radius:8px; padding:6px 10px; margin:4px 0; }
+  details.jseq summary { font-weight:900; cursor:pointer; font-size:11px; }
+  details.jseq .paso { font-size:11px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Informe de <span>Patrones</span> · Scouting</h1>
+  <div class="loaders" style="display:flex;gap:8px">
+    <label class="loadbtn">📊 Cargar JSON(s) etiquetados<input type="file" accept=".json" id="inJson" multiple><button class="btn" id="btnCargarCorr" style="margin-left:6px" onclick="cargarCorreccionDelVisor(false)">📥 Cargar corrección del visor</button></label>
+    <button class="btn primary" onclick="window.print()">🖨️ Imprimir / PDF</button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="empty" id="empty"><b>📈</b>Carga uno o varios JSON corregidos del visor<br>(pueden ser varios partidos del mismo rival)</div>
+</main>
+
+<script>
+// Almacenamiento persistente compatible: usa window.storage si existe (artifacts),
+// si no, cae a localStorage (web normal como Netlify).
+if (typeof window.storage === 'undefined' || !window.storage) {
+  window.storage = {
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch(e){} return Promise.resolve(); },
+    get: (k) => { try { const v = localStorage.getItem(k); return Promise.resolve(v ? {value:v} : null); } catch(e){ return Promise.resolve(null);} },
+  };
+}
+
+'use strict';
+const TIPOS = {
+  saque_centro:      { label: 'Saque centro',    color: '#22c55e' },
+  saque_esquina:     { label: 'Córner',          color: '#a855f7' },
+  saque_banda_baja:  { label: 'Banda baja',      color: '#06b6d4' },
+  saque_banda_media: { label: 'Banda media',     color: '#0ea5e9' },
+  saque_banda_alta:  { label: 'Banda alta',      color: '#3b82f6' },
+  saque_porteria:    { label: 'Saque portería',  color: '#f59e0b' },
+  clip:              { label: 'Clip',            color: '#eab308' },
+  portero_jugador:   { label: 'Portero-jugador', color: '#c084fc' },
+  robo_presion:      { label: 'Robo en presión', color: '#4ade80' },
+  tiro_a_puerta:     { label: 'Tiro a puerta',   color: '#fb7185' },
+  parada:            { label: 'Parada portero',  color: '#38bdf8' },
+  tiempo_muerto:     { label: 'Tiempo muerto',   color: '#94a3b8' },
+  falta:             { label: 'Falta',           color: '#f97316' },
+  penalti:           { label: 'Penalti',         color: '#ef4444' },
+  doble_penalti:     { label: 'Doble penalti',   color: '#dc2626' },
+  gol:               { label: 'Gol',             color: '#16a34a' },
+  superioridad:      { label: 'Superioridad',    color: '#e879f9' },
+  reanudacion_otra:  { label: 'Otra',            color: '#64748b' },
+};
+const SETPIECES = ['saque_esquina','saque_banda_baja','saque_banda_media','saque_banda_alta','saque_porteria','saque_centro','falta','penalti','doble_penalti','portero_jugador','robo_presion'];
+
+let files = []; // {name, data}
+const $ = id => document.getElementById(id);
+
+$('inJson').addEventListener('change', e => {
+  const list = [...e.target.files];
+  let pending = list.length;
+  list.forEach(f => {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        files.push({ name: f.name.replace(/\.json$/i, ''), data });
+      } catch (err) { alert(`${f.name}: JSON inválido`); }
+      if (--pending === 0) render();
+    };
+    r.readAsText(f);
+  });
+  e.target.value = '';
+});
+
+// ── Auto-carga de la corrección hecha en el visor (sin descargar/subir) ──
+async function mostrarTelestraciones() {
+  try {
+    if (!window.storage) return;
+    const r = await window.storage.get('galeria_scouting', false);
+    if (!r || !r.value) return;
+    const gal = JSON.parse(r.value);
+    if (!gal.length) return;
+    let sec = document.getElementById('secTelestra');
+    if (!sec) {
+      sec = document.createElement('section');
+      sec.id = 'secTelestra';
+      const main = document.querySelector('main') || document.body;
+      main.appendChild(sec);
+    }
+    sec.innerHTML = '<h2>🎯 Pizarras del analista (telestración del visor)</h2>' +
+      '<p class="hint">Fotogramas que marcaste en el visor sobre jugadas concretas. Se guardan junto al análisis.</p>' +
+      '<div class="minigrid">' + gal.map(g =>
+        `<figure style="margin:0"><img src="${g.dataURL}" style="width:100%;border-radius:8px;border:1px solid rgba(255,255,255,0.15)">
+         <figcaption style="font-size:10px;color:#94a3b8;margin-top:4px">${g.min || ''}${g.tipo ? ' · ' + g.tipo : ''}</figcaption></figure>`
+      ).join('') + '</div>';
+  } catch (e) {}
+}
+
+async function cargarCorreccionDelVisor(silencioso) {
+  try {
+    if (!window.storage) return false;
+    const r = await window.storage.get('analisis_corregido', false);
+    if (r && r.value) {
+      const data = JSON.parse(r.value);
+      files = [{ name: 'analisis_corregido', data }];
+      render();
+      return true;
+    }
+  } catch (e) {}
+  if (!silencioso) alert('No hay ninguna corrección guardada desde el visor todavía.');
+  return false;
+}
+// Si venimos del visor con ?corr=1, cargar automáticamente
+if (new URLSearchParams(location.search).get('corr') === '1') {
+  window.addEventListener('DOMContentLoaded', () => { cargarCorreccionDelVisor(true); mostrarTelestraciones(); });
+}
+// Botón para traer las pizarras del analista en cualquier momento
+window.addEventListener('DOMContentLoaded', () => { if (window.storage) mostrarTelestraciones(); });
+
+function allEvents() {
+  const evs = [];
+  files.forEach(f => (f.data.eventos || []).forEach(ev => evs.push({ ...ev, _src: f.name })));
+  return evs.sort((a, b) => (a._src + a.t).localeCompare?.(b._src + b.t) || a.t - b.t);
+}
+function metersFiles() { return files.filter(f => f.data.coordenadas === 'metros'); }
+
+// ── Clasificación de sistema desde una instantánea de formación ──
+function clasificarSistema(f) {
+  if (!f || f.n < 4) return null;
+  if (f.prof <= 7) return '4-0';                 // línea plana: poca profundidad
+  const [back, front] = f.lineas || [0, 0];
+  if (back >= 3) return '3-1';
+  if (front >= 3) return '1-3 (pívot doble)';
+  return '2-2';
+}
+
+// ── Render principal ─────────────────────────────────────────────
+function render() {
+  if (!files.length) return;
+  $('empty')?.remove();
+  const main = $('main');
+  main.innerHTML = '';
+
+  // Archivos cargados
+  main.insertAdjacentHTML('beforeend', `<section>
+    <h2>Fuentes del informe</h2>
+    <div class="filechips">${files.map((f, i) => `
+      <div class="filechip">${f.name}
+        <i>${(f.data.eventos||[]).length} eventos · ${f.data.coordenadas === 'metros' ? '📐 posiciones' : 'solo eventos'}</i>
+        <button onclick="files.splice(${i},1);render()">✕</button>
+      </div>`).join('')}
+    </div></section>`);
+
+  const evs = allEvents();
+
+  // ── 1. Resumen global ──
+  const counts = {};
+  evs.forEach(e => counts[e.tipo] = (counts[e.tipo] || 0) + 1);
+  const orden = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  main.insertAdjacentHTML('beforeend', `<section>
+    <h2>Resumen · ${evs.length} eventos en ${files.length} vídeo(s)</h2>
+    <div class="statrow">${orden.slice(0, 8).map(([k, n]) => {
+      const c = TIPOS[k] || TIPOS.reanudacion_otra;
+      return `<div class="stat"><b style="color:${c.color}">${n}</b><span>${c.label}</span></div>`;
+    }).join('')}</div>
+    <div class="filters" id="botonera" style="margin-top:10px"></div>
+    <div class="filters" id="filtrosGlobal" style="margin-top:10px">
+      <b style="font-size:10px;color:var(--muted);align-self:center">VER SOLO:</b>
+      <div class="chip fg on" data-fg="todo">Todo</div>
+      <div class="chip fg" data-fg="clave">⭐ Clave</div>
+      <div class="chip fg" data-fg="nota">Con nota</div>
+      ${[...new Set(evs.flatMap(e => e.tags || []))].map(tg => `<div class="chip fg" data-fg="tag:${tg}">${tg}</div>`).join('')}
+    </div>
+    <p class="hint">PULSA una categoría para saltar a sus movimientos. El filtro VER SOLO oculta lo demás.</p></section>`);
+
+  // ── 1b. CONCLUSIONES AUTOMÁTICAS ──
+  const claves = evs.filter(e => e.clave);
+  const conNotas = evs.filter(e => e.nota);
+  const tagCount = {};
+  evs.forEach(e => (e.tags || []).forEach(tg => tagCount[tg] = (tagCount[tg] || 0) + 1));
+  const conclusiones = [];
+  // Sistema dominante: contar sistemas detectados en las jugadas con posiciones
+  window._sistemasDetectados = window._sistemasDetectados || [];
+  if (claves.length) conclusiones.push(`⭐ <b>${claves.length} jugada(s) marcadas como CLAVE</b> por el analista — detalladas abajo con pizarra.`);
+  const topTipo = orden.filter(([k]) => k !== 'clip' && k !== 'reanudacion_otra')[0];
+  if (topTipo) conclusiones.push(`La acción a balón parado más repetida es <b>${(TIPOS[topTipo[0]] || {}).label || topTipo[0]}</b> (${topTipo[1]} veces): prioriza su preparación defensiva.`);
+  Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 3).forEach(([tg, n]) =>
+    conclusiones.push(`Descriptor <b>${tg}</b> presente en ${n} acción(es).`));
+  // Sistema dominante del rival → consejo de preparación (basado en principios del juego)
+  const sistCount = {};
+  files.forEach(f => (f.data.formaciones || []).forEach(snap => {
+    const s = clasificarSistema(snap.rival);
+    if (s) sistCount[s] = (sistCount[s] || 0) + 1;
+  }));
+  const sistTop = Object.entries(sistCount).sort((a, b) => b[1] - a[1])[0];
+  const CONSEJOS = {
+    '4-0': 'El rival ataca en <b>4-0</b>: busca amplitud y profundidad a tu espalda (paralelas, apariciones entre líneas, bloqueos). Claves defensivas: no perseguir al bloqueo (defensa de cambios con comunicación), coberturas permanentes y vigilar la puerta atrás.',
+    '3-1': 'El rival ataca en <b>3-1</b> con pívot: prioriza la defensa del pívot (anticipación o 2x1 al recibir), cierra la línea de pase interior y bascula fuerte al lado del balón.',
+    '2-2': 'El rival ataca en <b>2-2</b> (parejas): vigila los desdoblamientos por banda y las duplicaciones; mantén las coberturas entre líneas y no dejes 1x1 largos en banda.',
+    '1-3 (pívot doble)': 'El rival carga el juego arriba: refuerza el repliegue y las ayudas al pívot; cuidado con las segundas jugadas al borde del área.',
+  };
+  if (sistTop && CONSEJOS[sistTop[0]])
+    conclusiones.push(CONSEJOS[sistTop[0]]);
+  if (conclusiones.length)
+    main.insertAdjacentHTML('beforeend', `<section><h2>Conclusiones del análisis</h2>
+      ${conclusiones.map(c => `<div class="pat">${c}</div>`).join('')}
+      <p class="hint">Generadas automáticamente de los datos y tus etiquetas. Los automatismos por tipo de acción, con su pizarra, están en las secciones de movimientos.</p></section>`);
+
+  // ── 1c. JUGADAS CLAVE con pizarra ──
+  if (claves.length && metersFiles().length) {
+    let kh = `<section><h2 style="color:#fde047">⭐ Jugadas clave</h2>`;
+    claves.forEach((ev, ki) => {
+      kh += `<div class="pat"><b>${ev.t_min}</b> ${(TIPOS[ev.tipo] || {}).label || ev.tipo}
+             ${(ev.tags || []).map(t2 => `<span style="color:#93c5fd">[${t2}]</span>`).join(' ')}
+             ${ev.nota ? `— <i>${ev.nota}</i>` : ''}</div>
+             <canvas id="clave_${ki}" width="520" height="280" style="border-radius:10px;margin:6px 0"></canvas>`;
+    });
+    kh += `<p class="hint">Pizarra: movimientos de los jugadores del rival desde 2 s antes hasta 8 s después de la acción.</p></section>`;
+    main.insertAdjacentHTML('beforeend', kh);
+    claves.forEach((ev, ki) => {
+      const cv = document.getElementById('clave_' + ki);
+      const tj = extraerJugada(ev);
+      if (tj && tj.trays.length) drawPizarra(cv, tj.trays, tj.L, tj.W, `${ev.t_min} · ${(TIPOS[ev.tipo] || {}).label || ev.tipo}`);
+      else { const ctx = cv.getContext('2d'); ctx.fillStyle = '#1a1d26'; ctx.fillRect(0,0,cv.width,cv.height);
+             ctx.fillStyle = '#64748b'; ctx.font = '11px Inter'; ctx.fillText('Sin posiciones para esta jugada (vídeo sin calibración de pista)', 14, 24); }
+    });
+  }
+
+  // ── 2. Balón parado: por tipo, con mapa de orígenes si hay metros ──
+  const bpTypes = SETPIECES.filter(t => counts[t]);
+  if (bpTypes.length) {
+    let html = `<section><h2>Balón parado del rival</h2>`;
+    bpTypes.forEach(t => {
+      const c = TIPOS[t];
+      const lista = evs.filter(e => e.tipo === t);
+      html += `<h4 style="color:${c.color}">${c.label} · ${lista.length}</h4>`;
+      const conCluster = lista.filter(e => e.cluster && files.find(f => f.name === e._src)?.data.coordenadas === 'metros');
+      if (conCluster.length) {
+        const cid = 'map_' + t;
+        html += `<canvas id="${cid}" width="700" height="360" data-tipo="${t}"></canvas>`;
+      }
+      html += lista.map(e => `<div class="evrow" data-evfiltro data-evtime="${e.t_min || ''}">
+        <span class="t">${e.clave ? '⭐ ' : ''}${e.t_min || ''}</span>
+        <span class="src">${e._src}</span>
+        ${e.saca ? `<span class="tag" style="color:${e.saca === 'rival' ? 'var(--red)' : 'var(--blue)'}">${e.saca}</span>` : ''}
+        ${e.detalle && e.detalle !== 'campo_abierto' ? `<span class="src">${String(e.detalle).replace(/_/g, ' ')}</span>` : ''}
+        ${e.nota ? `<span class="nota">📝 ${e.nota}</span>` : ''}
+      </div>`).join('');
+    });
+    html += `<p class="hint">Los mapas muestran el punto de agrupación de los jugadores en cada saque (solo vídeos con calibración de pista). Repeticiones de zona = patrón.</p></section>`;
+    main.insertAdjacentHTML('beforeend', html);
+    bpTypes.forEach(t => { const cv = document.querySelector(`#map_${t}`); if (cv) drawClusterMap(cv, t); });
+  }
+
+  // ── 3. Sistemas de juego (solo archivos con metros) ──
+  const mf = metersFiles();
+  if (mf.length) {
+    ['local', 'rival'].forEach(team => {
+      const sistemas = {};
+      let total = 0;
+      mf.forEach(f => (f.data.formaciones || []).forEach(snap => {
+        const s = clasificarSistema(snap[team]);
+        if (s) { sistemas[s] = (sistemas[s] || 0) + 1; total++; }
+      }));
+      if (!total) return;
+      const color = team === 'local' ? 'var(--blue)' : 'var(--red)';
+      let html = `<section><h2 style="color:${color}">Estructura ${team} · ${total} instantáneas (cada 5 s)</h2>`;
+      Object.entries(sistemas).sort((a, b) => b[1] - a[1]).forEach(([s, n]) => {
+        const pct = Math.round(n / total * 100);
+        html += `<div class="bar"><label>${s}</label><div class="track">
+          <div class="fill" style="width:${pct}%;background:${team === 'local' ? '#3b82f6' : '#ef4444'}">${pct}%</div></div></div>`;
+      });
+      html += `<p class="hint">Clasificación aproximada por profundidad y reparto en líneas de las posiciones detectadas (incluye momentos de defensa y ataque mezclados). Úsala como tendencia, no como verdad absoluta.</p></section>`;
+      main.insertAdjacentHTML('beforeend', html);
+    });
+
+    // ── 4. Ocupación por tercios (indicador de altura de presión/juego) ──
+    let html = `<section><h2>Ocupación de pista por tercios</h2><div class="grid2">`;
+    ['local', 'rival'].forEach(team => {
+      const tercios = [0, 0, 0];
+      mf.forEach(f => {
+        const grid = f.data.heatmap_equipos?.[team];
+        if (!grid) return;
+        const cols = grid[0].length;
+        grid.forEach(row => row.forEach((v, c) => {
+          tercios[Math.min(2, Math.floor(c / cols * 3))] += v;
+        }));
+      });
+      const tot = tercios.reduce((a, b) => a + b, 0) || 1;
+      const color = team === 'local' ? '#3b82f6' : '#ef4444';
+      html += `<div><h4 style="color:${color}">${team}</h4>` +
+        ['Tercio propio', 'Tercio medio', 'Tercio rival'].map((lbl, i) => {
+          const pct = Math.round(tercios[i] / tot * 100);
+          return `<div class="bar"><label>${lbl}</label><div class="track">
+            <div class="fill" style="width:${pct}%;background:${color}">${pct}%</div></div></div>`;
+        }).join('') + `</div>`;
+    });
+    // Aviso si un equipo tiene muchas menos detecciones que el otro (color difícil de clasificar)
+    const totales = {};
+    ['local', 'rival'].forEach(team => {
+      totales[team] = mf.reduce((acc, f) => {
+        const g = f.data.heatmap_equipos?.[team];
+        return acc + (g ? g.flat().reduce((a, b) => a + b, 0) : 0);
+      }, 0);
+    });
+    const minT = Math.min(totales.local, totales.rival), maxT = Math.max(totales.local, totales.rival);
+    if (maxT > 0 && minT / maxT < 0.4) {
+      const debil = totales.local < totales.rival ? 'local' : 'rival';
+      html += `</div><p class="hint" style="color:var(--amber)">⚠️ El equipo ${debil} tiene muchas menos detecciones (color de equipación difícil de distinguir en el vídeo): su dato es solo orientativo.</p><div style="display:none">`;
+    }
+    html += `</div><p class="hint">Alto % en tercio rival = equipo que presiona/juega alto. El "tercio propio" se mide desde la portería que defiende cada equipo en la orientación del vídeo.</p></section>`;
+    main.insertAdjacentHTML('beforeend', html);
+  }
+
+  // ── 4b. MOVIMIENTOS DENTRO DE LA JUGADA (Fase 4) ──
+  if (mf.length) {
+    const tiposConJugadas = SETPIECES.filter(t =>
+      evs.some(e => e.tipo === t && files.find(f => f.name === e._src)?.data.coordenadas === 'metros'));
+    tiposConJugadas.forEach(t => {
+      const analisis = analizarMovimientos(t, 'rival');
+      if (!analisis || analisis.jugadas < 2) return;
+      const c = TIPOS[t];
+      const paleta = ['#f59e0b','#3b82f6','#ef4444','#a855f7','#06b6d4','#22c55e','#fb7185','#eab308','#94a3b8','#e879f9'];
+      let html = `<section id="sec_${t}"><h2 style="color:${c.color}">Movimientos del rival · ${c.label} (${analisis.jugadas} jugadas)</h2>
+        <div class="navrow">
+          <button class="navbtn" data-nav="${t}" data-d="-1">◀ anterior</button>
+          <span class="navlabel" id="navlab_${t}"></span>
+          <button class="navbtn" data-nav="${t}" data-d="1">siguiente ▶</button>
+          <button class="navbtn alt" id="btnAll_${t}">⊞ superposición de todas</button>
+        </div>
+        <canvas id="tray_${t}" width="700" height="380"></canvas>
+        <div class="pat" id="lect_${t}" style="border:none;font-size:11px;padding:6px 0"></div>
+        <h4>Secuencia de cada jugada (orden temporal · rol · movimiento)</h4>
+        ${analisis.trays.map((j, ji) => `<details class="jseq"><summary style="color:${paleta[ji % paleta.length]}">J${ji + 1} · ${j.ev.t_min || ''}</summary>${narrarSecuencia(j.trays, analisis.L, analisis.W)}</details>`).join('')}
+        <h4>Todas las jugadas · una pizarra por jugada</h4>
+        <div class="minigrid">${analisis.trays.map((j, ji) =>
+          `<div class="minibox"><canvas id="mini_${t}_${ji}" width="240" height="132"></canvas><span>J${ji + 1} · ${j.ev.t_min || ''}</span></div>`).join('')}</div>
+        <h4>Automatismos detectados — PULSA un patrón para verlo resaltado sobre la superposición</h4>
+        <div class="filters" id="patchips_${t}"></div>
+        <h4>Movimientos repetidos detectados</h4>`;
+      if (analisis.patrones.length) {
+        analisis.patrones.forEach(p => {
+          const pct = Math.round(p.n / analisis.jugadas * 100);
+          html += `<div class="bar"><label>Z${p.de} → Z${p.a}</label><div class="track">
+            <div class="fill" style="width:${pct}%;background:${c.color}">${p.n} de ${analisis.jugadas} jugadas (${pct}%)</div></div></div>`;
+        });
+      } else {
+        html += `<p class="hint">Sin movimientos repetidos en ≥50% de las jugadas: variaron sus recorridos.</p>`;
+      }
+      html += `<p class="hint">Trayectorias de los jugadores del rival desde 2 s antes del saque hasta 8 s después, todas las jugadas orientadas hacia el mismo lado para poder compararlas. Zonas 1-4 desde la portería donde nace la jugada. ● inicio → ▲ final. Un movimiento repetido en la mayoría de jugadas = automatismo que preparar.</p></section>`;
+      main.insertAdjacentHTML('beforeend', html);
+      // Botonera del resumen → salta a esta sección
+      document.getElementById('botonera')?.insertAdjacentHTML('beforeend',
+        `<div class="chip btnlike" data-sec="${t}" style="color:${c.color}">${c.label} · ${analisis.jugadas}</div>`);
+      // Lectura táctica de una jugada (línea viva bajo la pizarra)
+      analisis.trays.forEach(j => {
+        const s2 = detectarSistema(j.trays, analisis.L, analisis.W);
+        if (s2) (window._sistemasDetectados = window._sistemasDetectados || []).push(s2);
+      });
+      const lectDe = j => {
+        const cr = detectarCruces(j.trays), so = detectarSobreposiciones(j.trays, analisis.L), ro = detectarRotacion(j.trays);
+        const inter = [];
+        if (cr) inter.push(`${cr} cruce`);
+        if (so) inter.push(`${so} sobreposición`);
+        if (ro) inter.push(`rotación de ${ro}`);
+        return `<div class="seqhead">Secuencia de la jugada · orden temporal</div>`
+          + narrarSecuencia(j.trays, analisis.L, analisis.W)
+          + (inter.length ? `<div class="interline">Interacciones: ${inter.join(' · ')}</div>` : '');
+      };
+      // Navegador jugada a jugada (vista por defecto: UNA jugada, limpia)
+      const nav = { i: 0 };
+      const cvT = document.querySelector(`#tray_${t}`);
+      const pinta = () => {
+        const j = analisis.trays[nav.i];
+        drawPizarra(cvT, j.trays, analisis.L, analisis.W,
+                    `J${nav.i + 1} · ${j.ev.t_min || ''} · ${c.label}`);
+        document.getElementById(`navlab_${t}`).textContent = `Jugada ${nav.i + 1} de ${analisis.jugadas} · min ${j.ev.t_min || '?'}`;
+        document.getElementById(`lect_${t}`).innerHTML = lectDe(j);
+      };
+      pinta();
+      document.querySelectorAll(`[data-nav="${t}"]`).forEach(b =>
+        b.addEventListener('click', () => {
+          nav.i = (nav.i + (+b.dataset.d) + analisis.jugadas) % analisis.jugadas;
+          pinta();
+        }));
+      document.getElementById(`btnAll_${t}`).addEventListener('click', () => {
+        drawTrayectorias(cvT, analisis, -1);
+        document.getElementById(`navlab_${t}`).textContent = 'Superposición de todas las jugadas';
+        document.getElementById(`lect_${t}`).innerHTML = '<span class=\'hint\'>Vuelve a una jugada con ◀ ▶ para ver su secuencia.</span>';
+      });
+      // Mini-pizarras (una por jugada — es lo que sale en el PDF)
+      analisis.trays.forEach((j, ji) => {
+        const mc = document.getElementById(`mini_${t}_${ji}`);
+        if (mc) drawPizarra(mc, j.trays, analisis.L, analisis.W, '');
+      });
+      const grupos = agruparAutomatismos(analisis);
+      const letras = ['A', 'B', 'C'];
+      document.querySelector(`#patchips_${t}`).innerHTML = grupos.map((g, gi) => {
+        const ej = clasificarMov(analisis.trays[g.miembros[0].ji].trays[g.miembros[0].ti], analisis.L, analisis.W);
+        return `<div class="chip" data-pat="${t}" data-g="${gi}" style="color:#4ade80">⚙ Patrón ${letras[gi]} · ${ej.tipo} ${ej.z} · ${g.jugadas.length} jugadas (${g.jugadas.map(x => 'J' + (x + 1)).join(',')})</div>`;
+      }).join('') || '<span class="hint">Sin automatismos claros: hacen falta 2+ jugadas con movimientos similares.</span>';
+      // Pizarra del automatismo principal (movimiento medio + zona)
+      if (grupos.length) {
+        document.querySelector(`#patchips_${t}`).insertAdjacentHTML('afterend',
+          `<canvas id="piz_${t}" width="520" height="280" style="border-radius:10px;margin:6px 0"></canvas>`);
+        const med = trayectoriaMedia(grupos[0], analisis).map(p => ({ x: p.x * analisis.L, y: p.y * analisis.W }));
+        const indivs = grupos[0].miembros.slice(0, 4).map(m => analisis.trays[m.ji].trays[m.ti]);
+        drawPizarra(document.getElementById('piz_' + t), [med, ...indivs], analisis.L, analisis.W,
+                    `Patrón A · ${clasificarMov(med, analisis.L, analisis.W).tipo} · ${grupos[0].jugadas.length} jugadas`);
+      }
+      document.querySelectorAll(`.chip[data-pat="${t}"]`).forEach(chip => {
+        chip.addEventListener('click', () => {
+          const activo = chip.classList.toggle('on');
+          document.querySelectorAll(`.chip[data-pat="${t}"]`).forEach(x => { if (x !== chip) x.classList.remove('on'); });
+          if (activo) {
+            drawTrayectorias(cvT, analisis, -1, grupos[+chip.dataset.g].miembros);
+            document.getElementById(`navlab_${t}`).textContent = 'Patrón resaltado sobre la superposición';
+          } else { pinta(); }
+        });
+      });
+    });
+  }
+
+  // Conclusión de sistema dominante (con los sistemas ya registrados)
+  if ((window._sistemasDetectados || []).length >= 3) {
+    const cnt = {};
+    window._sistemasDetectados.forEach(s => cnt[s] = (cnt[s] || 0) + 1);
+    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+    const total = window._sistemasDetectados.length;
+    const secC = [...document.querySelectorAll('h2')].find(x => x.textContent.includes('Conclusiones'));
+    if (secC) secC.insertAdjacentHTML('afterend',
+      `<div class="pat">Sistema de ataque dominante del rival: <b>${top[0]}</b> en ${top[1]} de ${total} jugadas analizadas (${Math.round(top[1]/total*100)}%). El desglose por jugada está en cada secuencia (fila S).</div>`);
+  }
+  document.querySelectorAll('#botonera .chip').forEach(ch =>
+    ch.addEventListener('click', () =>
+      document.getElementById('sec_' + ch.dataset.sec)?.scrollIntoView({ behavior: 'smooth' })));
+
+  // Filtro global tipo Once: bueno/clave/nota/descriptor
+  document.querySelectorAll('#filtrosGlobal .fg').forEach(ch =>
+    ch.addEventListener('click', () => {
+      document.querySelectorAll('#filtrosGlobal .fg').forEach(x => x.classList.remove('on'));
+      ch.classList.add('on');
+      const fg = ch.dataset.fg;
+      const cumple = ev => fg === 'todo' ? true
+        : fg === 'clave' ? ev.clave
+        : fg === 'nota' ? !!ev.nota
+        : fg.startsWith('tag:') ? (ev.tags || []).includes(fg.slice(4)) : true;
+      // Atenuar las filas de evento que no cumplen en todas las listas del informe
+      document.querySelectorAll('[data-evfiltro]').forEach(el => {
+        const t2 = el.getAttribute('data-evtime');
+        const match = evs.some(ev => ev.t_min === t2 && cumple(ev));
+        el.style.display = (fg === 'todo' || match) ? '' : 'none';
+      });
+    }));
+
+  // ── 5. Notas del analista ──
+  const conNota = evs.filter(e => e.nota);
+  if (conNota.length) {
+    main.insertAdjacentHTML('beforeend', `<section><h2>Notas del analista · ${conNota.length}</h2>
+      ${conNota.map(e => {
+        const c = TIPOS[e.tipo] || TIPOS.reanudacion_otra;
+        return `<div class="evrow"><span class="t">${e.t_min || ''}</span>
+          <span class="tag" style="color:${c.color}">${c.label}</span>
+          <span class="src">${e._src}</span>
+          <span class="nota">${e.nota}</span></div>`;
+      }).join('')}</section>`);
+  }
+}
+
+// ── Fase 4: análisis de movimientos dentro de la jugada ──────────
+// Extrae las trayectorias del equipo elegido en la ventana de cada jugada
+// del tipo dado, las orienta todas hacia el mismo lado, y busca movimientos
+// zona→zona que se repiten entre jugadas.
+function extraerJugada(ev) {
+  const f = files.find(f2 => (f2.data.eventos || []).includes(ev)) || metersFiles()[0];
+  if (!f || f.data.coordenadas !== 'metros') return null;
+  const L = f.data.pista?.largo_m || 40, W = f.data.pista?.ancho_m || 20;
+  const t0 = (ev.parado_desde ?? ev.t) - 2, t1 = ev.t + 8;
+  const porJugador = {};
+  (f.data.muestras || []).forEach(m => {
+    if (m.t < t0 || m.t > t1) return;
+    m.p.forEach(p => {
+      if (p.eq !== 'r') return;
+      (porJugador[p.id] = porJugador[p.id] || []).push({ t: m.t, x: p.x, y: p.y });
+    });
+  });
+  const trays = Object.values(porJugador).filter(tr => tr.length >= 4).slice(0, 5);
+  return { trays, L, W };
+}
+
+function analizarMovimientos(tipo, equipo) {
+  const eq = equipo === 'rival' ? 'r' : 'l';
+  const L0 = metersFiles()[0]?.data.pista?.largo_m || 40;
+  const W0 = metersFiles()[0]?.data.pista?.ancho_m || 20;
+  const jugadas = [];
+
+  files.forEach(f => {
+    if (f.data.coordenadas !== 'metros') return;
+    const ms = f.data.muestras || [];
+    (f.data.eventos || []).forEach(ev => {
+      if (ev.tipo !== tipo) return;
+      const t0 = (ev.parado_desde ?? ev.t) - 2, t1 = ev.t + 8;
+      const porJugador = {};
+      ms.forEach(m => {
+        if (m.t < t0 || m.t > t1) return;
+        m.p.forEach(p => {
+          if (p.eq !== eq) return;
+          (porJugador[p.id] = porJugador[p.id] || []).push({ t: m.t, x: p.x, y: p.y });
+        });
+      });
+      // Normalizar orientación: espejo para que la jugada nazca siempre a la izquierda/arriba
+      const cx = ev.cluster?.x ?? L0 / 2, cy = ev.cluster?.y ?? W0 / 2;
+      const flipX = cx > L0 / 2, flipY = cy > W0 / 2;
+      // Filtro de calidad: el tracker fragmenta IDs, asi que exigimos
+      // trayectorias sustanciales (>=2.5 s), cercanas a la accion si hay
+      // cluster, y nos quedamos con las 5 mas completas (4 jugadores + cierre).
+      const durTr = tr => tr[tr.length - 1].t - tr[0].t;
+      let brutos = Object.values(porJugador).filter(tr => tr.length >= 6 && durTr(tr) >= 2.5);
+      if (ev.cluster) {
+        brutos = brutos.filter(tr =>
+          tr.some(p => Math.hypot(p.x - ev.cluster.x, p.y - ev.cluster.y) <= 12));
+      }
+      brutos.sort((a2, b2) => durTr(b2) - durTr(a2));
+      const trays = brutos.slice(0, 5)
+        .map(tr => tr.map(p => ({
+          t: p.t,
+          x: flipX ? L0 - p.x : p.x,
+          y: flipY ? W0 - p.y : p.y,
+        })));
+      if (trays.length) jugadas.push({ trays, ev });
+    });
+  });
+  if (jugadas.length < 2) return null;
+
+  // Minería: transición zona-inicio → zona-fin de cada trayectoria (zonas 1-4 a lo largo)
+  const zona = x => Math.min(4, Math.max(1, Math.floor(x / L0 * 4) + 1));
+  const transiciones = {};
+  jugadas.forEach((j, ji) => {
+    const vistas = new Set();
+    j.trays.forEach(tr => {
+      const z0 = zona(tr[0].x), z1 = zona(tr[tr.length - 1].x);
+      if (z0 === z1) return;                       // sin desplazamiento entre zonas
+      const key = z0 + '>' + z1;
+      if (vistas.has(key)) return;                 // contar una vez por jugada
+      vistas.add(key);
+      (transiciones[key] = transiciones[key] || new Set()).add(ji);
+    });
+  });
+  const patrones = Object.entries(transiciones)
+    .map(([k, set]) => { const [de, a] = k.split('>'); return { de, a, n: set.size }; })
+    .filter(p => p.n / jugadas.length >= 0.5)      // repetido en ≥50% de las jugadas
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 5);
+
+  return { jugadas: jugadas.length, trays: jugadas, patrones, L: L0, W: W0 };
+}
+
+// ── Pizarra táctica (pista + flechas de movimiento) ─────────────
+function drawPizarra(cv, trayectorias, L, W, titulo) {
+  const ctx = cv.getContext('2d');
+  const pad = 14, sw = cv.width - pad * 2, sh = cv.height - pad * 2;
+
+  // ── AUTO-ZOOM: encuadrar solo la zona donde ocurre la jugada ──
+  // Calcula el rectángulo que contiene todas las trayectorias y hace zoom a él,
+  // para que la acción llene la pizarra en vez de quedar amontonada en una esquina.
+  let vx0 = L, vy0 = W, vx1 = 0, vy1 = 0, hayPts = false;
+  trayectorias.forEach(tr => tr.forEach(p => {
+    hayPts = true;
+    if (p.x < vx0) vx0 = p.x; if (p.x > vx1) vx1 = p.x;
+    if (p.y < vy0) vy0 = p.y; if (p.y > vy1) vy1 = p.y;
+  }));
+  if (!hayPts) { vx0 = 0; vy0 = 0; vx1 = L; vy1 = W; }
+  // margen alrededor de la acción (20% del tamaño de la zona, mínimo 4 m)
+  const mx = Math.max((vx1 - vx0) * 0.25, 4), my = Math.max((vy1 - vy0) * 0.25, 3);
+  vx0 = Math.max(0, vx0 - mx); vx1 = Math.min(L, vx1 + mx);
+  vy0 = Math.max(0, vy0 - my); vy1 = Math.min(W, vy1 + my);
+  // mantener proporción del canvas para no deformar
+  const vw = vx1 - vx0, vh = vy1 - vy0;
+  const arCanvas = sw / sh, arView = vw / vh;
+  let fx0 = vx0, fy0 = vy0, fw = vw, fh = vh;
+  if (arView > arCanvas) { fh = vw / arCanvas; fy0 = vy0 - (fh - vh) / 2; }
+  else { fw = vh * arCanvas; fx0 = vx0 - (fw - vw) / 2; }
+  const X = x => pad + (x - fx0) / fw * sw, Y = y => pad + (y - fy0) / fh * sh;
+
+  // fondo + marco
+  ctx.fillStyle = '#14532d'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2;
+  ctx.strokeRect(pad, pad, sw, sh);
+  // líneas del campo visibles dentro del encuadre (solo las que caen en la vista)
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
+  if (L/2 >= fx0 && L/2 <= fx0 + fw) { ctx.beginPath(); ctx.moveTo(X(L/2), pad); ctx.lineTo(X(L/2), pad + sh); ctx.stroke(); }
+  // porterías / áreas si entran en la vista
+  [0, L].forEach(gx => { if (gx >= fx0 - 2 && gx <= fx0 + fw + 2) {
+    ctx.beginPath(); ctx.arc(X(gx), Y(W/2), (sh/fh)*6, gx===0?-Math.PI/2:Math.PI/2, gx===0?Math.PI/2:Math.PI*1.5); ctx.stroke(); } });
+
+  const escZoom = sh / fh;  // factor de zoom (px por metro) para escalar grosores
+  const cols = ['#fde047', '#93c5fd', '#fda4af', '#86efac', '#c4b5fd'];
+  const lw = Math.max(2.5, Math.min(5, escZoom * 0.5));
+  const rFoco = Math.max(7, Math.min(13, escZoom * 1.1));
+  trayectorias.forEach((tr, i) => {
+    if (tr.length < 2) return;
+    const col = cols[i % cols.length];
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // halo oscuro para separar trazos que se cruzan
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = lw + 3;
+    ctx.beginPath(); tr.forEach((p, k) => k === 0 ? ctx.moveTo(X(p.x), Y(p.y)) : ctx.lineTo(X(p.x), Y(p.y))); ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = col; ctx.lineWidth = lw;
+    ctx.beginPath(); tr.forEach((p, k) => k === 0 ? ctx.moveTo(X(p.x), Y(p.y)) : ctx.lineTo(X(p.x), Y(p.y))); ctx.stroke();
+    const a = tr[0], b = tr[tr.length - 1], pr = tr[tr.length - 2] || a;
+    // foco inicial
+    ctx.beginPath(); ctx.arc(X(a.x), Y(a.y), rFoco, 0, Math.PI * 2);
+    ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = '900 ' + Math.round(rFoco*1.1) + 'px Inter'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), X(a.x), Y(a.y));
+    // flecha final
+    const ang = Math.atan2(Y(b.y) - Y(pr.y), X(b.x) - X(pr.x));
+    const fl = rFoco * 1.3;
+    ctx.beginPath();
+    ctx.moveTo(X(b.x) + fl * Math.cos(ang), Y(b.y) + fl * Math.sin(ang));
+    ctx.lineTo(X(b.x) + fl * Math.cos(ang + 2.6), Y(b.y) + fl * Math.sin(ang + 2.6));
+    ctx.lineTo(X(b.x) + fl * Math.cos(ang - 2.6), Y(b.y) + fl * Math.sin(ang - 2.6));
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+  });
+  // etiqueta de zoom (para que el analista sepa que es una vista ampliada)
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '700 8px Inter';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  ctx.fillText('zona ampliada', pad + sw - 4, pad + sh - 4);
+  if (titulo) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(pad, pad, sw, 20);
+    ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.font = '900 11px Inter';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(titulo, pad + 6, pad + 5);
+  }
+}
+
+function trayectoriaMedia(grupo, analisis) {
+  const rs = grupo.miembros.map(m => remuestrear(analisis.trays[m.ji].trays[m.ti], 12, 1, 1));
+  return Array.from({ length: 12 }, (_, i) => ({
+    x: rs.reduce((s, r) => s + r[i][0], 0) / rs.length,
+    y: rs.reduce((s, r) => s + r[i][1], 0) / rs.length,
+  }));
+}
+
+// ── Secuencia narrada de la jugada (Paso 1) ──────────────────────
+// Posición representativa de una trayectoria en la FASE INICIAL de la jugada
+// (primeros 2 s): es donde el jugador ocupa su puesto de partida.
+function posInicial(tr) {
+  const t0 = tr[0].t;
+  const ini = tr.filter(p => p.t - t0 <= 2.0);
+  const src = ini.length ? ini : tr.slice(0, Math.min(3, tr.length));
+  return { x: src.reduce((s, p) => s + p.x, 0) / src.length,
+           y: src.reduce((s, p) => s + p.y, 0) / src.length };
+}
+
+// PASO 2 — Asigna roles de futsal al conjunto de la jugada, no jugador a
+// jugador. Coloca los puestos por geometría del quinteto: el más atrás =
+// portero-jugador/cierre; el más adelantado = pívot; en medio, alas por
+// banda; y desempata para no repetir 'cierre' cuando el tracker fragmenta.
+// Detecta el SISTEMA de ataque de la jugada por la geometría del quinteto
+function detectarSistema(trays, L, W) {
+  if (trays.length < 3) return null;
+  const pos = trays.map(tr => posInicial(tr));
+  // excluir portero-jugador (muy atrás)
+  const campo = pos.filter(p => p.x >= L * 0.15);
+  if (campo.length < 3) return null;
+  const xs = campo.map(p => p.x / L).sort((a, b) => a - b);
+  const arriba = xs.filter(x => x >= 0.68).length;   // zona de pívot
+  const abajo = xs.filter(x => x <= 0.45).length;    // zona de cierre/salida
+  const n = campo.length;
+  const pj = pos.length > campo.length ? ' con portero-jugador' : '';
+  if (arriba === 0) return '4-0' + pj;               // nadie fijo arriba: rotación total
+  if (arriba === 1) return '3-1' + pj;               // un pívot de referencia
+  if (arriba >= 2 && abajo >= 2) return '2-2' + pj;  // dos arriba, dos atrás
+  return (arriba >= 2 ? '2-2' : '3-1') + pj;
+}
+
+function asignarRoles(trays, L, W) {
+  const jug = trays.map((tr, i) => ({ i, p: posInicial(tr) }));
+  if (!jug.length) return {};
+  const roles = {};
+  const orden = [...jug].sort((a, b) => a.p.x - b.p.x);  // de atrás (x bajo) a arriba
+  const n = orden.length;
+  // El más atrasado del todo, si está muy retrasado y centrado → portero-jugador
+  const primero = orden[0];
+  let inicio = 0;
+  if (primero.p.x < L * 0.15) { roles[primero.i] = 'portero-jugador'; inicio = 1; }
+  const resto = orden.slice(inicio);
+  const m = resto.length;
+  resto.forEach((j, k) => {
+    const frac = m <= 1 ? 0 : k / (m - 1);   // 0 = más atrás, 1 = más arriba
+    const banda = j.p.y < W * 0.5 ? 'izq.' : 'der.';
+    if (frac >= 0.80) roles[j.i] = 'pívot';
+    else if (frac <= 0.25) roles[j.i] = 'cierre';
+    else roles[j.i] = 'ala ' + banda;
+  });
+  // Evitar dos 'cierre' o dos 'pívot' idénticos: desempatar por banda
+  const vistos = {};
+  Object.keys(roles).forEach(i => {
+    let r = roles[i];
+    if ((r === 'cierre' || r === 'pívot') && vistos[r]) {
+      const banda = jug.find(j => j.i == i).p.y < W * 0.5 ? 'izq.' : 'der.';
+      r = r + ' ' + banda;
+    }
+    vistos[roles[i]] = true;
+    roles[i] = r;
+  });
+  return roles;  // { indiceTrayectoria: 'rol' }
+}
+
+function secuenciaJugada(trays, L, W) {
+  const roles = asignarRoles(trays, L, W);
+  const pasos = [];
+  trays.forEach((tr, idx) => {
+    if (tr.length < 4) return;
+    let tArr = tr[0].t, acc = 0;
+    for (let i = 1; i < tr.length; i++) {
+      acc = Math.hypot(tr[i].x - tr[0].x, tr[i].y - tr[0].y);
+      if (acc > 1.5) { tArr = tr[i].t; break; }
+    }
+    const mv = clasificarMov(tr, L, W);
+    const rol = roles[idx] || 'jugador';
+    if (mv.tipo === 'fijo (pantalla/bloqueo)') {
+      pasos.push({ t: tr[0].t, rol, accion: 'se queda fijo (pantalla/bloqueo)', z: mv.z, mv: mv.tipo });
+    } else {
+      pasos.push({ t: tArr, rol, accion: mv.tipo, z: mv.z, mv: mv.tipo });
+    }
+  });
+  pasos.sort((a, b) => a.t - b.t);
+  if (!pasos.length) return pasos;
+  // Ceñir a la ventana de la jugada: desde el primer arranque, 7 s de acción
+  const t0 = pasos[0].t;
+  const ceñidos = pasos.filter(p => p.t - t0 <= 7.5);
+  ceñidos.forEach((p, i) => {
+    p.rel = +(p.t - t0).toFixed(1);
+    p.simult = i > 0 && (p.t - ceñidos[i - 1].t) < 0.6;
+  });
+  return ceñidos;
+}
+
+function narrarSecuencia(trays, L, W) {
+  const pasos = secuenciaJugada(trays, L, W);
+  if (!pasos.length) return '<span class="hint">Sin movimientos claros que ordenar en esta jugada.</span>';
+  const sist = detectarSistema(trays, L, W);
+  const cab = sist ? `<div class="paso" style="border:none"><b class="pn" style="background:#22c55e">S</b><span class="prol">sistema</span><span class="pac"><b>${sist}</b> (verifícalo con el ojo del analista)</span></div>` : '';
+  return cab + narrarPasos(pasos);
+}
+function narrarPasos(pasos) {
+  return pasos.map((p, i) => {
+    const conector = p.simult ? '<span class="sim">↳ a la vez</span>' : `<b class="pn">${i + 1}</b>`;
+    return `<div class="paso">${conector}
+      <span class="pt">${p.rel}s</span>
+      <span class="prol">${p.rol}</span>
+      <span class="pac">${p.accion}</span>
+      <span class="pz">${p.z}</span></div>`;
+  }).join('');
+}
+
+// ── Lectura táctica de movimientos ───────────────────────────────
+function zonaDe(x, L) { return Math.min(4, Math.max(1, Math.ceil(x / L * 4))); }
+
+function clasificarMov(tr, L, W) {
+  const a = tr[0], b = tr[tr.length - 1];
+  const dx = b.x - a.x, dy = b.y - a.y;
+  let len = 0;
+  for (let i = 1; i < tr.length; i++) len += Math.hypot(tr[i].x - tr[i-1].x, tr[i].y - tr[i-1].y);
+  const z = `Z${zonaDe(a.x, L)}→Z${zonaDe(b.x, L)}`;
+  const enBanda = y => y < W * 0.28 || y > W * 0.72;
+  if (len < L * 0.06) return { tipo: 'fijo (pantalla/bloqueo)', z };
+  if (dx <= -L * 0.15) return { tipo: 'apoyo atrás / repliegue', z };
+  // Vocabulario futsal: movimientos de ataque con contexto de pista
+  if (b.x >= L * 0.80 && Math.abs(dy) >= W * 0.25)
+    return { tipo: 'corte al segundo palo', z };
+  if (dx >= L * 0.18 && enBanda(a.y) && enBanda(b.y) && Math.abs(dy) < W * 0.20)
+    return { tipo: 'paralela por banda', z };
+  if (dx >= L * 0.18 && enBanda(a.y) && Math.abs(dy) >= W * 0.25)
+    return { tipo: 'diagonal al interior', z };
+  if (dx >= L * 0.12 && !enBanda(b.y) && b.x >= L * 0.45 && b.x <= L * 0.78)
+    return { tipo: 'aparición entre líneas', z };
+  if (dx >= L * 0.12 && b.x > L * 0.45 && b.x < L * 0.78 && !enBanda(b.y))
+    return { tipo: 'aparición entre líneas', z };
+  if (dx >= L * 0.22) return { tipo: 'corte profundo', z };
+  if (Math.abs(dy) >= W * 0.30 && Math.abs(dx) < L * 0.15) return { tipo: 'desmarque lateral', z };
+  if (dx >= L * 0.10) return { tipo: 'avance de apoyo', z };
+  return { tipo: 'movimiento corto', z };
+}
+
+function detectarBloqueos(trays, L, W) {
+  let n = 0;
+  for (let i = 0; i < trays.length; i++) {
+    const A = trays[i];
+    let lenA = 0;
+    for (let s = 1; s < A.length; s++) lenA += Math.hypot(A[s].x - A[s-1].x, A[s].y - A[s-1].y);
+    if (lenA >= L * 0.06) continue;              // A no está fijo
+    for (let k = 0; k < trays.length; k++) {
+      if (k === i) continue;
+      const B = trays[k];
+      let lenB = 0, pasa = false;
+      for (let s = 1; s < B.length; s++) lenB += Math.hypot(B[s].x - B[s-1].x, B[s].y - B[s-1].y);
+      if (lenB < L * 0.10) continue;             // B debe moverse de verdad
+      const m = Math.min(A.length, B.length);
+      for (let s = 0; s < m; s++)
+        if (Math.hypot(A[s].x - B[s].x, A[s].y - B[s].y) < 1.8) { pasa = true; break; }
+      if (pasa) { n++; break; }
+    }
+  }
+  return n;
+}
+
+function detectarRotacion(trays) {
+  const n = trays.length;
+  if (n < 3) return 0;
+  const cerca = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 3.5;
+  const sig = [];
+  for (let i = 0; i < n; i++) {
+    sig[i] = -1;
+    for (let k = 0; k < n; k++) {
+      if (i === k) continue;
+      const fin = trays[i][trays[i].length - 1], ini = trays[k][0];
+      const movio = Math.hypot(fin.x - trays[i][0].x, fin.y - trays[i][0].y) > 3;
+      if (movio && cerca(fin, ini)) { sig[i] = k; break; }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    let cur = i, pasos = 0;
+    const vis = new Set();
+    while (sig[cur] >= 0 && !vis.has(cur)) {
+      vis.add(cur); cur = sig[cur]; pasos++;
+      if (cur === i && pasos >= 3) return pasos;
+    }
+  }
+  return 0;
+}
+
+function detectarSobreposiciones(trays, L) {
+  let s = 0;
+  for (let i = 0; i < trays.length; i++) for (let k = i + 1; k < trays.length; k++) {
+    const A = trays[i], B = trays[k];
+    const n = Math.min(A.length, B.length);
+    if (n < 4) continue;
+    let minD = 1e9;
+    for (let q = 0; q < n; q++) minD = Math.min(minD, Math.hypot(A[q].x - B[q].x, A[q].y - B[q].y));
+    const adelanta = (A[0].x - B[0].x) * (A[n-1].x - B[n-1].x) < 0;
+    const dxA = A[n-1].x - A[0].x, dxB = B[n-1].x - B[0].x;
+    if (minD < 3.0 && adelanta && dxA > -L * 0.03 && dxB > -L * 0.03 &&
+        Math.max(dxA, dxB) > L * 0.08) s++;
+  }
+  return s;
+}
+
+function detectarCruces(trays) {
+  let cruces = 0;
+  for (let i = 0; i < trays.length; i++) for (let k = i + 1; k < trays.length; k++) {
+    const A = trays[i], B = trays[k];
+    const n = Math.min(A.length, B.length);
+    if (n < 4) continue;
+    let minD = 1e9;
+    for (let s = 0; s < n; s++) minD = Math.min(minD, Math.hypot(A[s].x - B[s].x, A[s].y - B[s].y));
+    const inv = (A[0].x - B[0].x) * (A[n-1].x - B[n-1].x) < 0 ||
+                (A[0].y - B[0].y) * (A[n-1].y - B[n-1].y) < 0;
+    if (minD < 2.2 && inv) cruces++;
+  }
+  return cruces;
+}
+
+function remuestrear(tr, N, L, W) {
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    const p = tr[Math.min(tr.length - 1, Math.round(i * (tr.length - 1) / (N - 1)))];
+    out.push([p.x / L, p.y / W]);
+  }
+  return out;
+}
+
+function agruparAutomatismos(analisis) {
+  const items = [];
+  analisis.trays.forEach((j, ji) => j.trays.forEach((tr, ti) => {
+    if (tr.length >= 4) items.push({ ji, ti, r: remuestrear(tr, 12, analisis.L, analisis.W) });
+  }));
+  const dist = (u, v) => u.r.reduce((s, p, i) => s + Math.hypot(p[0]-v.r[i][0], p[1]-v.r[i][1]), 0) / 12;
+  const usado = new Set(), grupos = [];
+  for (let i = 0; i < items.length; i++) {
+    if (usado.has(i)) continue;
+    const g = [items[i]];
+    for (let k = i + 1; k < items.length; k++) {
+      if (usado.has(k) || items[k].ji === items[i].ji) continue;
+      if (dist(items[i], items[k]) < 0.09) { g.push(items[k]); usado.add(k); }
+    }
+    const jugadas = new Set(g.map(m => m.ji));
+    if (jugadas.size >= 2) { usado.add(i); grupos.push({ miembros: g, jugadas: [...jugadas] }); }
+  }
+  grupos.sort((a, b) => b.jugadas.length - a.jugadas.length);
+  return grupos.slice(0, 3);
+}
+
+function drawTrayectorias(cv, analisis, solo = -1, grupo = null) {
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const { L, W } = analisis;
+  const pad = 18, sw = cv.width - pad * 2, sh = cv.height - pad * 2;
+  const X = x => pad + x / L * sw, Y = y => pad + y / W * sh;
+
+  ctx.fillStyle = '#166534'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+  ctx.strokeRect(pad, pad, sw, sh);
+  ctx.beginPath(); ctx.moveTo(X(L/2), pad); ctx.lineTo(X(L/2), pad + sh); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L/2), Y(W/2), sh * 0.17, 0, Math.PI * 2); ctx.stroke();
+  // Zonas 1-4
+  ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  for (let z = 1; z < 4; z++) {
+    ctx.beginPath(); ctx.moveTo(X(L * z / 4), pad); ctx.lineTo(X(L * z / 4), pad + sh); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '900 12px Inter, sans-serif'; ctx.textAlign = 'center';
+  for (let z = 1; z <= 4; z++) ctx.fillText('Z' + z, X(L * (z - 0.5) / 4), pad + 16);
+
+  const paleta = ['#f59e0b','#3b82f6','#ef4444','#a855f7','#06b6d4','#22c55e','#fb7185','#eab308','#94a3b8','#e879f9'];
+  const enGrupo = (ji, ti) => grupo && grupo.some(m => m.ji === ji && m.ti === ti);
+  analisis.trays.forEach((j, ji) => {
+    if (solo >= 0 && ji !== solo) return;
+    const col = paleta[ji % paleta.length];
+    j.trays.forEach((tr, ti) => {
+      ctx.globalAlpha = grupo ? (enGrupo(ji, ti) ? 1 : 0.12) : 1;
+      ctx.strokeStyle = col + 'aa'; ctx.lineWidth = enGrupo(ji, ti) ? 4 : 2;
+      ctx.beginPath();
+      tr.forEach((p, i) => i === 0 ? ctx.moveTo(X(p.x), Y(p.y)) : ctx.lineTo(X(p.x), Y(p.y)));
+      ctx.stroke();
+      // inicio ●
+      ctx.beginPath(); ctx.arc(X(tr[0].x), Y(tr[0].y), 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.fill();
+      // final ▲ (punta de flecha orientada)
+      const a = tr[tr.length - 2] || tr[0], b = tr[tr.length - 1];
+      const ang = Math.atan2(Y(b.y) - Y(a.y), X(b.x) - X(a.x));
+      ctx.beginPath();
+      ctx.moveTo(X(b.x), Y(b.y));
+      ctx.lineTo(X(b.x) - 9 * Math.cos(ang - 0.45), Y(b.y) - 9 * Math.sin(ang - 0.45));
+      ctx.lineTo(X(b.x) - 9 * Math.cos(ang + 0.45), Y(b.y) - 9 * Math.sin(ang + 0.45));
+      ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+    });
+  });
+}
+
+// ── Mapa de clusters de un tipo de saque ─────────────────────────
+function drawClusterMap(cv, tipo) {
+  const ctx = cv.getContext('2d');
+  const mf = metersFiles();
+  const L = mf[0]?.data.pista?.largo_m || 40, W = mf[0]?.data.pista?.ancho_m || 20;
+  const pad = 18, sw = cv.width - pad * 2, sh = cv.height - pad * 2;
+  const X = x => pad + x / L * sw, Y = y => pad + y / W * sh;
+
+  ctx.fillStyle = '#166534'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+  ctx.strokeRect(pad, pad, sw, sh);
+  ctx.beginPath(); ctx.moveTo(X(L/2), pad); ctx.lineTo(X(L/2), pad + sh); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L/2), Y(W/2), sh * 0.17, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(0), Y(W/2), sh * 0.28, -Math.PI/2, Math.PI/2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L), Y(W/2), sh * 0.28, Math.PI/2, Math.PI*1.5); ctx.stroke();
+
+  const col = (TIPOS[tipo] || {}).color || '#fff';
+  let i = 0;
+  allEvents().filter(e => e.tipo === tipo && e.cluster).forEach(e => {
+    const srcMeters = files.find(f => f.name === e._src)?.data.coordenadas === 'metros';
+    if (!srcMeters) return;
+    i++;
+    ctx.beginPath(); ctx.arc(X(e.cluster.x), Y(e.cluster.y), 11, 0, Math.PI * 2);
+    ctx.fillStyle = col + 'cc'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = '900 10px Inter, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i), X(e.cluster.x), Y(e.cluster.y));
+  });
+}
+</script>
+</body>
+</html>

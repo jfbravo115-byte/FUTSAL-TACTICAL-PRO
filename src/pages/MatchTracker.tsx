@@ -45,7 +45,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { toPng } from "html-to-image";
+import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import {
   Player,
@@ -1574,9 +1574,10 @@ export default function MatchTracker() {
       // Small delay to ensure styles are applied
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      const dataUrl = await toPng(dynamicExportRef.current, {
+      const dataUrl = await toJpeg(dynamicExportRef.current, {
         cacheBust: true,
-        pixelRatio: 2,
+        pixelRatio: 1.5,
+        quality: 0.82,
         backgroundColor: "#0A0B0E",
         style: {
           opacity: "1",
@@ -1611,7 +1612,7 @@ export default function MatchTracker() {
           format: [img.width, img.height]
         });
 
-        pdf.addImage(dataUrl, "PNG", 0, 0, img.width, img.height);
+        pdf.addImage(dataUrl, "JPEG", 0, 0, img.width, img.height);
         pdf.save(`${baseFileName}.pdf`);
       }
     } catch (err) {
@@ -1660,7 +1661,8 @@ export default function MatchTracker() {
 
         const captureOpts = {
           cacheBust: true,
-          pixelRatio: 2,
+          pixelRatio: 1.5,
+        quality: 0.82,
           backgroundColor: "#ffffff",
           style: { opacity: "1", visibility: "visible" },
         };
@@ -1670,7 +1672,7 @@ export default function MatchTracker() {
 
         for (const ref of refs) {
           if (!ref.current) continue;
-          const url = await toPng(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
+          const url = await toJpeg(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
           if (url && url.length > 1000) images.push(url);
         }
 
@@ -1687,7 +1689,7 @@ export default function MatchTracker() {
           await new Promise(r => { img.onload = r; });
           const imgAspect = img.height / img.width;
           const imgH = Math.min(pdfH, pdfW * imgAspect);
-          pdf.addImage(images[i], "PNG", 0, 0, pdfW, imgH);
+          pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
         }
 
         const fileName = `informe_${matchData.teamName.replace(/\s+/g, "_")}_${Date.now()}.pdf`;
@@ -1707,12 +1709,13 @@ export default function MatchTracker() {
     setReportType(Role.GOALKEEPER);
     try {
       await new Promise(r => setTimeout(r, 600));
-      const captureOpts = { cacheBust: true, pixelRatio: 2, backgroundColor: '#ffffff', style: { opacity: '1', visibility: 'visible' } };
+      const captureOpts = { cacheBust: true, pixelRatio: 1.5,
+        quality: 0.82, backgroundColor: '#ffffff', style: { opacity: '1', visibility: 'visible' } };
       const gkRefs = [pdfGkPage1Ref, pdfGkPage2Ref, pdfGkPage3Ref];
       const images: string[] = [];
       for (const ref of gkRefs) {
         if (!ref.current) continue;
-        const url = await toPng(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
+        const url = await toJpeg(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
         if (url && url.length > 1000) images.push(url);
       }
       if (images.length === 0) throw new Error('No goalkeeper pages generated');
@@ -1725,7 +1728,7 @@ export default function MatchTracker() {
         img.src = images[i];
         await new Promise(r => { img.onload = r; });
         const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
-        pdf.addImage(images[i], 'PNG', 0, 0, pdfW, imgH);
+        pdf.addImage(images[i], 'JPEG', 0, 0, pdfW, imgH);
       }
       pdf.save(`porteros_${matchData.teamName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
     } catch (err) {

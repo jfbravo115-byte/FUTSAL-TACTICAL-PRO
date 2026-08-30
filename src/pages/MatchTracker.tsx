@@ -3203,7 +3203,7 @@ export default function MatchTracker() {
               {players.map(p => {
                 // Use SHOT/GOAL events from rival (same as PORTERO tab)
                 const isGkInvolved = (e: any) =>
-                  e.playerIds.includes(p.id) || (e.metadata?.isOpponent !== p.isOpponent);
+                  e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
                 const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
                 const saves = halfEvts.filter(e =>
                   (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
@@ -3245,7 +3245,7 @@ export default function MatchTracker() {
               const isGoalieInvolved = (e: any) =>
                 e.playerIds.includes(p.id) ||
                 // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
-                (e.metadata?.isOpponent !== p.isOpponent);
+                (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
 
               const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
 
@@ -3410,7 +3410,7 @@ export default function MatchTracker() {
 
                   {team.players.map(p => {
                     const isGkInvolved = (e: any) =>
-                      e.playerIds.includes(p.id) || (e.metadata?.isOpponent !== p.isOpponent);
+                      e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
                     const ev1 = matchData.events.filter(e => isGkInvolved(e) && isFirstHalf(e));
                     const ev2 = matchData.events.filter(e => isGkInvolved(e) && isSecondHalf(e));
                     const evAll = matchData.events.filter(e => isGkInvolved(e));

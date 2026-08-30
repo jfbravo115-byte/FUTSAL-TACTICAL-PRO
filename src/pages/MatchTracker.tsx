@@ -2898,51 +2898,138 @@ export default function MatchTracker() {
               })()}
             </div>
 
-            {/* ── LOCAL: Page 3 (spider charts) */}
+            {/* ── LOCAL: Page 3 (donut charts + heat maps) */}
             <div ref={pdfPage3Ref} style={pageStyle}>
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
                 const total = allTeamsForPDF.length * 3;
-                const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
-                const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
-                const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
-                const W = 140, H = 140, cx = 70, cy = 70, R = 50;
-                const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
-                const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
+                const ACT_COLORS: Record<string, string> = {
+                  'Goles':   '#16a34a',
+                  'Tiros':   '#2563eb',
+                  'Recup.':  '#9333ea',
+                  'Perd.':   '#ea580c',
+                };
+                const DonutChart = ({ p, accent }: { p: Player, accent: string }) => {
+                  const slices = [
+                    { label: 'Goles',  v: p.stats.goals  || 0 },
+                    { label: 'Tiros',  v: p.stats.shots  || 0 },
+                    { label: 'Recup.', v: p.stats.steals || 0 },
+                    { label: 'Perd.',  v: p.stats.losses || 0 },
+                  ];
+                  const total_v = slices.reduce((s, x) => s + x.v, 0);
+                  const mins = Math.round((p.individualTimeSeconds || 0) / 60);
+                  const cx = 44, cy = 44, R = 36, r = 20;
+                  let angle = -Math.PI / 2;
+                  const arcs = slices.map(sl => {
+                    const pct = total_v > 0 ? sl.v / total_v : 0;
+                    const a1 = angle, a2 = angle + pct * 2 * Math.PI;
+                    angle = a2;
+                    return { ...sl, pct, a1, a2 };
+                  });
+                  const arc = (a1: number, a2: number, R: number, r: number) => {
+                    if (Math.abs(a2 - a1) < 0.001) return '';
+                    const x1o = cx + R * Math.cos(a1), y1o = cy + R * Math.sin(a1);
+                    const x2o = cx + R * Math.cos(a2), y2o = cy + R * Math.sin(a2);
+                    const x1i = cx + r * Math.cos(a2), y1i = cy + r * Math.sin(a2);
+                    const x2i = cx + r * Math.cos(a1), y2i = cy + r * Math.sin(a1);
+                    const large = a2 - a1 > Math.PI ? 1 : 0;
+                    return `M${x1o},${y1o} A${R},${R},0,${large},1,${x2o},${y2o} L${x1i},${y1i} A${r},${r},0,${large},0,${x2i},${y2i} Z`;
+                  };
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}>
+                        <span style={{ color: accent, marginRight: 2 }}>#{p.number}</span>{p.name.split(' ')[0]}
+                        <span style={{ display: 'inline-block', fontSize: 7, padding: '1px 3px', borderRadius: 3, background: '#f1f5f9', color: '#64748b', marginLeft: 4 }}>{mins}min</span>
+                      </div>
+                      <svg width={88} height={88} viewBox="0 0 88 88">
+                        {total_v === 0 ? (
+                          <circle cx={cx} cy={cy} r={R} fill="#f1f5f9" />
+                        ) : arcs.map((a, i) => (
+                          <path key={i} d={arc(a.a1, a.a2, R, r)} fill={ACT_COLORS[a.label]} opacity={0.85} />
+                        ))}
+                        <circle cx={cx} cy={cy} r={r - 1} fill="white" />
+                        <text x={cx} y={cy - 4} textAnchor="middle" dominantBaseline="middle" fontSize={total_v > 9 ? 11 : 13} fontWeight="700" fill="#0f172a">{total_v}</text>
+                        <text x={cx} y={cy + 9} textAnchor="middle" dominantBaseline="middle" fontSize={6} fill="#94a3b8">acc.</text>
+                      </svg>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', justifyContent: 'center' }}>
+                        {slices.map(sl => sl.v > 0 && (
+                          <span key={sl.label} style={{ fontSize: 7, color: ACT_COLORS[sl.label], fontWeight: 600 }}>{sl.label} {sl.v}</span>
+                        ))}
+                        {total_v === 0 && <span style={{ fontSize: 7, color: '#94a3b8' }}>Sin acciones</span>}
+                      </div>
+                    </div>
+                  );
+                };
+                const HeatGrid = ({ events, color, title }: { events: GameEvent[], color: string, title: string }) => {
+                  const rows = ['A','B','C'], cols = ['1','2','3'];
+                  const counts: Record<string, number> = {};
+                  events.forEach((e: any) => { if (e.originGrid) counts[e.originGrid] = (counts[e.originGrid] || 0) + 1; });
+                  const maxC = Math.max(...Object.values(counts) as number[], 1);
+                  const W = 90, H = 70, cW = (W-4)/3, cH = (H-4)/3;
+                  const toRgb: Record<string, string> = {
+                    '#16a34a': '22,163,74', '#2563eb': '37,99,235', '#9333ea': '147,51,234',
+                    '#ea580c': '234,88,12', '#dc2626': '220,38,38', '#0ea5e9': '14,165,233',
+                  };
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                      <div style={{ fontSize: 7, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>{title}</div>
+                      <div style={{ fontSize: 7, color: '#94a3b8' }}>{events.length} eventos</div>
+                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc' }}>
+                        {rows.map((r, ri) => cols.map((c, ci) => {
+                          const zId = `${r}${c}`;
+                          const cnt = counts[zId] || 0;
+                          const intensity = cnt / maxC;
+                          const x = 2 + ci * cW, y = 2 + ri * cH;
+                          const rgb = toRgb[color] || '14,165,233';
+                          const fill = cnt === 0 ? '#f8fafc' : `rgba(${rgb},${0.15 + intensity * 0.75})`;
+                          return (
+                            <g key={zId}>
+                              <rect x={x} y={y} width={cW-1} height={cH-1} fill={fill} rx={2} />
+                              {cnt > 0 && <text x={x+cW/2-0.5} y={y+cH/2} textAnchor="middle" dominantBaseline="central" fontSize="8" fontWeight="600" fill={intensity > 0.5 ? 'white' : color}>{cnt}</text>}
+                              <text x={x+2} y={y+cH-2} fontSize="5" fill="#cbd5e1">{zId}</text>
+                            </g>
+                          );
+                        }))}
+                      </svg>
+                    </div>
+                  );
+                };
+                const localEvs = matchData.events.filter((e: any) => !e.metadata?.isOpponent);
+                const rivalEvs = matchData.events.filter((e: any) => !!e.metadata?.isOpponent);
+                const heatMaps = [
+                  { title: 'Goles',          color: '#16a34a', evs: localEvs.filter((e: any) => e.type === ActionType.GOAL) },
+                  { title: 'Tiros',          color: '#2563eb', evs: localEvs.filter((e: any) => e.type === ActionType.SHOT) },
+                  { title: 'Recuperaciones', color: '#9333ea', evs: localEvs.filter((e: any) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION) },
+                  { title: 'Perdidas',       color: '#ea580c', evs: localEvs.filter((e: any) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR) },
+                  { title: 'Goles encajados',color: '#dc2626', evs: rivalEvs.filter((e: any) => e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) },
+                  { title: 'Tiros recibidos',color: '#0ea5e9', evs: rivalEvs.filter((e: any) => e.type === ActionType.SHOT || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH) },
+                ];
                 return (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil circular + mapas de zona</span>
+                      </div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {total}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                      {team.players.map(p => {
-                        const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
-                        const dataR = normV.map(v => (v / 5) * R);
-                        const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
-                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0); const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
-                        const atkPct = Math.round((atk / maxAtkV) * 100); const defPct = Math.round((def / maxDefV) * 100);
-                        const diff = atkPct - defPct; const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
-                        const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b'; const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
-                        const pos = getPosLabel(p);
-                        return (
-                          <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
-                            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-                              {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
-                              {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
-                              <polygon points={dataPts} fill="rgba(59,130,246,0.1)" stroke="#3b82f6" strokeWidth="1.5"/>
-                              {angles.map((a, i) => { const px = cx+dataR[i]*Math.cos(a), py = cy+dataR[i]*Math.sin(a); const c = SPIDER_ITEMS[i].isRed ? redGrad(normV[i]) : '#3b82f6'; return <circle key={i} cx={px} cy={py} r="3" fill={c} stroke="white" strokeWidth="0.5"/>; })}
-                              {SPIDER_ITEMS.map((it, i) => { const lx = cx+(R+11)*Math.cos(angles[i]), ly = cy+(R+11)*Math.sin(angles[i]); const c = it.isRed ? redGrad(normV[i]) : '#94a3b8'; return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill={c}>{it.label}</text>; })}
-                            </svg>
-                            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {[{ label: 'Ataque', pct: atkPct, color: '#ef4444' }, { label: 'Defensa', pct: defPct, color: '#22c55e' }].map(b => (<div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ fontSize: 7, color: '#94a3b8', width: 36 }}>{b.label}</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${b.pct}%`, height: '100%', background: b.color, borderRadius: 3 }}/></div><span style={{ fontSize: 7, color: '#94a3b8', width: 22, textAlign: 'right' }}>{b.pct}%</span></div>))}
-                              <div style={{ marginTop: 3, padding: '2px 8px', borderRadius: 4, background: vbg, border: `0.5px solid ${vc}30`, fontSize: 8, fontWeight: 600, color: vc, textAlign: 'center' }}>{verdict}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+                      {Object.entries(ACT_COLORS).map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: v }} />
+                          <span style={{ fontSize: 8, color: '#64748b' }}>{k}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 20 }}>
+                      {team.players.map((p: Player) => <DonutChart key={p.id} p={p} accent={team.accent} />)}
+                    </div>
+                    <div style={{ borderTop: '0.5px solid #e2e8f0', paddingTop: 14, marginBottom: 10 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>mapas de zona del partido</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                        {heatMaps.map((h: any) => <HeatGrid key={h.title} events={h.evs} color={h.color} title={h.title} />)}
+                      </div>
                     </div>
                     <Footer page={3} total={total} />
                   </>

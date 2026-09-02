@@ -1157,6 +1157,15 @@ const StatsExportTemplate = React.forwardRef<
   );
 });
 
+// ── ORIENTACIÓN VISUAL DEL CAMPO (solo presentación) ────────────────────
+// Espeja una coordenada horizontal PORCENTUAL DE PANTALLA (0-100, 0 =
+// borde izquierdo del contenedor del campo) cuando la vista está
+// invertida. Es una función pura, sin efectos, que NUNCA toca datos del
+// modelo (matchData, events, coordenadas guardadas). Solo se usa para
+// decidir en qué lado de la pantalla se dibuja algo ya calculado.
+const applyFieldFlip = (uiLeftPercent: number, isFieldFlipped: boolean): number =>
+  isFieldFlipped ? 100 - uiLeftPercent : uiLeftPercent;
+
 const formatTime = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
   const mins = Math.floor(totalSeconds / 60);
@@ -1235,6 +1244,13 @@ export default function MatchTracker() {
   const [isDataLocked, setIsDataLocked] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
+  // ── ORIENTACIÓN VISUAL DEL CAMPO ──────────────────────────────────────
+  // isFieldFlipped afecta ÚNICAMENTE a qué lado de la pantalla (izquierda/
+  // derecha) se dibuja cada equipo en la vista táctica. NO toca isOpponent,
+  // NO toca matchData, NO reordena ni transforma coordenadas guardadas de
+  // eventos/acciones. Es puro estado de presentación (UI), local a este
+  // componente y no persistido.
+  const [isFieldFlipped, setIsFieldFlipped] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
   const [exportToast, setExportToast] = useState<string | null>(null);
@@ -1489,6 +1505,15 @@ export default function MatchTracker() {
       isClockRunning: false,
       fouls: { team: 0, opponent: 0 },
     }));
+    // Cambio de campo real al iniciar la 2ª parte: invierte SOLO la
+    // orientación visual (izquierda/derecha) de la vista táctica, una
+    // única vez por partido. Esto es una llamada imperativa dentro del
+    // handler que confirma el fin de la 1ª parte — no un efecto reactivo
+    // sobre el período — por lo que no puede disparar por re-render.
+    // Se compone con el estado actual (toggle) para respetar cualquier
+    // cambio manual que el usuario ya hubiera hecho con el botón
+    // "↔ Cambiar lado".
+    setIsFieldFlipped((prev) => !prev);
     setIsEndFirstConfirmOpen(false);
     setIsDataLocked(true);
   };
@@ -5761,6 +5786,22 @@ export default function MatchTracker() {
             </button>
           </div>
 
+          {/* ORIENTACIÓN VISUAL DEL CAMPO — control discreto, solo afecta
+              a qué lado de la pantalla se dibuja cada equipo. No cambia
+              quién es local/visitante ni ningún dato guardado. */}
+          <div className="flex items-center justify-between px-1.5 flex-shrink-0">
+            <span className="text-[7px] font-bold uppercase tracking-widest text-slate-500">
+              Vista: {isFieldFlipped ? "Visitante ← | Local →" : "Local ← | Visitante →"}
+            </span>
+            <button
+              onClick={() => setIsFieldFlipped((prev) => !prev)}
+              title="Invertir lado izquierda/derecha de la vista táctica (no afecta a los datos)"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
+            >
+              <span aria-hidden="true">↔</span> Cambiar lado
+            </button>
+          </div>
+
           <div className="bg-white/5 border border-white/5 rounded-2xl flex flex-col backdrop-blur-md relative overflow-hidden flex-1 min-h-0">
             {/* Context Header (Formation & State) */}
             <div className="p-1 border-b border-white/5 flex items-center justify-between relative bg-black/20 flex-shrink-0">
@@ -5878,11 +5919,13 @@ export default function MatchTracker() {
                     <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-white/20"></div>
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[55%] aspect-square border border-white/20 rounded-full"></div>
                     
-                    {/* Goal Areas - lado defendido resaltado según la vista */}
+                    {/* Goal Areas - lado defendido resaltado según la vista.
+                        isFieldFlipped invierte SOLO qué lado de pantalla se
+                        resalta; no cambia isOpponent ni qué equipo es local. */}
                     {/* Left Area */}
-                    <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-r rounded-r-[3rem] ${pitchView === 'local' ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
+                    <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-r rounded-r-[3rem] ${(pitchView === 'local') !== isFieldFlipped ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
                     {/* Right Area */}
-                    <div className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-l rounded-l-[3rem] ${pitchView === 'opponent' ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
+                    <div className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-[60%] w-[18%] border-y border-l rounded-l-[3rem] ${(pitchView === 'opponent') !== isFieldFlipped ? 'border-white/30 bg-white/5' : 'border-white/20'}`}></div>
                     
                     <div className="absolute left-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
                     <div className="absolute right-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
@@ -5901,7 +5944,7 @@ export default function MatchTracker() {
                         {currentSlots.map((slot, index) => {
                           if (occupiedSlots.includes(index)) return null;
                           // Horizontal Logic: local defiende izquierda; rival defiende derecha (espejo)
-                          const uiLeft = isOpp ? (100 - slot.left) : slot.left;
+                          const uiLeft = applyFieldFlip(isOpp ? (100 - slot.left) : slot.left, isFieldFlipped);
                           const uiTop = slot.top;
 
                           return (
@@ -5931,7 +5974,7 @@ export default function MatchTracker() {
 
                         {onPitchPlayers.map((player) => {
                           const slot = currentSlots[player.pitchPosition ?? 0] || currentSlots[0];
-                          const uiLeft = isOpp ? (100 - slot.left) : slot.left;
+                          const uiLeft = applyFieldFlip(isOpp ? (100 - slot.left) : slot.left, isFieldFlipped);
                           const uiTop = slot.top;
 
                           return (

@@ -1166,6 +1166,25 @@ const StatsExportTemplate = React.forwardRef<
 const applyFieldFlip = (uiLeftPercent: number, isFieldFlipped: boolean): number =>
   isFieldFlipped ? 100 - uiLeftPercent : uiLeftPercent;
 
+// ── SANEAMIENTO DE SURROGATES HUÉRFANOS (fix real del bug reportado) ────
+// Si un campo de texto libre (nombre de equipo/jugador) contiene un
+// surrogate UTF-16 sin pareja — típicamente por un emoji cortado a mitad
+// al pegar texto, o por un fallo de autocorrección del teclado — el JSON
+// resultante de JSON.stringify() sigue siendo JSON válido (los surrogates
+// sueltos se permiten como \uXXXX), PERO al codificar ese string a UTF-8
+// para el body de fetch(), Safari/WebKit en iOS lanza exactamente:
+// "TypeError: The string did not match the expected pattern." — un error
+// nativo del motor, no de esta app ni del SDK de Anthropic (confirmado:
+// no aparece en ningún dependencia ni en @anthropic-ai/sdk). Chrome/V8 no
+// lanza este error para el mismo string, así que el fallo solo se
+// reproduce en Safari/iOS — coherente con que la app corre principalmente
+// como PWA en iPhone. Reemplazamos cualquier surrogate huérfano por el
+// carácter de reemplazo U+FFFD antes de enviar el body, sin tocar el
+// resto de la cadena.
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const stripLoneSurrogates = (str: string): string =>
+  str.replace(LONE_SURROGATE_RE, "\uFFFD");
+
 const formatTime = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
   const mins = Math.floor(totalSeconds / 60);
@@ -1323,7 +1342,7 @@ export default function MatchTracker() {
       const res = await fetch('/api/tactical-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matchData }),
+        body: stripLoneSurrogates(JSON.stringify({ matchData })),
       });
       const data = await res.json();
       if (data.analysis) {

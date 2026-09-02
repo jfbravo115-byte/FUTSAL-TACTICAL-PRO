@@ -1436,6 +1436,11 @@ export default function MatchTracker() {
               ? {
                   ...p,
                   individualTimeSeconds: p.individualTimeSeconds + delta / 1000,
+                  // ROT usa exactamente el mismo tick/delta que TOT (mismo
+                  // reloj real de partido, mismo gating por isClockRunning):
+                  // se pausa y reanuda de forma idéntica, sin un segundo
+                  // sistema de cronometraje independiente.
+                  rotationTimeSeconds: (p.rotationTimeSeconds ?? 0) + delta / 1000,
                 }
               : p,
           ),
@@ -1510,7 +1515,7 @@ export default function MatchTracker() {
       ...prev,
       matchClock: 0,
       isClockRunning: false,
-      players: prev.players.map((p) => ({ ...p, individualTimeSeconds: 0 })),
+      players: prev.players.map((p) => ({ ...p, individualTimeSeconds: 0, rotationTimeSeconds: 0 })),
     }));
     setIsResetConfirmOpen(false);
     setIsDataLocked(false);
@@ -2288,6 +2293,12 @@ export default function MatchTracker() {
                 pitchPosition: targetPlayer.isOnPitch
                   ? targetPlayer.pitchPosition
                   : undefined,
+                // ROT solo se reinicia si esto es una entrada real
+                // (source estaba en el banquillo y pasa a pista).
+                rotationTimeSeconds:
+                  targetPlayer.isOnPitch && !sourcePlayer.isOnPitch
+                    ? 0
+                    : p.rotationTimeSeconds,
               };
             }
             if (p.id === targetId) {
@@ -2297,6 +2308,10 @@ export default function MatchTracker() {
                 pitchPosition: sourcePlayer.isOnPitch
                   ? sourcePlayer.pitchPosition
                   : undefined,
+                rotationTimeSeconds:
+                  sourcePlayer.isOnPitch && !targetPlayer.isOnPitch
+                    ? 0
+                    : p.rotationTimeSeconds,
               };
             }
             return p;
@@ -2316,7 +2331,7 @@ export default function MatchTracker() {
       ...prev,
       players: prev.players.map((p) =>
         p.id === benchPlayerId
-          ? { ...p, isOnPitch: true, pitchPosition: slotIndex }
+          ? { ...p, isOnPitch: true, pitchPosition: slotIndex, rotationTimeSeconds: 0 }
           : p,
       ),
     }));
@@ -2492,6 +2507,7 @@ export default function MatchTracker() {
       isOnPitch: false,
       plusMinus: 0,
       individualTimeSeconds: 0,
+      rotationTimeSeconds: 0,
       isOpponent,
       stats: { ...INITIAL_STATS },
     };
@@ -2531,7 +2547,13 @@ export default function MatchTracker() {
             }
           }
 
-          return { ...p, isStarter, isOnPitch: shouldBeOnPitch, pitchPosition: shouldBeOnPitch ? finalPitchPos : undefined };
+          return {
+            ...p,
+            isStarter,
+            isOnPitch: shouldBeOnPitch,
+            pitchPosition: shouldBeOnPitch ? finalPitchPos : undefined,
+            rotationTimeSeconds: shouldBeOnPitch && !p.isOnPitch ? 0 : p.rotationTimeSeconds,
+          };
         }
         return p;
       })
@@ -2562,7 +2584,7 @@ export default function MatchTracker() {
                   break;
                 }
               }
-              return { ...p, isOnPitch: true, pitchPosition: firstFree };
+              return { ...p, isOnPitch: true, pitchPosition: firstFree, rotationTimeSeconds: 0 };
             }
             return { ...p, isOnPitch: false, pitchPosition: undefined };
           }
@@ -5975,7 +5997,7 @@ export default function MatchTracker() {
                                   if (p && !!p.isOpponent === isOpp) {
                                     setMatchData(prev => ({
                                       ...prev,
-                                      players: prev.players.map(pl => pl.id === swapSelection ? { ...pl, isOnPitch: true, pitchPosition: index } : pl)
+                                      players: prev.players.map(pl => pl.id === swapSelection ? { ...pl, isOnPitch: true, pitchPosition: index, rotationTimeSeconds: p.isOnPitch ? pl.rotationTimeSeconds : 0 } : pl)
                                     }));
                                     setSwapSelection(null);
                                   }
@@ -6760,6 +6782,7 @@ export default function MatchTracker() {
                         ...p,
                         isOnPitch: true,
                         pitchPosition: activeSlotToAdd.index,
+                        rotationTimeSeconds: 0,
                       }
                     : p,
                 ),
@@ -7702,12 +7725,21 @@ const PlayerCard = ({
           <span className="text-[7px] font-black text-slate-400 uppercase leading-none opacity-80">
             {player.role === Role.GOALKEEPER ? "POR" : "JUG"}
           </span>
-          {!player.isOpponent && (
-            <span className={`text-[8px] font-mono font-black ${player.isOpponent ? "text-red-400" : "text-blue-400"} leading-none`}>
-              {formatPlayerTime(player.individualTimeSeconds)}
-            </span>
-          )}
         </div>
+        {/* TOT (acumulado total, sin cambios) + ROT (tiempo desde la
+            última entrada a pista, nuevo). Mismo alcance que el contador
+            previo: solo se muestra para jugadores propios (!isOpponent),
+            para no alterar el diseño existente para el rival. */}
+        {!player.isOpponent && player.isOnPitch && (
+          <div className="flex flex-col items-center leading-none gap-px">
+            <span className="text-[7px] font-mono font-black text-blue-400 leading-none">
+              TOT {formatPlayerTime(player.individualTimeSeconds)}
+            </span>
+            <span className="text-[7px] font-mono font-black text-emerald-400 leading-none">
+              ROT {formatPlayerTime(player.rotationTimeSeconds ?? 0)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Card Indicators */}

@@ -78,6 +78,13 @@ export type Player = {
   pitchPosition?: number;
   plusMinus: number;
   individualTimeSeconds: number;
+  // Tiempo (segundos) transcurrido desde la última entrada a pista. Se
+  // reinicia a 0 en cada entrada (titular en el saque inicial cuenta como
+  // una entrada) y deja de incrementarse al salir — el valor queda
+  // congelado hasta la siguiente entrada, momento en que vuelve a 0.
+  // Opcional para aceptar datos guardados anteriores sin este campo
+  // (se trata como 0 en ese caso, igual que otras stats opcionales).
+  rotationTimeSeconds?: number;
   isStarter?: boolean;
   isOpponent: boolean;
   stats: PlayerStats;

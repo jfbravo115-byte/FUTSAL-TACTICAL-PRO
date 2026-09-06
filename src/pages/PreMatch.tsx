@@ -132,6 +132,15 @@ export default function PreMatch() {
 
   // ── Start match ───────────────────────────────────────────────
   const startMatch = () => {
+    // Guarda automáticamente MI EQUIPO antes de iniciar el partido.
+    // Es persistencia únicamente local: no guarda ni sincroniza el rival.
+    const template: TeamTemplate = {
+      teamName,
+      teamLogo,
+      players,
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('futsal_template', JSON.stringify(template));
     // Build MatchTracker-compatible players
     let pitchPos = 0;
     const starters = players.filter(p => p.isStarter && !p.isOpponent);

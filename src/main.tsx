@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { shouldShowOrientationOverlay } from './utils/orientationGuard';
 
 // ── Lock viewport height ────────────────────────────────────────
 const setAppHeight = () => {
@@ -34,10 +35,15 @@ lockPortrait();
 
 // ── Show/hide landscape warning overlay ─────────────────────────
 const applyOrientationOverlay = () => {
-  const isLandscape = window.innerWidth > window.innerHeight;
+  const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const shouldBlock = shouldShowOrientationOverlay(
+    window.innerWidth,
+    window.innerHeight,
+    hasCoarsePointer,
+  );
   let overlay = document.getElementById('orientation-overlay');
 
-  if (isLandscape) {
+  if (shouldBlock) {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'orientation-overlay';

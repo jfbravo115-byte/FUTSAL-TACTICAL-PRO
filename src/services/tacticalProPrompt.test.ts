@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, SYSTEM_INSTRUCTION } from "./tactical-pro.mts";
+import { buildPrompt, SYSTEM_INSTRUCTION } from "../../netlify/functions/tactical-pro.mts";
 
 describe("TACTICAL PRO prompt grounding", () => {
   it("prohíbe inventar métricas no registradas", () => {

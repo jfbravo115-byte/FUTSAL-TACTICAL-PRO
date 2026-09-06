@@ -1,21 +1,45 @@
 import type { Context } from "@netlify/functions";
 import Anthropic from "@anthropic-ai/sdk";
 
-const SYSTEM_INSTRUCTION =
-  "Eres un analista táctico profesional especializado en Fútbol Sala de alto rendimiento. Tu comunicación es formal, precisa y rigurosa, propia de un informe técnico deportivo de élite. Utilizas terminología táctica avanzada de Futsal. No uses introducciones entusiastas ni frases coloquiales. Ve directo al análisis técnico.";
+export const SYSTEM_INSTRUCTION = `Eres un analista táctico profesional especializado en Fútbol Sala de alto rendimiento.
+Tu comunicación es formal, precisa y rigurosa. Trabajas únicamente con los datos suministrados.
+REGLAS OBLIGATORIAS:
+- No inventes posesión, xG, distancias, velocidades, intervalos de 5 minutos ni ninguna métrica ausente.
+- No conviertas una ausencia de registro en un cero salvo que el resumen determinista lo indique.
+- Distingue hechos medidos de interpretación táctica.
+- Toda recomendación debe estar vinculada a una evidencia concreta de los datos.
+- Si los datos no permiten sostener una conclusión, indícalo explícitamente.
+- No uses introducciones entusiastas ni frases coloquiales.`;
 
-function buildPrompt(matchDataStr: string): string {
-  return `Analiza los siguientes datos de un partido de fútbol sala (Futsal) y redacta un informe TACTICAL PRO detallado en formato Markdown.
+export function buildPrompt(matchDataStr: string, deterministicReportStr: string): string {
+  return `Redacta un informe TACTICAL PRO en Markdown a partir de dos fuentes:
 
-Los datos incluyen el rendimiento general, estadísticas por parciales de 5 minutos, y rendimiento de jugadores.
+1. RESUMEN DETERMINISTA CANÓNICO: métricas calculadas por la propia aplicación. Úsalo como referencia principal para cantidades, porcentajes, marcador, tiempos y rotaciones.
+2. DATOS CRUDOS: eventos y estado del partido. Úsalos para contextualizar secuencias, estados de juego y zonas, sin contradecir el resumen determinista.
 
-Crea un informe que contenga:
-1.  **Resumen del Partido**: Breve interpretación del resultado y flujo del juego (basado en g/a, posesión, y tiros).
-2.  **Análisis por Intervalos (Momentos Críticos)**: Analiza los intervalos de 5 minutos proporcionados e identifica en qué momento el equipo fue más vulnerable defensivamente y en qué momento fue más eficaz ofensivamente.
-3.  **Evaluación de Jugadores**: Basado en las métricas individuales provistas, destaca las fortalezas y puntos de mejora, mencionando a quiénes recomiendas para situaciones específicas (ej. jugador clave para remontar).
-4.  **Sugerencias Tácticas (TACTICAL PRO)**: Ofrece recomendaciones y ajustes estratégicos estructurados para el próximo partido a partir de las vulnerabilidades y fortalezas observadas. Sé analítico y constructivo. Sé específico sobre tácticas de futsal (rotaciones, defensa en zona, presión alta, etc.).
+Estructura obligatoria:
+## 1. Lectura objetiva del partido
+Marcador, volumen de tiro, precisión/conversión, recuperaciones, pérdidas/errores y faltas. Sin atribuir causas no registradas.
 
-Datos del partido:
+## 2. Ataque y finalización
+Describe eficiencia ofensiva, zonas de origen/destino y jugadores destacados solo cuando exista evidencia. No hables de posesión si no está registrada.
+
+## 3. Recuperación y seguridad con balón
+Analiza recuperaciones frente a pérdidas/errores y las zonas asociadas. Separa dato de interpretación.
+
+## 4. Rotaciones y utilización
+Usa TOT, ROT y sustituciones registradas. No estimes cargas o fatiga fisiológica; limita cualquier lectura a la distribución real de minutos/rotaciones.
+
+## 5. Momentos relevantes
+Usa únicamente goles, tarjetas y otros eventos con timestamp real que aparezcan en los datos. No inventes tramos de cinco minutos.
+
+## 6. Recomendaciones TACTICAL PRO
+Da 3-5 ajustes concretos. Para cada uno escribe primero "Evidencia:" y cita la métrica o patrón registrado que lo sustenta. Si no hay evidencia suficiente para una recomendación, no la incluyas.
+
+RESUMEN DETERMINISTA:
+${deterministicReportStr}
+
+DATOS CRUDOS:
 ${matchDataStr}
 `;
 }
@@ -32,7 +56,6 @@ export default async (req: Request, _context: Context) => {
     return jsonResponse(405, { error: "Method not allowed" });
   }
 
-  // ── 1. API key ────────────────────────────────────────────────
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return jsonResponse(500, {
@@ -40,7 +63,6 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  // ── 2. Parseo defensivo del cuerpo de la petición ──────────────
   let body: any;
   try {
     body = await req.json();
@@ -50,35 +72,34 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  const { matchData } = body || {};
+  const { matchData, deterministicReport } = body || {};
   if (matchData === undefined || matchData === null) {
     return jsonResponse(400, { error: "Falta matchData en el cuerpo de la petición" });
   }
 
-  // ── 3. Serialización defensiva (nunca dejar que un dato raro tumbe la función) ──
   let matchDataStr: string;
+  let deterministicReportStr: string;
   try {
     matchDataStr = JSON.stringify(matchData, null, 2);
+    deterministicReportStr = deterministicReport
+      ? JSON.stringify(deterministicReport, null, 2)
+      : "No se recibió resumen determinista; trabaja solo con los datos crudos y explicita cualquier limitación.";
     if (!matchDataStr) throw new Error("matchData se serializó como vacío");
   } catch (e: any) {
     return jsonResponse(400, {
-      error: "matchData no se pudo serializar: " + (e?.message || String(e)),
+      error: "Los datos del partido no se pudieron serializar: " + (e?.message || String(e)),
     });
   }
 
-  // ── 4. Llamada a Claude ─────────────────────────────────────────
   try {
     const anthropic = new Anthropic({ apiKey });
-
     const response = await anthropic.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 8192,
+      max_tokens: 4096,
       system: SYSTEM_INSTRUCTION,
-      messages: [{ role: "user", content: buildPrompt(matchDataStr) }],
+      messages: [{ role: "user", content: buildPrompt(matchDataStr, deterministicReportStr) }],
     });
 
-    // Une todos los bloques de texto de la respuesta (normalmente hay uno solo,
-    // pero esto es robusto ante respuestas multi-bloque).
     const analysis = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
@@ -94,14 +115,11 @@ export default async (req: Request, _context: Context) => {
     return jsonResponse(200, { analysis });
   } catch (error: any) {
     console.error("tactical-pro error:", error);
-
-    // Errores conocidos del SDK de Anthropic traen status/mensaje utilizables.
     const status = typeof error?.status === "number" ? error.status : 500;
     const message =
-      error?.error?.error?.message || // forma anidada de la API de Anthropic
+      error?.error?.error?.message ||
       error?.message ||
       "Unknown error occurred";
-
     return jsonResponse(status >= 400 && status < 600 ? status : 500, { error: message });
   }
 };

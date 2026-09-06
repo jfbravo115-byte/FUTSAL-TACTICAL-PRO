@@ -1,7 +1,12 @@
 import React, { useState } from "react";
-import { X, FileJson, FileSpreadsheet, Printer, Download } from "lucide-react";
+import { X, FileJson, FileSpreadsheet, Printer, Download, Users } from "lucide-react";
 import { MatchData } from "../types/futsal";
-import { downloadActionsCsv, downloadMatchJson, printMatchReport } from "../services/matchExportService";
+import {
+  downloadActionsCsv,
+  downloadMatchJson,
+  downloadPlayersCsv,
+  printMatchReport,
+} from "../services/matchExportService";
 
 type Props = {
   isOpen: boolean;
@@ -29,14 +34,18 @@ export function SimpleExportModal({ isOpen, onClose, matchData }: Props) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div>
             <h2 className="text-white font-black uppercase italic flex items-center gap-2"><Download size={18} className="text-blue-400" /> Exportar</h2>
-            <p className="text-[10px] text-slate-500 uppercase mt-1">Simple, recuperable y sin depender de mapas</p>
+            <p className="text-[10px] text-slate-500 uppercase mt-1">Informe, jugadores, acciones o respaldo</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><X size={18} /></button>
         </div>
         <div className="p-5 grid gap-3">
           <button onClick={() => run(() => printMatchReport(matchData), "Vista de impresión abierta")} className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 flex items-center gap-4 text-left">
             <Printer className="text-blue-400" />
-            <div><div className="font-black text-white uppercase text-sm">Informe / Imprimir</div><div className="text-[10px] text-slate-500">Usa la impresión del navegador · Guardar como PDF</div></div>
+            <div><div className="font-black text-white uppercase text-sm">Informe / PDF</div><div className="text-[10px] text-slate-500">Resumen, tiempos y zonas · guardar como PDF</div></div>
+          </button>
+          <button onClick={() => run(() => downloadPlayersCsv(matchData), "CSV de jugadores generado")} className="p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/25 hover:bg-cyan-500/20 flex items-center gap-4 text-left">
+            <Users className="text-cyan-400" />
+            <div><div className="font-black text-white uppercase text-sm">CSV de jugadores</div><div className="text-[10px] text-slate-500">TOT, ROT, goles, tiros, recuperaciones y pérdidas</div></div>
           </button>
           <button onClick={() => run(() => downloadActionsCsv(matchData), "CSV de acciones generado")} className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 flex items-center gap-4 text-left">
             <FileSpreadsheet className="text-emerald-400" />

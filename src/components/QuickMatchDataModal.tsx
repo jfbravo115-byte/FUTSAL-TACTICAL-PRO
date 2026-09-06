@@ -16,11 +16,11 @@ export function QuickMatchDataModal({ isOpen, onClose, matchData }: Props) {
   const report = useMemo(() => generateMatchReport(matchData), [matchData]);
   if (!isOpen) return null;
 
-  const ownRecoveries = report.teamTotals.steals + report.teamTotals.interceptions;
+  const ownRecoveries = report.teamTotals.recoveries;
   const cards = [
     { label: "Tiros", value: report.teamTotals.shots, icon: Target, cls: "text-amber-400" },
     { label: "Recuper.", value: ownRecoveries, icon: Zap, cls: "text-cyan-400" },
-    { label: "Pérdidas", value: report.teamTotals.losses, icon: AlertTriangle, cls: "text-red-400" },
+    { label: "Pér+Err", value: report.teamTotals.lossesAndErrors, icon: AlertTriangle, cls: "text-red-400" },
     { label: "Goles", value: report.score.team, icon: Trophy, cls: "text-lime-400" },
   ];
 

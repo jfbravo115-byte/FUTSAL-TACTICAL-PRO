@@ -9,6 +9,7 @@ import { SimpleExportModal } from "../components/SimpleExportModal";
 import {
   Activity,
   ArrowLeft,
+  BarChart3,
   Cloud,
   CloudOff,
   Download,
@@ -221,10 +222,11 @@ export default function Dashboard() {
                   </div>
                   <div className={`mb-4 text-[10px] font-black uppercase tracking-wide ${m.historySource === "local" ? (m.syncStatus === "pending" ? "text-amber-400" : "text-blue-400") : "text-lime-400"}`}>{status}</div>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => navigate(`/analysis/${encodeURIComponent(m.localStorageId || m.id)}`)} className="py-2.5 rounded-xl bg-lime-400 text-slate-950 font-black text-[10px] uppercase">Ver</button>
+                    <button onClick={() => navigate(`/analysis/${encodeURIComponent(m.localStorageId || m.id)}`)} className="py-2.5 rounded-xl bg-lime-400 text-slate-950 font-black text-[10px] uppercase">Resumen</button>
+                    <button onClick={() => navigate(`/analysis/${encodeURIComponent(m.localStorageId || m.id)}?section=data`)} className="py-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/25 text-cyan-300 font-black text-[10px] uppercase flex items-center justify-center gap-1"><BarChart3 size={12}/> Datos</button>
                     <button onClick={() => navigate(`/analysis/${encodeURIComponent(m.localStorageId || m.id)}?section=report`)} className="py-2.5 rounded-xl bg-blue-500/15 border border-blue-500/25 text-blue-400 font-black text-[10px] uppercase flex items-center justify-center gap-1"><FileText size={12}/> Informe</button>
                     <button onClick={() => navigate(`/analysis/${encodeURIComponent(m.localStorageId || m.id)}?section=times`)} className="py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/25 text-amber-400 font-black text-[10px] uppercase flex items-center justify-center gap-1"><Timer size={12}/> Tiempos</button>
-                    <button onClick={() => setExportMatch(asMatchData(m))} className="py-2.5 rounded-xl bg-violet-500/15 border border-violet-500/25 text-violet-300 font-black text-[10px] uppercase flex items-center justify-center gap-1"><Download size={12}/> Exportar</button>
+                    <button onClick={() => setExportMatch(asMatchData(m))} className="col-span-2 py-2.5 rounded-xl bg-violet-500/15 border border-violet-500/25 text-violet-300 font-black text-[10px] uppercase flex items-center justify-center gap-1"><Download size={12}/> Exportar</button>
                   </div>
                   {m.historySource === "local" && m.syncStatus === "pending" && user && (
                     <button disabled={syncingId === m.id} onClick={() => void syncLocal(m)} className="mt-3 w-full py-2.5 rounded-xl border border-white/10 bg-white/5 text-slate-300 font-black text-[10px] uppercase hover:bg-white/10 disabled:opacity-50">

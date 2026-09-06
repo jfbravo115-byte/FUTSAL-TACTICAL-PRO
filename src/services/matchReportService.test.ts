@@ -109,6 +109,19 @@ describe("generateMatchReport — TOT/ROT (A y B del encargo)", () => {
   });
 });
 
+describe("generateMatchReport — reloj en milisegundos", () => {
+  it("formatea matchClock y timestamps de eventos como milisegundos, no como segundos", () => {
+    const md = matchData({
+      matchClock: 125000,
+      players: [player({ individualTimeSeconds: 300 })],
+      events: [event({ timestamp: 65000, type: ActionType.GOAL, playerIds: ["p1"] })],
+    });
+    const r = generateMatchReport(md);
+    expect(r.matchClockLabel).toBe("2:05");
+    expect(r.relevantEvents[0].timeLabel).toBe("1:05");
+  });
+});
+
 describe("generateMatchReport — marcador, goles, faltas", () => {
   it("calcula el marcador con la misma convención que el resto de la app (GOAL/GOAL_CONCEDED + metadata.isOpponent)", () => {
     const md = matchData({

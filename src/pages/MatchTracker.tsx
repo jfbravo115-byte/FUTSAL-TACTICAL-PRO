@@ -68,6 +68,7 @@ import {
   clearMatchSnapshot,
   hasRecoverableMatch,
   saveFinalLocalCopy,
+  getFinalLocalCopy,
   markFinalLocalCopySynced,
   updateFinalLocalCopyMatchData,
   importantChangeSignature,
@@ -1683,28 +1684,40 @@ export default function MatchTracker() {
     // pase lo que pase con la red, antes de intentar nada remoto.
     const cleanData = JSON.parse(JSON.stringify(finalMatchData));
     const localCopyId = saveFinalLocalCopy(cleanData);
-    clearMatchSnapshot(); // ya no es "partido activo sin terminar"
+    const localCopySaved = !!getFinalLocalCopy(localCopyId);
+    // Solo eliminamos el snapshot activo si hemos comprobado que existe una
+    // copia final. Si localStorage falla por cuota/modo privado, mantenemos la
+    // última copia recuperable hasta confirmar el guardado remoto.
+    if (localCopySaved) clearMatchSnapshot();
 
     // 2. Informe automático disponible INMEDIATAMENTE, sin esperar red/IA.
     setBaseReportMarkdown(formatMatchReportAsMarkdown(generateMatchReport(cleanData)));
     setAiAnalysisMarkdown(null);
     setTacticalProError(null);
     setIsTacticalModalOpen(true);
-    setFlashFeedback("Partido guardado · Informe generado");
+    setFlashFeedback(localCopySaved ? "Partido guardado · Informe generado" : "Informe generado · verificando guardado…");
     setTimeout(() => setFlashFeedback(null), 3500);
 
     // 3. Intentar guardado remoto (best-effort). Un fallo aquí NUNCA
-    // puede hacer perder el partido: la copia local ya existe.
+    // elimina la copia local/activa disponible.
+    let remoteSaved = false;
     try {
       const remoteId = await savePartido(cleanData);
-      markFinalLocalCopySynced(localCopyId, remoteId);
+      remoteSaved = true;
+      if (localCopySaved) markFinalLocalCopySynced(localCopyId, remoteId);
+      else clearMatchSnapshot(); // remoto confirmado: ya existe una copia persistente
       console.log('✅ Partido guardado automáticamente');
     } catch (err) {
-      console.warn('⚠️ No se pudo guardar el partido en el servidor (queda copia local):', err);
+      console.warn('⚠️ No se pudo guardar el partido en el servidor:', err);
+    }
+
+    if (!localCopySaved && !remoteSaved) {
+      setFlashFeedback("⚠️ No se pudo confirmar el guardado · se mantiene la copia de recuperación");
+      setTimeout(() => setFlashFeedback(null), 5000);
     }
 
     // 4. IA opcional DESPUÉS de proteger/guardar. No bloquea la finalización.
-    void runTacticalAnalysis(cleanData, localCopyId);
+    void runTacticalAnalysis(cleanData, localCopySaved ? localCopyId : undefined);
   };
 
   const copySummaryToClipboard = () => {

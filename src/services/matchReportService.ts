@@ -101,12 +101,18 @@ export type MatchReport = {
   relevantEvents: MatchReportRelevantEvent[];
 };
 
-const fmtTime = (totalSeconds: number): string => {
+const fmtSeconds = (totalSeconds: number): string => {
   const s = Math.max(0, Math.floor(totalSeconds));
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${String(sec).padStart(2, "0")}`;
 };
+
+// matchClock y GameEvent.timestamp se guardan en MILISEGUNDOS en MatchTracker.
+// Mantener este formateador separado evita mostrar 1000x más tiempo en el
+// informe determinista mientras TOT/ROT continúan expresados en segundos.
+const fmtMilliseconds = (milliseconds: number): string =>
+  fmtSeconds(Math.max(0, milliseconds) / 1000);
 
 const PERIOD_LABEL: Record<Period, string> = {
   [Period.FIRST]: "1ª Parte",
@@ -154,9 +160,9 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       role: p.role,
       isOnPitch: p.isOnPitch,
       totSeconds: p.individualTimeSeconds,
-      totLabel: fmtTime(p.individualTimeSeconds),
+      totLabel: fmtSeconds(p.individualTimeSeconds),
       rotSeconds: p.isOnPitch ? p.rotationTimeSeconds ?? 0 : null,
-      rotLabel: p.isOnPitch ? fmtTime(p.rotationTimeSeconds ?? 0) : null,
+      rotLabel: p.isOnPitch ? fmtSeconds(p.rotationTimeSeconds ?? 0) : null,
       rotationsCount: countRotations(matchData.events, p.id),
       goals: p.stats.goals,
       shots: p.stats.shots,
@@ -252,7 +258,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
         ? matchData.players.find((p) => e.playerIds.includes(p.id))
         : undefined;
       return {
-        timeLabel: fmtTime(e.timestamp),
+        timeLabel: fmtMilliseconds(e.timestamp),
         period: e.period,
         type: ACTION_LABEL[e.type] || String(e.type),
         playerName: player?.name,
@@ -277,14 +283,14 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     },
     period: matchData.period,
     periodLabel: PERIOD_LABEL[matchData.period] ?? String(matchData.period),
-    matchClockLabel: fmtTime(matchData.matchClock),
+    matchClockLabel: fmtMilliseconds(matchData.matchClock),
     fouls: matchData.fouls,
     playersUsed,
     rotationSummary: {
       avgRotSeconds,
-      avgRotLabel: avgRotSeconds !== null ? fmtTime(avgRotSeconds) : null,
+      avgRotLabel: avgRotSeconds !== null ? fmtSeconds(avgRotSeconds) : null,
       maxRotSeconds,
-      maxRotLabel: maxRotSeconds !== null ? fmtTime(maxRotSeconds) : null,
+      maxRotLabel: maxRotSeconds !== null ? fmtSeconds(maxRotSeconds) : null,
       totalRotationsCount,
     },
     teamTotals,

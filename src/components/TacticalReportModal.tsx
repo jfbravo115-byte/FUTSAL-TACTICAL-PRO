@@ -8,6 +8,8 @@ interface TacticalReportModalProps {
   onClose: () => void;
   report: string | null;
   isLoading: boolean;
+  errorMessage?: string | null;
+  onRetry?: () => void;
 }
 
 export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
@@ -15,6 +17,8 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
   onClose,
   report,
   isLoading,
+  errorMessage,
+  onRetry,
 }) => {
   return (
     <AnimatePresence>
@@ -47,12 +51,29 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-              {isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-4">
-                  <Loader2 className="animate-spin text-blue-500" size={32} />
-                  <p className="text-xs font-bold uppercase tracking-widest animate-pulse">Generando Análisis...</p>
+              {errorMessage && !isLoading && (
+                <div className="mb-4 flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-2 text-amber-400">
+                    <AlertCircle size={16} />
+                    <span className="text-xs font-black uppercase tracking-widest">{errorMessage}</span>
+                  </div>
+                  {onRetry && (
+                    <button
+                      onClick={onRetry}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-widest hover:bg-amber-400 transition-all flex-shrink-0"
+                    >
+                      Reintentar
+                    </button>
+                  )}
                 </div>
-              ) : report ? (
+              )}
+              {isLoading && (
+                <div className="mb-4 flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-4 py-3">
+                  <Loader2 className="animate-spin text-blue-400" size={18} />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">TACTICAL PRO está interpretando el informe…</p>
+                </div>
+              )}
+              {report ? (
                 <div className="prose prose-invert prose-sm max-w-none prose-headings:text-blue-400 prose-headings:uppercase prose-headings:italic prose-headings:font-black prose-strong:text-blue-300">
                   <Markdown>{report}</Markdown>
                 </div>

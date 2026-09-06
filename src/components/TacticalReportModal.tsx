@@ -67,12 +67,13 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
                   )}
                 </div>
               )}
-              {isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-4">
-                  <Loader2 className="animate-spin text-blue-500" size={32} />
-                  <p className="text-xs font-bold uppercase tracking-widest animate-pulse">Generando Análisis...</p>
+              {isLoading && (
+                <div className="mb-4 flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-4 py-3">
+                  <Loader2 className="animate-spin text-blue-400" size={18} />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">TACTICAL PRO está interpretando el informe…</p>
                 </div>
-              ) : report ? (
+              )}
+              {report ? (
                 <div className="prose prose-invert prose-sm max-w-none prose-headings:text-blue-400 prose-headings:uppercase prose-headings:italic prose-headings:font-black prose-strong:text-blue-300">
                   <Markdown>{report}</Markdown>
                 </div>

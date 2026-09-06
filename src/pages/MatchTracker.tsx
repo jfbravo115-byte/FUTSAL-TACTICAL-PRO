@@ -68,10 +68,15 @@ import {
   clearMatchSnapshot,
   hasRecoverableMatch,
   saveFinalLocalCopy,
+  markFinalLocalCopySynced,
+  updateFinalLocalCopyMatchData,
   importantChangeSignature,
+  isMeaningfulActiveMatch,
 } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import { applyFieldFlip } from "../utils/fieldOrientation";
+import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
+import { SimpleExportModal } from "../components/SimpleExportModal";
 
 import Markdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
@@ -1247,22 +1252,24 @@ export default function MatchTracker() {
   // Al montar: si hay un snapshot recuperable de una sesión anterior, se
   // avisa (nunca se recupera en silencio). El usuario decide continuar o
   // descartar. No se toca matchData hasta que el usuario elige.
-  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
-  const recoveryHandledRef = useRef(false);
-  useEffect(() => {
-    if (recoveryHandledRef.current) return;
-    recoveryHandledRef.current = true;
-    // No interrumpir si esta instancia se abrió para exportar un PDF
-    // pendiente desde Historial (carga temporal de otro partido, no un
-    // partido activo real en este dispositivo).
-    if (sessionStorage.getItem('pendingPDFExport')) return;
-    if (hasRecoverableMatch()) setShowRecoveryPrompt(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(() => {
+    // Debe decidirse ANTES de que corran los efectos de snapshot. Si se
+    // inicializara a false y se activara después en useEffect, el primer
+    // efecto de guardado podría pisar el snapshot recuperable con un partido
+    // nuevo vacío durante el mismo montaje.
+    if (sessionStorage.getItem('pendingPDFExport')) return false;
+    return hasRecoverableMatch();
+  });
 
   const handleContinueRecoveredMatch = () => {
     const snap = loadMatchSnapshot();
-    if (snap) setMatchData(snap.matchData);
+    if (snap) {
+      setMatchData(snap.matchData);
+      if (typeof snap.uiState?.isFieldFlipped === "boolean") setIsFieldFlipped(snap.uiState.isFieldFlipped);
+      if (snap.uiState?.gameState) setGameState(snap.uiState.gameState);
+      if (snap.uiState?.rivalGameState) setRivalGameState(snap.uiState.rivalGameState);
+      if (typeof snap.uiState?.isDataLocked === "boolean") setIsDataLocked(snap.uiState.isDataLocked);
+    }
     setShowRecoveryPrompt(false);
   };
   const handleDiscardRecoveredMatch = () => {
@@ -1282,6 +1289,7 @@ export default function MatchTracker() {
   useEffect(() => {
     if (showRecoveryPrompt) return; // no pisar el snapshot mientras se decide
     if (matchData.period === Period.FINISHED) return; // ya se congeló/copió aparte
+    if (!isMeaningfulActiveMatch(matchData)) return; // no crear falsos "partidos sin finalizar" vacíos
     const sig = importantChangeSignature(matchData);
     const isImportant = sig !== lastSnapshotSigRef.current;
     lastSnapshotSigRef.current = sig;
@@ -1328,6 +1336,8 @@ export default function MatchTracker() {
   // ── VISTA RÁPIDA "TIEMPOS" ── overlay puro, deriva de matchData.players,
   // no crea ningún cronómetro ni estado de tiempo propio.
   const [isTiemposOpen, setIsTiemposOpen] = useState(false);
+  const [isQuickDataOpen, setIsQuickDataOpen] = useState(false);
+  const [isSimpleExportOpen, setIsSimpleExportOpen] = useState(false);
   const [tiemposSort, setTiemposSort] = useState<"dorsal" | "totAsc" | "totDesc" | "rotDesc">("dorsal");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
@@ -1338,6 +1348,18 @@ export default function MatchTracker() {
   // eventos/acciones. Es puro estado de presentación (UI), local a este
   // componente y no persistido.
   const [isFieldFlipped, setIsFieldFlipped] = useState(false);
+
+  // Persistencia inmediata de estado crítico que vive fuera de MatchData.
+  // El efecto throttled principal conserva este uiState en sus escrituras.
+  useEffect(() => {
+    if (showRecoveryPrompt || matchData.period === Period.FINISHED) return;
+    if (!isMeaningfulActiveMatch(matchData)) return;
+    saveMatchSnapshot(matchData, { isFieldFlipped, gameState, rivalGameState, isDataLocked });
+    // No incluir matchData: este efecto solo se dispara cuando cambia el estado
+    // UI/táctico; el reloj ya tiene su propio guardado throttled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFieldFlipped, gameState, rivalGameState, isDataLocked, showRecoveryPrompt]);
+
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
   const [exportToast, setExportToast] = useState<string | null>(null);
@@ -1421,41 +1443,38 @@ export default function MatchTracker() {
     setIsTacticalModalOpen(true);
   };
 
-  const handleTacticalAnalysis = async () => {
-    // Si el informe base todavía no se generó en esta sesión de modal
-    // (p.ej. se entra directo por el botón de IA), se genera primero.
-    if (!baseReportMarkdown) {
-      const report = generateMatchReport(matchData);
-      setBaseReportMarkdown(formatMatchReportAsMarkdown(report));
-    }
+  const runTacticalAnalysis = async (dataToAnalyze: MatchData, localCopyId?: string) => {
+    // El informe determinista siempre se pinta primero. La IA es una capa
+    // opcional y NUNCA guarda un partido remoto por sí sola (evita duplicados
+    // en Historial cada vez que se consulta TACTICAL PRO durante el partido).
+    const report = generateMatchReport(dataToAnalyze);
+    setBaseReportMarkdown(formatMatchReportAsMarkdown(report));
     setIsTacticalModalOpen(true);
     setIsGeneratingReport(true);
     setTacticalProError(null);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // timeout razonable
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch('/api/tactical-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: stripLoneSurrogates(JSON.stringify({ matchData })),
+        body: stripLoneSurrogates(JSON.stringify({ matchData: dataToAnalyze })),
         signal: controller.signal,
       });
+      if (!res.ok) throw new Error(`TACTICAL PRO: ${res.status}`);
       const data = await res.json();
       if (data.analysis) {
         setAiAnalysisMarkdown(data.analysis);
-        try {
-          const cleanData = JSON.parse(JSON.stringify({
-            ...matchData,
-            timestamp: new Date().toISOString(),
-            tacticalAnalysis: data.analysis,
-          }));
-          await savePartido(cleanData);
-        } catch (saveErr) {
-          console.warn('No se pudo guardar en Firestore:', saveErr);
+        // La interpretación queda en el mismo estado/snapshot del partido y
+        // se incluirá en el guardado final normal. No crea registros remotos extra.
+        setMatchData((prev) => ({ ...prev, tacticalAnalysis: data.analysis }));
+        if (localCopyId) {
+          updateFinalLocalCopyMatchData(localCopyId, { ...dataToAnalyze, tacticalAnalysis: data.analysis });
         }
-      } else {
-        setTacticalProError('TACTICAL PRO no está disponible');
+        return data.analysis as string;
       }
+      setTacticalProError('TACTICAL PRO no está disponible');
+      return null;
     } catch (e: any) {
       console.error(e);
       setTacticalProError(
@@ -1463,10 +1482,15 @@ export default function MatchTracker() {
           ? 'TACTICAL PRO no está disponible (tiempo de espera agotado)'
           : 'TACTICAL PRO no está disponible'
       );
+      return null;
     } finally {
       clearTimeout(timeoutId);
       setIsGeneratingReport(false);
     }
+  };
+
+  const handleTacticalAnalysis = async () => {
+    await runTacticalAnalysis(matchData);
   };
 
   const playAlertSound = (count: number) => {
@@ -1658,17 +1682,29 @@ export default function MatchTracker() {
     // 1. Congelar + copia local final PRIMERO: el partido queda a salvo
     // pase lo que pase con la red, antes de intentar nada remoto.
     const cleanData = JSON.parse(JSON.stringify(finalMatchData));
-    saveFinalLocalCopy(cleanData);
+    const localCopyId = saveFinalLocalCopy(cleanData);
     clearMatchSnapshot(); // ya no es "partido activo sin terminar"
 
-    // 2. Intentar guardado remoto (best-effort). Un fallo aquí NUNCA
+    // 2. Informe automático disponible INMEDIATAMENTE, sin esperar red/IA.
+    setBaseReportMarkdown(formatMatchReportAsMarkdown(generateMatchReport(cleanData)));
+    setAiAnalysisMarkdown(null);
+    setTacticalProError(null);
+    setIsTacticalModalOpen(true);
+    setFlashFeedback("Partido guardado · Informe generado");
+    setTimeout(() => setFlashFeedback(null), 3500);
+
+    // 3. Intentar guardado remoto (best-effort). Un fallo aquí NUNCA
     // puede hacer perder el partido: la copia local ya existe.
     try {
-      await savePartido(cleanData);
+      const remoteId = await savePartido(cleanData);
+      markFinalLocalCopySynced(localCopyId, remoteId);
       console.log('✅ Partido guardado automáticamente');
     } catch (err) {
       console.warn('⚠️ No se pudo guardar el partido en el servidor (queda copia local):', err);
     }
+
+    // 4. IA opcional DESPUÉS de proteger/guardar. No bloquea la finalización.
+    void runTacticalAnalysis(cleanData, localCopyId);
   };
 
   const copySummaryToClipboard = () => {
@@ -3952,6 +3988,28 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => { setIsSidebarOpen(false); setIsQuickDataOpen(true); }}
+                  className="w-full p-5 bg-gradient-to-br from-cyan-500/10 to-blue-500/10 rounded-xl border border-cyan-500/20 hover:border-cyan-500/40 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
+                >
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-black text-white">DATOS</span>
+                    <span className="text-[10px] text-cyan-400 font-black tracking-widest">RESUMEN + ZONAS SIMPLES</span>
+                  </div>
+                  <TrendingUp size={24} className="text-cyan-600 group-hover:text-cyan-400 transition-colors" />
+                </button>
+
+                <button
+                  onClick={() => { setIsSidebarOpen(false); setIsSimpleExportOpen(true); }}
+                  className="w-full p-5 bg-gradient-to-br from-violet-500/10 to-blue-500/10 rounded-xl border border-violet-500/20 hover:border-violet-500/40 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
+                >
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-black text-white">EXPORTAR</span>
+                    <span className="text-[10px] text-violet-400 font-black tracking-widest">INFORME · CSV · JSON</span>
+                  </div>
+                  <Download size={24} className="text-violet-600 group-hover:text-violet-400 transition-colors" />
+                </button>
+
+                <button
                   onClick={() => { setIsSidebarOpen(false); navigate('/dashboard'); }}
                   className="w-full p-5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
                 >
@@ -4273,6 +4331,34 @@ export default function MatchTracker() {
               </motion.span>
 
             </div>
+          </div>
+
+          {/* ACCESO RÁPIDO DE PARTIDO: un toque, sin cambiar de ruta ni perder estado */}
+          <div className="grid grid-cols-4 gap-1 px-1 pb-1">
+            <button
+              onClick={() => { setIsTiemposOpen(false); setIsQuickDataOpen(false); setIsTacticalModalOpen(false); setActiveTab("pitch"); }}
+              className="py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[8px] font-black uppercase tracking-wide text-blue-300"
+            >
+              Partido
+            </button>
+            <button
+              onClick={() => setIsTiemposOpen(true)}
+              className="py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] font-black uppercase tracking-wide text-amber-300"
+            >
+              Tiempos
+            </button>
+            <button
+              onClick={() => setIsQuickDataOpen(true)}
+              className="py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-[8px] font-black uppercase tracking-wide text-cyan-300"
+            >
+              Datos
+            </button>
+            <button
+              onClick={handleShowInforme}
+              className="py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-[8px] font-black uppercase tracking-wide text-violet-300"
+            >
+              Informe
+            </button>
           </div>
         </div>
       </header>
@@ -7125,6 +7211,18 @@ export default function MatchTracker() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <QuickMatchDataModal
+        isOpen={isQuickDataOpen}
+        onClose={() => setIsQuickDataOpen(false)}
+        matchData={matchData}
+      />
+
+      <SimpleExportModal
+        isOpen={isSimpleExportOpen}
+        onClose={() => setIsSimpleExportOpen(false)}
+        matchData={matchData}
+      />
 
       {/* VISTA RÁPIDA "TIEMPOS" — overlay puro, no reinicia ni toca el partido */}
       <AnimatePresence>

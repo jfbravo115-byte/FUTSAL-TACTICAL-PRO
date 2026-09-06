@@ -1,40 +1,60 @@
 /**
- * src/services/matchSnapshotService.ts
+ * Seguridad local de partido y copias finales.
  *
- * Capa de seguridad LOCAL, independiente del backend remoto.
- * Guarda snapshots del partido en curso en localStorage para poder
- * recuperarlo si el navegador se cierra, se recarga o el guardado
- * remoto falla. No sustituye a partidosService (Netlify Database):
- * es una red de seguridad adicional, de menor dependencia externa.
- *
- * Funciones puras / con efectos mínimos y aislados, fáciles de testear.
+ * Objetivo: que un fallo de red/auth/IA nunca implique perder un partido.
+ * La copia local es independiente del backend remoto y se mantiene incluso
+ * después de sincronizar correctamente.
  */
-import { MatchData, Period } from "../types/futsal";
+import { GameState, MatchData, Period } from "../types/futsal";
 
 const SNAPSHOT_KEY = "futsal_active_match_snapshot_v1";
-const FINAL_COPY_PREFIX = "futsal_final_copy_v1_"; // + timestamp
+export const FINAL_COPY_PREFIX = "futsal_final_copy_v1_";
+
+export type MatchSnapshotUiState = {
+  isFieldFlipped?: boolean;
+  gameState?: GameState;
+  rivalGameState?: GameState;
+  isDataLocked?: boolean;
+};
 
 export type MatchSnapshot = {
   matchData: MatchData;
-  savedAt: string; // ISO
+  savedAt: string;
+  uiState?: MatchSnapshotUiState;
 };
 
-/** Guarda (sobrescribe) el snapshot del partido activo. Nunca lanza. */
-export function saveMatchSnapshot(matchData: MatchData): void {
+export type LocalFinalCopy = {
+  id: string;
+  matchData: MatchData;
+  syncStatus: "local" | "pending" | "synced";
+  remoteId?: string;
+  savedAt?: string;
+};
+
+type StoredFinalCopyV2 = {
+  version: 2;
+  matchData: MatchData;
+  syncStatus: "local" | "pending" | "synced";
+  remoteId?: string;
+  savedAt: string;
+};
+
+export function saveMatchSnapshot(matchData: MatchData, uiState?: MatchSnapshotUiState): void {
   try {
+    // Si el guardado throttled del reloj no trae uiState, conserva el último
+    // estado visual/táctico persistido en vez de borrarlo.
+    const previousUiState = uiState === undefined ? loadMatchSnapshot()?.uiState : undefined;
     const snapshot: MatchSnapshot = {
       matchData,
       savedAt: new Date().toISOString(),
+      uiState: uiState ?? previousUiState,
     };
     localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
   } catch (err) {
-    // No debe interrumpir el partido si localStorage falla (cuota, modo
-    // privado, etc.) — es una red de seguridad, no el flujo principal.
     console.warn("No se pudo guardar la copia local del partido:", err);
   }
 }
 
-/** Lee el snapshot del partido activo, si existe y es legible. */
 export function loadMatchSnapshot(): MatchSnapshot | null {
   try {
     const raw = localStorage.getItem(SNAPSHOT_KEY);
@@ -43,12 +63,11 @@ export function loadMatchSnapshot(): MatchSnapshot | null {
     if (!parsed || typeof parsed !== "object" || !parsed.matchData) return null;
     return parsed as MatchSnapshot;
   } catch (err) {
-    console.warn("Copia local del partido ilegible, se descarta:", err);
+    console.warn("Copia local del partido ilegible:", err);
     return null;
   }
 }
 
-/** Elimina el snapshot del partido activo (tras finalizar o descartar). */
 export function clearMatchSnapshot(): void {
   try {
     localStorage.removeItem(SNAPSHOT_KEY);
@@ -57,61 +76,147 @@ export function clearMatchSnapshot(): void {
   }
 }
 
-/**
- * ¿Hay un partido recuperable? (existe snapshot y no está ya FINISHED).
- * Un partido FINISHED ya se congeló y se movió a copia final; no debe
- * ofrecerse como "partido sin terminar".
- */
+export function isMeaningfulActiveMatch(matchData: MatchData): boolean {
+  return (
+    matchData.period !== Period.FIRST ||
+    matchData.matchClock > 0 ||
+    matchData.events.length > 0 ||
+    matchData.players.some((p) => p.individualTimeSeconds > 0)
+  );
+}
+
 export function hasRecoverableMatch(): boolean {
   const snap = loadMatchSnapshot();
-  return !!snap && snap.matchData.period !== Period.FINISHED;
+  return !!snap && snap.matchData.period !== Period.FINISHED && isMeaningfulActiveMatch(snap.matchData);
 }
 
 /**
- * Guarda una copia final local (post-finalización), con clave propia por
- * timestamp para no colisionar entre partidos y poder listarlas todas.
- * Se usa como fuente de verdad del Historial cuando el backend remoto
- * no está disponible.
+ * Guarda una copia final local. Por defecto queda pendiente de sincronizar;
+ * si luego el POST remoto funciona se marca como synced sin eliminarla.
  */
 export function saveFinalLocalCopy(matchData: MatchData): string {
-  // Sufijo aleatorio además del timestamp: evita colisión de clave si dos
-  // copias finales se guardan en el mismo milisegundo.
   const id = `${FINAL_COPY_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    localStorage.setItem(id, JSON.stringify(matchData));
+    const payload: StoredFinalCopyV2 = {
+      version: 2,
+      matchData,
+      syncStatus: "pending",
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(id, JSON.stringify(payload));
   } catch (err) {
     console.warn("No se pudo guardar la copia final local del partido:", err);
   }
   return id;
 }
 
-/** Lista todas las copias finales locales guardadas (más reciente primero). */
-export function listFinalLocalCopies(): { id: string; matchData: MatchData }[] {
-  const out: { id: string; matchData: MatchData }[] = [];
+function parseStoredFinalCopy(id: string, raw: string): LocalFinalCopy | null {
+  try {
+    const parsed = JSON.parse(raw);
+    // v2 actual
+    if (parsed?.version === 2 && parsed.matchData) {
+      return {
+        id,
+        matchData: parsed.matchData as MatchData,
+        syncStatus: parsed.syncStatus === "synced" ? "synced" : parsed.syncStatus === "local" ? "local" : "pending",
+        remoteId: parsed.remoteId,
+        savedAt: parsed.savedAt,
+      };
+    }
+    // Compatibilidad con las copias creadas por la primera versión del módulo,
+    // donde se almacenaba MatchData directamente.
+    if (parsed && typeof parsed === "object" && parsed.teamName && parsed.players && parsed.events) {
+      return { id, matchData: parsed as MatchData, syncStatus: "local" };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function listFinalLocalCopies(): LocalFinalCopy[] {
+  const out: LocalFinalCopy[] = [];
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key || !key.startsWith(FINAL_COPY_PREFIX)) continue;
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        out.push({ id: key, matchData: JSON.parse(raw) as MatchData });
-      } catch {
-        // copia individual corrupta: se omite, no rompe el listado completo
-      }
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const copy = parseStoredFinalCopy(key, raw);
+      if (copy) out.push(copy);
     }
   } catch (err) {
     console.warn("No se pudieron listar las copias finales locales:", err);
   }
-  return out.sort((a, b) => (b.matchData.timestamp || "").localeCompare(a.matchData.timestamp || ""));
+  return out.sort((a, b) => (b.matchData.timestamp || b.savedAt || "").localeCompare(a.matchData.timestamp || a.savedAt || ""));
+}
+
+export function getFinalLocalCopy(id: string): LocalFinalCopy | null {
+  if (!id.startsWith(FINAL_COPY_PREFIX)) return null;
+  try {
+    const raw = localStorage.getItem(id);
+    return raw ? parseStoredFinalCopy(id, raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Marca como sincronizada, pero conserva siempre la copia local. */
+export function markFinalLocalCopySynced(id: string, remoteId: string): void {
+  const copy = getFinalLocalCopy(id);
+  if (!copy) return;
+  try {
+    const payload: StoredFinalCopyV2 = {
+      version: 2,
+      matchData: copy.matchData,
+      syncStatus: "synced",
+      remoteId,
+      savedAt: copy.savedAt || new Date().toISOString(),
+    };
+    localStorage.setItem(id, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("No se pudo marcar la copia local como sincronizada:", err);
+  }
+}
+
+/** Permite marcar explícitamente una copia como local/pending sin borrarla. */
+export function updateFinalLocalCopyMatchData(id: string, matchData: MatchData): void {
+  const copy = getFinalLocalCopy(id);
+  if (!copy) return;
+  try {
+    const payload: StoredFinalCopyV2 = {
+      version: 2,
+      matchData,
+      syncStatus: copy.syncStatus,
+      remoteId: copy.remoteId,
+      savedAt: copy.savedAt || new Date().toISOString(),
+    };
+    localStorage.setItem(id, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("No se pudo actualizar la copia final local:", err);
+  }
+}
+
+export function markFinalLocalCopyPending(id: string): void {
+  const copy = getFinalLocalCopy(id);
+  if (!copy) return;
+  try {
+    const payload: StoredFinalCopyV2 = {
+      version: 2,
+      matchData: copy.matchData,
+      syncStatus: "pending",
+      remoteId: copy.remoteId,
+      savedAt: copy.savedAt || new Date().toISOString(),
+    };
+    localStorage.setItem(id, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("No se pudo actualizar el estado de sincronización:", err);
+  }
 }
 
 /**
- * Firma corta de los campos que deben forzar un guardado INMEDIATO
- * (no throttled): nº de eventos, período, si el reloj corre, faltas,
- * y composición de jugadores en pista (sustituciones). Cambios que no
- * afectan a esta firma (tick de reloj, TOT/ROT acumulando) se consideran
- * "no urgentes" y respetan el throttle normal.
+ * Firma de cambios que fuerzan snapshot inmediato. El reloj/TOT/ROT por sí
+ * solos no cambian la firma y respetan el throttle de MatchTracker.
  */
 export function importantChangeSignature(matchData: MatchData): string {
   const onPitchIds = matchData.players

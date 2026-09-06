@@ -7,8 +7,11 @@ import {
   saveFinalLocalCopy,
   listFinalLocalCopies,
   importantChangeSignature,
+  getFinalLocalCopy,
+  markFinalLocalCopySynced,
+  isMeaningfulActiveMatch,
 } from "./matchSnapshotService";
-import { Period, Role, MatchData } from "../types/futsal";
+import { Period, Role, GameState, MatchData } from "../types/futsal";
 
 // Node/vitest no trae localStorage por defecto: mock mínimo en memoria,
 // suficiente para las funciones que usa este servicio.
@@ -82,6 +85,22 @@ describe("matchSnapshotService", () => {
     expect(snap!.savedAt).toBeTruthy();
   });
 
+  it("persiste orientación/cambio de lado y estado táctico fuera de MatchData", () => {
+    const md = buildMatchData({ period: Period.SECOND });
+    saveMatchSnapshot(md, {
+      isFieldFlipped: true,
+      gameState: GameState.PJ_ATTACK,
+      rivalGameState: GameState.INFERIORITY,
+      isDataLocked: true,
+    });
+    // Un guardado posterior del reloj sin uiState no debe borrar esos datos.
+    saveMatchSnapshot({ ...md, matchClock: 5000 });
+    const snap = loadMatchSnapshot();
+    expect(snap?.uiState?.isFieldFlipped).toBe(true);
+    expect(snap?.uiState?.gameState).toBe(GameState.PJ_ATTACK);
+    expect(snap?.uiState?.isDataLocked).toBe(true);
+  });
+
   it("hasRecoverableMatch es true tras guardar un partido no finalizado", () => {
     saveMatchSnapshot(buildMatchData({ period: Period.SECOND }));
     expect(hasRecoverableMatch()).toBe(true);
@@ -89,6 +108,13 @@ describe("matchSnapshotService", () => {
 
   it("hasRecoverableMatch es false si el partido está FINISHED", () => {
     saveMatchSnapshot(buildMatchData({ period: Period.FINISHED }));
+    expect(hasRecoverableMatch()).toBe(false);
+  });
+
+  it("un partido inicial vacío no se considera recuperable", () => {
+    const blank = buildMatchData();
+    expect(isMeaningfulActiveMatch(blank)).toBe(false);
+    saveMatchSnapshot(blank);
     expect(hasRecoverableMatch()).toBe(false);
   });
 
@@ -108,12 +134,24 @@ describe("matchSnapshotService", () => {
     expect(loadMatchSnapshot()).toBeNull();
   });
 
-  it("saveFinalLocalCopy guarda una copia final recuperable vía listFinalLocalCopies", () => {
+  it("saveFinalLocalCopy guarda una copia final recuperable y pendiente de sincronizar", () => {
     const md = buildMatchData({ period: Period.FINISHED, timestamp: "2026-01-01T00:00:00.000Z" });
-    saveFinalLocalCopy(md);
+    const id = saveFinalLocalCopy(md);
     const copies = listFinalLocalCopies();
     expect(copies.length).toBe(1);
     expect(copies[0].matchData.teamName).toBe("Mi Equipo");
+    expect(copies[0].syncStatus).toBe("pending");
+    expect(getFinalLocalCopy(id)?.matchData.opponentName).toBe("Rival");
+  });
+
+  it("marcar sincronizada NO elimina la copia local y conserva el remoteId", () => {
+    const id = saveFinalLocalCopy(buildMatchData({ period: Period.FINISHED }));
+    markFinalLocalCopySynced(id, "remote-123");
+    const copy = getFinalLocalCopy(id);
+    expect(copy).not.toBeNull();
+    expect(copy!.syncStatus).toBe("synced");
+    expect(copy!.remoteId).toBe("remote-123");
+    expect(localStorage.getItem(id)).toBeTruthy();
   });
 
   it("listFinalLocalCopies ordena por timestamp descendente (más reciente primero)", () => {

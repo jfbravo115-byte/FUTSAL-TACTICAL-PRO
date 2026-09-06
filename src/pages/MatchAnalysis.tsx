@@ -1,344 +1,162 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { getPartido } from '../services/partidosService';
-import { SavedMatch, ActionType, GoalieAction, Role } from '../types/futsal';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, BarChart, Bar
-} from 'recharts';
-import { Cpu, ArrowLeft, Loader2, Trophy, Target, Zap, Shield, Download } from 'lucide-react';
-import Markdown from 'react-markdown';
-import TacticalHeatMap from '../components/TacticalHeatMap';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import Markdown from "react-markdown";
+import { ArrowLeft, Cpu, Download, FileText, Loader2, RefreshCw, Timer, Trophy } from "lucide-react";
+import { MatchData, SavedMatch, Role } from "../types/futsal";
+import { getPartido } from "../services/partidosService";
+import { getFinalLocalCopy } from "../services/matchSnapshotService";
+import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
+import { summarizeQuickZones } from "../services/matchZonesService";
+import { generateTacticalReport } from "../services/tacticalAnalysisService";
+import { SimpleExportModal } from "../components/SimpleExportModal";
 
-const formatTime = (ms: number) => {
-  const s = Math.floor(ms / 1000);
-  return `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
-};
+function fmtSeconds(seconds: number) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+}
 
 export default function MatchAnalysis() {
   const { matchId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [match, setMatch] = useState<SavedMatch | null>(null);
   const [loading, setLoading] = useState(true);
-  const [analysis, setAnalysis] = useState<string>('');
-  const [analyzingAI, setAnalyzingAI] = useState(false);
-  const [searchParams] = useSearchParams();
-  const teamPdfRef = useRef<HTMLDivElement>(null);
-  const gkPdfRef = useRef<HTMLDivElement>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [ai, setAi] = useState<string>("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const timesRef = useRef<HTMLDivElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!matchId) return;
-    const fetch = async () => {
-      const matchData = await getPartido(matchId);
-      if (matchData) {
-        setMatch(matchData);
-        // Auto-generate Tactical PRO if not already available
-        if (!matchData.tacticalAnalysis) {
-          autoGenerateAnalysis(matchData);
-        } else {
-          setAnalysis(matchData.tacticalAnalysis);
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const decoded = decodeURIComponent(matchId);
+        const local = getFinalLocalCopy(decoded);
+        let data: SavedMatch | null = local ? { ...local.matchData, id: local.id } : null;
+        if (!data) {
+          try {
+            data = await getPartido(decoded);
+          } catch (remoteErr) {
+            console.warn("No se pudo leer el partido remoto:", remoteErr);
+          }
         }
+        if (!alive) return;
+        if (!data) {
+          setLoadError("No se encontró el partido en este dispositivo ni en el historial remoto.");
+        } else {
+          setMatch(data);
+          setAi(data.tacticalAnalysis || "");
+        }
+      } finally {
+        if (alive) setLoading(false);
       }
-      setLoading(false);
-    };
-    fetch();
+    })();
+    return () => { alive = false; };
   }, [matchId]);
 
-  const [exportingPDF, setExportingPDF] = useState<'team' | 'goalkeeper' | null>(null);
-  const [exportToast, setExportToast] = useState<string | null>(null);
-
-  const generatePDF = async (type: 'team' | 'goalkeeper') => {
+  useEffect(() => {
     if (!match) return;
-    const msg = type === 'team' ? 'Generando PDF Global Equipo...' : 'Generando PDF Porteros + Mapa...';
-    setExportToast(msg);
-    setTimeout(() => setExportToast(null), 4000);
-    // Store export request and navigate to MatchTracker which has the full PDF templates
-    sessionStorage.setItem('pendingPDFExport', JSON.stringify({
-      type,
-      matchId: match.id,
-    }));
-    setTimeout(() => navigate(`/match?export=${type}&matchId=${match.id}`), 600);
-  };
+    const section = searchParams.get("section");
+    const el = section === "times" ? timesRef.current : section === "report" ? reportRef.current : null;
+    if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }, [match, searchParams]);
 
-  const autoGenerateAnalysis = async (matchData: SavedMatch) => {
+  const report = useMemo(() => match ? generateMatchReport(match) : null, [match]);
+  const reportMarkdown = useMemo(() => report ? formatMatchReportAsMarkdown(report) : "", [report]);
+  const zones = useMemo(() => match ? summarizeQuickZones(match, false) : [], [match]);
+
+  const runAI = async () => {
+    if (!match) return;
+    setAiLoading(true);
+    setAiError(null);
     try {
-      const res = await fetch('/api/tactical-pro', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matchData }),
-      });
-      const data = await res.json();
-      if (data.analysis) setAnalysis(data.analysis);
-    } catch (e) {
-      console.warn('Auto-analysis failed:', e);
+      const result = await Promise.race([
+        generateTacticalReport(match),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 20000)),
+      ]);
+      setAi(result);
+    } catch (err) {
+      console.error(err);
+      setAiError("TACTICAL PRO no está disponible. El informe automático sigue completo.");
     } finally {
-      setAnalyzingAI(false);
+      setAiLoading(false);
     }
   };
 
   if (loading) return (
-    <div className="flex flex-col items-center justify-center h-screen bg-[#0A0B0E]">
-      <Loader2 className="w-8 h-8 animate-spin text-lime-400 mb-4" />
-      <p className="text-slate-400 text-sm">Cargando análisis...</p>
+    <div className="h-screen bg-[#0A0B0E] flex items-center justify-center text-slate-300">
+      <Loader2 className="animate-spin text-lime-400 mr-3" /> Cargando partido…
     </div>
   );
 
-  if (!match) return (
-    <div className="flex flex-col items-center justify-center h-screen bg-[#0A0B0E] text-center p-6">
-      <p className="text-red-400 font-bold">No se encontró el partido.</p>
-      <button onClick={() => navigate('/dashboard')} className="mt-4 text-lime-400 hover:underline">
-        Volver al historial
-      </button>
+  if (!match || !report) return (
+    <div className="h-screen bg-[#0A0B0E] flex flex-col items-center justify-center text-center p-6">
+      <p className="text-red-400 font-bold">{loadError || "No se encontró el partido."}</p>
+      <button onClick={() => navigate("/dashboard")} className="mt-4 text-lime-400 hover:underline">Volver al historial</button>
     </div>
   );
 
-  // Derive stats from events
-  const goals = match.events?.filter(
-    e => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-  ).length ?? 0;
-  const opponentGoals = match.events?.filter(
-    e => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-  ).length ?? 0;
-
-  const localPlayers = match.players?.filter(p => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE) ?? [];
-  const rivalPlayers = match.players?.filter(p => p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE) ?? [];
-
-  // Build timeline data (goals over time in 5-min buckets)
-  const buckets: Record<number, { localGoals: number; rivalGoals: number }> = {};
-  match.events?.forEach(e => {
-    if (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) {
-      const bucket = Math.floor(e.timestamp / 1000 / 60 / 5) * 5;
-      if (!buckets[bucket]) buckets[bucket] = { localGoals: 0, rivalGoals: 0 };
-      if (e.metadata?.isOpponent) buckets[bucket].rivalGoals++;
-      else buckets[bucket].localGoals++;
-    }
-  });
-  const timelineData = Object.entries(buckets)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([min, v]) => ({ min: `${min}'`, ...v }));
-
-  // Player chart data
-  const playerChartData = localPlayers
-    .sort((a, b) => (b.stats.goals + b.stats.assists) - (a.stats.goals + a.stats.assists))
-    .slice(0, 8)
-    .map(p => ({
-      name: p.name.split(' ')[0],
-      Goles: p.stats.goals,
-      Asistencias: p.stats.assists,
-      Recuperaciones: p.stats.steals,
-    }));
+  const players = match.players
+    .filter((p) => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE)
+    .sort((a, b) => a.number - b.number);
 
   return (
     <div className="bg-[#0A0B0E] text-slate-200 font-sans overflow-y-auto allow-scroll" style={{ height: "var(--app-height, 100vh)" }}>
-      {/* Header */}
       <header className="border-b border-white/10 bg-[#0E1015]/95 sticky top-0 z-50 backdrop-blur-xl">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard')} className="p-2 hover:bg-white/10 rounded-xl transition-all text-slate-400 hover:text-white">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h1 className="text-base font-black text-white uppercase tracking-tight">
-              {match.teamName} <span className="text-slate-500">vs</span> {match.opponentName}
-            </h1>
-            <p className="text-[10px] text-slate-500 uppercase">
-              {match.timestamp ? new Date(match.timestamp).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}
-            </p>
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={() => navigate("/dashboard")} className="p-2 hover:bg-white/10 rounded-xl text-slate-400"><ArrowLeft size={20}/></button>
+            <div className="min-w-0"><h1 className="font-black text-white truncate">{match.teamName} <span className="text-slate-500">vs</span> {match.opponentName}</h1><p className="text-[10px] text-slate-500 uppercase">{match.timestamp ? new Date(match.timestamp).toLocaleString("es-ES") : ""}</p></div>
           </div>
+          <button onClick={() => setExportOpen(true)} className="px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/25 text-violet-300 font-black text-[10px] uppercase flex gap-2 items-center"><Download size={14}/> Exportar</button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8 pb-16">
-        {/* Score + PDF buttons */}
-        <div className="flex justify-between items-center gap-3">
-          <div className="min-w-0">
-            <h2 className="text-2xl font-black text-white truncate">{match.teamName}</h2>
-            <p className="text-slate-500 uppercase text-xs truncate">vs {match.opponentName}</p>
-          </div>
-          <div className="text-right shrink-0">
-            <div className={`text-4xl font-mono font-black whitespace-nowrap ${goals > opponentGoals ? 'text-lime-400' : goals < opponentGoals ? 'text-red-400' : 'text-white'}`}>
-              {goals}–{opponentGoals}
-            </div>
-            <div className="text-[10px] font-black text-slate-500 uppercase mt-1">
-              {goals > opponentGoals ? '🏆 Victoria' : goals < opponentGoals ? '❌ Derrota' : '🤝 Empate'}
-            </div>
-          </div>
-        </div>
+      <main className="max-w-5xl mx-auto px-4 py-6 space-y-6 pb-16">
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-5 flex items-center justify-between gap-4">
+          <div><div className="text-xs uppercase font-black text-slate-500">Resultado</div><div className="text-lg font-black text-white">{match.teamName} · {match.opponentName}</div></div>
+          <div className="text-5xl font-mono font-black text-white">{report.score.team}-{report.score.opponent}</div>
+        </section>
 
-        {/* PDF Export buttons */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => generatePDF('team')}
-            disabled={exportingPDF !== null}
-            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 transition-all active:scale-95 disabled:opacity-50"
-          >
-            {exportingPDF === 'team' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            PDF Global Jugadores
-          </button>
-          <button
-            onClick={() => generatePDF('goalkeeper')}
-            disabled={exportingPDF !== null}
-            className="flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 transition-all active:scale-95 disabled:opacity-50"
-          >
-            {exportingPDF === 'goalkeeper' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            PDF Porteros + Mapa
-          </button>
-        </div>
-
-        {/* Key stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Tiros', value: match.events?.filter(e => !e.metadata?.isOpponent && (e.type === ActionType.SHOT || e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED)).length ?? 0, icon: Target, color: 'text-amber-400' },
-            { label: 'Recuper.', value: localPlayers.reduce((acc, p) => acc + p.stats.steals, 0), icon: Zap, color: 'text-cyan-400' },
-            { label: 'Faltas', value: match.fouls?.team ?? 0, icon: Shield, color: 'text-orange-400' },
-            { label: 'Eventos', value: match.events?.length ?? 0, icon: Trophy, color: 'text-purple-400' },
-          ].map(s => (
-            <div key={s.label} className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 flex flex-col items-center text-center">
-              <s.icon className={`w-5 h-5 ${s.color} mb-2`} />
-              <div className={`text-2xl font-black ${s.color}`}>{s.value}</div>
-              <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{s.label}</div>
-            </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[['Tiros', report.teamTotals.shots], ['Recuper.', report.teamTotals.steals + report.teamTotals.interceptions], ['Pérdidas', report.teamTotals.losses], ['Rotaciones', report.rotationSummary.totalRotationsCount]].map(([label,value]) => (
+            <div key={String(label)} className="rounded-2xl border border-white/10 bg-slate-900/50 p-4 text-center"><div className="text-2xl font-black text-cyan-300">{value}</div><div className="text-[9px] uppercase font-black text-slate-500">{label}</div></div>
           ))}
         </div>
 
-        {/* Goals Timeline */}
-        {timelineData.length > 0 && (
-          <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800">
-            <h3 className="text-base font-black text-white mb-4">Dinámica de Goles por Periodo (5 min)</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={timelineData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="min" stroke="#475569" tick={{ fontSize: 10 }} />
-                  <YAxis stroke="#475569" allowDecimals={false} tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', color: '#f8fafc' }} />
-                  <Legend />
-                  <Line type="monotone" dataKey="localGoals" name={`Goles ${match.teamName}`} stroke="#a3e635" strokeWidth={2} dot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="rivalGoals" name={`Goles ${match.opponentName}`} stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
+        <section ref={timesRef} className="scroll-mt-20 rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5 overflow-x-auto">
+          <h2 className="font-black text-white uppercase flex items-center gap-2 mb-4"><Timer size={18} className="text-amber-400"/> Tiempos</h2>
+          <table className="w-full text-xs min-w-[520px]"><thead><tr className="text-slate-500 uppercase text-[9px] border-b border-white/10"><th className="py-2 text-left">#</th><th className="text-left">Jugador</th><th>Estado</th><th>TOT</th><th>ROT</th></tr></thead><tbody>
+            {players.map((p) => <tr key={p.id} className="border-b border-white/5"><td className="py-3 font-black text-slate-400">{p.number}</td><td className="font-black text-white">{p.name}</td><td className="text-center">{p.isOnPitch ? <span className="text-emerald-400 font-black">PISTA</span> : <span className="text-slate-500">BANCO</span>}</td><td className="text-center font-mono font-black text-blue-400">{fmtSeconds(p.individualTimeSeconds)}</td><td className="text-center font-mono font-black text-emerald-400">{p.isOnPitch ? fmtSeconds(p.rotationTimeSeconds ?? 0) : "—"}</td></tr>)}
+          </tbody></table>
+        </section>
 
-        {/* Player stats chart */}
-        {playerChartData.length > 0 && (
-          <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800">
-            <h3 className="text-base font-black text-white mb-4">Estadísticas de Jugadores — {match.teamName}</h3>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={playerChartData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="name" stroke="#475569" tick={{ fontSize: 9 }} />
-                  <YAxis stroke="#475569" allowDecimals={false} tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', color: '#f8fafc' }} />
-                  <Legend />
-                  <Bar dataKey="Goles" fill="#a3e635" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Asistencias" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Recuperaciones" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        <section className="rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-5">
+          <h2 className="font-black text-white uppercase mb-2">Zonas simples</h2>
+          <p className="text-[10px] text-slate-500 mb-4">9 zonas lógicas reales. Sin heatmap como vista principal.</p>
+          <div className="grid grid-cols-3 gap-2 max-w-2xl">
+            {zones.map((z) => <div key={z.zone} className={`rounded-2xl border p-3 ${z.total ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-white/5 bg-black/20'}`}><div className="flex justify-between"><b className="font-mono">{z.zone}</b><b className="text-cyan-300 text-xl">{z.total}</b></div><div className="mt-2 grid grid-cols-2 text-[9px] font-black uppercase gap-1"><span className="text-amber-400">T {z.shots}</span><span className="text-lime-400">G {z.goals}</span><span className="text-cyan-400">R {z.recoveries}</span><span className="text-red-400">P {z.losses}</span></div></div>)}
           </div>
-        )}
+        </section>
 
-        {/* Player table */}
-        {localPlayers.length > 0 && (
-          <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 overflow-x-auto">
-            <h3 className="text-base font-black text-white mb-4">Estadísticas Individuales — {match.teamName}</h3>
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-500 text-[10px] uppercase">
-                  <th className="pb-2 pr-4 font-black">#</th>
-                  <th className="pb-2 pr-4 font-black">Jugador</th>
-                  <th className="pb-2 px-3 font-black text-center">G</th>
-                  <th className="pb-2 px-3 font-black text-center">A</th>
-                  <th className="pb-2 px-3 font-black text-center">T</th>
-                  <th className="pb-2 px-3 font-black text-center">R</th>
-                  <th className="pb-2 px-3 font-black text-center">P</th>
-                  <th className="pb-2 px-3 font-black text-center">+/-</th>
-                </tr>
-              </thead>
-              <tbody>
-                {localPlayers
-                  .sort((a, b) => (b.stats.goals * 5 + b.stats.assists * 3) - (a.stats.goals * 5 + a.stats.assists * 3))
-                  .map(p => (
-                    <tr key={p.id} className="border-b border-slate-800/50 hover:bg-white/5">
-                      <td className="py-2 pr-4 font-mono font-black text-slate-400">{p.number}</td>
-                      <td className="py-2 pr-4 font-black text-white">{p.name}</td>
-                      <td className="py-2 px-3 text-center font-black text-lime-400">{p.stats.goals}</td>
-                      <td className="py-2 px-3 text-center font-black text-blue-400">{p.stats.assists}</td>
-                      <td className="py-2 px-3 text-center font-black text-amber-400">{p.stats.shots + p.stats.goals}</td>
-                      <td className="py-2 px-3 text-center font-black text-cyan-400">{p.stats.steals}</td>
-                      <td className="py-2 px-3 text-center font-black text-red-400">{p.stats.losses}</td>
-                      <td className={`py-2 px-3 text-center font-mono font-black ${p.plusMinus > 0 ? 'text-lime-400' : p.plusMinus < 0 ? 'text-red-400' : 'text-slate-500'}`}>
-                        {p.plusMinus > 0 ? `+${p.plusMinus}` : p.plusMinus}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <section ref={reportRef} className="scroll-mt-20 rounded-3xl border border-blue-500/20 bg-blue-500/5 p-5">
+          <div className="flex items-center gap-2 mb-4"><FileText className="text-blue-400" size={18}/><h2 className="font-black text-white uppercase">Informe automático</h2></div>
+          <div className="prose prose-invert prose-sm max-w-none prose-headings:text-blue-300"><Markdown>{reportMarkdown}</Markdown></div>
+        </section>
 
-        {/* Tactical Heat Map */}
-        <TacticalHeatMap match={match} />
-
-        {/* Tactical Pro Analysis */}
-        <div className="border border-lime-400/20 rounded-2xl overflow-hidden">
-          <div className="bg-gradient-to-r from-lime-400/10 to-transparent p-5 border-b border-lime-400/10 flex items-center gap-3">
-            <div className="p-2 bg-lime-400 rounded-xl">
-              <Cpu className="w-5 h-5 text-slate-950" />
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-lime-400 font-mono tracking-tight">TACTICAL PRO</h3>
-              <p className="text-slate-500 text-xs">Informe generado por IA</p>
-            </div>
-          </div>
-          <div className="p-6 bg-slate-950 min-h-[200px]">
-            {analyzingAI ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Loader2 className="w-8 h-8 mb-3 text-lime-400 animate-spin" />
-                <p className="text-xs text-slate-500 uppercase font-black tracking-widest animate-pulse">Generando análisis táctico...</p>
-              </div>
-            ) : analysis ? (
-              <div className="prose prose-invert prose-lime prose-p:text-slate-300 prose-headings:text-white max-w-none text-sm">
-                <Markdown>{analysis}</Markdown>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-slate-600">
-                <Cpu className="w-10 h-10 mb-3 opacity-20" />
-                <p className="text-sm">No se pudo generar el análisis.</p>
-              </div>
-            )}
-          </div>
-        </div>
+        <section className="rounded-3xl border border-lime-500/20 bg-lime-500/5 overflow-hidden">
+          <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><div className="p-2 bg-lime-400 rounded-xl"><Cpu className="text-slate-950" size={18}/></div><div><h2 className="font-black text-lime-400">TACTICAL PRO</h2><p className="text-[10px] text-slate-500">Interpretación opcional · el informe no depende de ella</p></div></div><button disabled={aiLoading} onClick={() => void runAI()} className="px-3 py-2 rounded-xl bg-lime-400 text-slate-950 font-black text-[10px] uppercase flex items-center gap-2 disabled:opacity-50">{aiLoading ? <Loader2 className="animate-spin" size={13}/> : <RefreshCw size={13}/>} {ai ? 'Reanalizar' : 'Analizar'}</button></div>
+          <div className="p-5">{aiError && <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-amber-300 text-xs">{aiError}</div>}{ai ? <div className="prose prose-invert prose-sm max-w-none prose-headings:text-lime-300"><Markdown>{ai}</Markdown></div> : <div className="py-6 text-center text-slate-500 text-sm"><Trophy className="mx-auto opacity-20 mb-2"/>El informe automático ya está disponible. Pulsa Analizar solo si quieres interpretación IA.</div>}</div>
+        </section>
       </main>
 
-      {/* Export loading overlay */}
-      {exportToast && (
-        <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center">
-          <div className="flex flex-col items-center gap-6 bg-slate-900/95 border border-white/10 rounded-3xl px-10 py-8 shadow-2xl mx-6">
-            <div className="relative w-16 h-16">
-              <div className="absolute inset-0 rounded-full border-4 border-blue-500/20"></div>
-              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-400 animate-spin"></div>
-              <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-blue-300/60 animate-spin" style={{ animationDuration: '1.5s', animationDirection: 'reverse' }}></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Download size={18} className="text-blue-400" />
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-[13px] font-black uppercase tracking-widest text-white text-center">{exportToast}</span>
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Por favor, espera...</span>
-            </div>
-            <div className="flex gap-1">
-              {[0,1,2].map(i => (
-                <div key={i} className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
+      <SimpleExportModal isOpen={exportOpen} onClose={() => setExportOpen(false)} matchData={match as MatchData}/>
     </div>
   );
 }

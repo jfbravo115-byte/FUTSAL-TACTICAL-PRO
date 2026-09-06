@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import MatchAnalysis from './pages/MatchAnalysis';
 import TacticalBoard from './pages/TacticalBoard';
 import LiveTracking from './pages/LiveTracking';
+import { hasRecoverableMatch } from './services/matchSnapshotService';
 
 // En un arranque fresco de la app (cerrar y reabrir la PWA), iOS restaura la
 // última URL visitada (p.ej. /match). Esto fuerza a empezar siempre en la
@@ -20,7 +21,14 @@ function StartupRedirect() {
     const isFreshLaunch = !sessionStorage.getItem('app_session_active');
     if (isFreshLaunch) {
       sessionStorage.setItem('app_session_active', '1');
-      if (location.pathname !== '/') {
+      // Si existe una copia local de un partido activo, entrar directamente
+      // en MatchTracker para mostrar el diálogo CONTINUAR/DESCARTAR. Así un
+      // cierre de la PWA durante el partido no obliga a preparar uno nuevo.
+      if (hasRecoverableMatch()) {
+        if (location.pathname !== '/match') navigate('/match', { replace: true });
+      } else if (location.pathname === '/match') {
+        // Solo evitamos reabrir un MatchTracker vacío por restauración de iOS.
+        // Rutas explícitas de Historial/Análisis se respetan.
         navigate('/', { replace: true });
       }
     }

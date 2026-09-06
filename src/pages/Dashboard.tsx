@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { MatchData, SavedMatch, ActionType, GoalieAction } from "../types/futsal";
-import { listPartidos, savePartido } from "../services/partidosService";
-import { listFinalLocalCopies, markFinalLocalCopySynced } from "../services/matchSnapshotService";
+import { listPartidos, savePartido, deletePartidos } from "../services/partidosService";
+import { listFinalLocalCopies, markFinalLocalCopySynced, deleteFinalLocalCopy } from "../services/matchSnapshotService";
 import { combineMatchHistory, MatchHistoryEntry } from "../services/matchHistoryService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 import {
@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Smartphone,
   Timer,
+  Trash2,
   Trophy,
 } from "lucide-react";
 
@@ -65,6 +66,8 @@ export default function Dashboard() {
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [exportMatch, setExportMatch] = useState<MatchData | null>(null);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setFetching(true);
@@ -113,6 +116,29 @@ export default function Dashboard() {
       setRemoteError("No se pudo sincronizar ahora. La copia local permanece intacta.");
     } finally {
       setSyncingId(null);
+    }
+  };
+
+  const handleDelete = async (entry: MatchHistoryEntry) => {
+    const key = `${entry.id}-${entry.localStorageId || ""}`;
+    setDeletingKey(key);
+    try {
+      // Borra en cada sitio donde exista una copia real de este partido.
+      // No se borra nada "en cascada" ni automáticamente: es una acción
+      // explícita del usuario sobre esta entrada concreta.
+      if (entry.localStorageId) deleteFinalLocalCopy(entry.localStorageId);
+      if (entry.remoteId) {
+        try {
+          await deletePartidos([entry.remoteId]);
+        } catch (err) {
+          console.error(err);
+          setRemoteError("Se borró la copia local, pero no se pudo borrar la copia remota ahora.");
+        }
+      }
+      await refresh();
+    } finally {
+      setConfirmDeleteKey(null);
+      setDeletingKey(null);
     }
   };
 
@@ -205,6 +231,24 @@ export default function Dashboard() {
                       {syncingId === m.id ? "Sincronizando…" : "Sincronizar ahora"}
                     </button>
                   )}
+                  {(() => {
+                    const key = `${m.id}-${m.localStorageId || ""}`;
+                    const isConfirming = confirmDeleteKey === key;
+                    const isDeleting = deletingKey === key;
+                    return (
+                      <button
+                        disabled={isDeleting}
+                        onClick={() => (isConfirming ? void handleDelete(m) : setConfirmDeleteKey(key))}
+                        className={`mt-2 w-full py-2 rounded-xl border font-black text-[10px] uppercase flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 ${
+                          isConfirming
+                            ? "bg-red-600 border-red-600 text-white"
+                            : "bg-white/5 border-white/10 text-slate-500 hover:text-red-400 hover:border-red-500/30"
+                        }`}
+                      >
+                        <Trash2 size={12} /> {isDeleting ? "Borrando…" : isConfirming ? "¿Confirmar borrado?" : "Borrar"}
+                      </button>
+                    );
+                  })()}
                 </article>
               );
             })}

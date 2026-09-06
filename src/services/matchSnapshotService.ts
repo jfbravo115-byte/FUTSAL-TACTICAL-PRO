@@ -215,6 +215,21 @@ export function markFinalLocalCopyPending(id: string): void {
 }
 
 /**
+ * Elimina una copia final local por decisión EXPLÍCITA del usuario (p.ej.
+ * borrar un partido desde Historial). Nunca se llama automáticamente al
+ * sincronizar — ver combineMatchHistory/markFinalLocalCopySynced, que
+ * conservan la copia local incluso tras un guardado remoto correcto.
+ */
+export function deleteFinalLocalCopy(id: string): void {
+  if (!id.startsWith(FINAL_COPY_PREFIX)) return;
+  try {
+    localStorage.removeItem(id);
+  } catch (err) {
+    console.warn("No se pudo eliminar la copia final local:", err);
+  }
+}
+
+/**
  * Firma de cambios que fuerzan snapshot inmediato. El reloj/TOT/ROT por sí
  * solos no cambian la firma y respetan el throttle de MatchTracker.
  */

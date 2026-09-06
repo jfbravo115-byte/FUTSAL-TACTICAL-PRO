@@ -1,14 +1,6 @@
 /**
- * src/services/matchReportService.ts
- *
- * Generador de informe DETERMINISTA a partir de MatchData. No depende de
- * IA/red: puede generarse instantáneamente durante el partido o al
- * finalizar, incluso sin conexión. Función pura, fácil de testear.
- *
- * REGLA: no se inventa ningún dato que el modelo no contenga. Todo lo
- * que aparece aquí se deriva directamente de matchData (players, events,
- * stats). Cuando algo no puede calcularse con los datos disponibles,
- * se omite o se deja en 0/null explícitamente.
+ * Informe determinista a partir de MatchData. No depende de IA ni red.
+ * Todo lo mostrado se deriva de datos realmente registrados.
  */
 import {
   MatchData,
@@ -28,11 +20,13 @@ export type MatchReportPlayerLine = {
   isOnPitch: boolean;
   totSeconds: number;
   totLabel: string;
-  rotSeconds: number | null; // solo si está en pista ahora mismo
+  rotSeconds: number | null;
   rotLabel: string | null;
-  rotationsCount: number; // nº de entradas registradas como sustitución
+  rotationsCount: number;
   goals: number;
   shots: number;
+  shotsOffTarget: number;
+  attempts: number;
   steals: number;
   interceptions: number;
   losses: number;
@@ -80,15 +74,28 @@ export type MatchReport = {
   };
   teamTotals: {
     goals: number;
+    /** Intentos totales: gol + tiro a portería + tiro fuera. */
     shots: number;
+    shotsOnTarget: number;
     shotsOffTarget: number;
+    shotsUnknownTarget: number;
+    shotAccuracyPct: number | null;
+    goalConversionPct: number | null;
     steals: number;
     interceptions: number;
+    recoveries: number;
     losses: number;
     errors: number;
+    lossesAndErrors: number;
+    recoveryLossBalance: number;
     fouls: number;
     yellowCards: number;
     redCards: number;
+  };
+  highlights: {
+    topTot: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "totLabel" | "totSeconds"> | null;
+    topScorer: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "goals"> | null;
+    topRecoverer: (Pick<MatchReportPlayerLine, "id" | "number" | "name"> & { recoveries: number }) | null;
   };
   goalkeeper: {
     name: string;
@@ -108,9 +115,7 @@ const fmtSeconds = (totalSeconds: number): string => {
   return `${m}:${String(sec).padStart(2, "0")}`;
 };
 
-// matchClock y GameEvent.timestamp se guardan en MILISEGUNDOS en MatchTracker.
-// Mantener este formateador separado evita mostrar 1000x más tiempo en el
-// informe determinista mientras TOT/ROT continúan expresados en segundos.
+// MatchTracker guarda matchClock y GameEvent.timestamp en milisegundos.
 const fmtMilliseconds = (milliseconds: number): string =>
   fmtSeconds(Math.max(0, milliseconds) / 1000);
 
@@ -129,29 +134,41 @@ const ACTION_LABEL: Record<string, string> = {
   [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
 };
 
+const isGoalEvent = (e: GameEvent) =>
+  e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED;
+
+const isShotAttempt = (e: GameEvent) =>
+  e.type === ActionType.SHOT || isGoalEvent(e);
+
 function countRotations(events: GameEvent[], playerId: string): number {
   return events.filter(
-    (e) => e.type === ActionType.SUBSTITUTION && e.playerIds.includes(playerId)
+    (e) => e.type === ActionType.SUBSTITUTION && e.playerIds.includes(playerId),
   ).length;
 }
 
-/**
- * Genera el informe. Puede llamarse en cualquier momento del partido
- * ("Informe actual") o tras finalizar ("Informe final") — el propio
- * matchData.period/isFinal describen en qué punto se generó.
- */
+function pct(part: number, total: number): number | null {
+  return total > 0 ? Math.round((part / total) * 100) : null;
+}
+
 export function generateMatchReport(matchData: MatchData): MatchReport {
-  const propios = matchData.players.filter((p) => !p.isOpponent);
+  const propios = matchData.players.filter(
+    (p) => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE,
+  );
   const eventosPropios = matchData.events.filter((e) => !e.metadata?.isOpponent);
 
-  // "Jugadores utilizados": han jugado algo de tiempo o participan en algún evento.
+  const score = {
+    team: matchData.events.filter((e) => isGoalEvent(e) && !e.metadata?.isOpponent).length,
+    opponent: matchData.events.filter((e) => isGoalEvent(e) && !!e.metadata?.isOpponent).length,
+  };
+
   const usados = propios.filter(
     (p) =>
       p.individualTimeSeconds > 0 ||
-      matchData.events.some((e) => e.playerIds.includes(p.id))
+      matchData.events.some((e) => e.playerIds.includes(p.id)),
   );
 
   const playersUsed: MatchReportPlayerLine[] = usados
+    .slice()
     .sort((a, b) => a.number - b.number)
     .map((p) => ({
       id: p.id,
@@ -166,6 +183,8 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       rotationsCount: countRotations(matchData.events, p.id),
       goals: p.stats.goals,
       shots: p.stats.shots,
+      shotsOffTarget: p.stats.shotsOffTarget,
+      attempts: p.stats.goals + p.stats.shots + p.stats.shotsOffTarget,
       steals: p.stats.steals,
       interceptions: p.stats.interceptions,
       losses: p.stats.losses,
@@ -175,36 +194,65 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       redCards: p.stats.redCards,
     }));
 
-  // ROT medio/máximo: sobre los jugadores EN PISTA en el momento de generar
-  // el informe (ROT es, por definición, el tiempo desde la última entrada;
-  // no existe un histórico de todas las rotaciones pasadas en el modelo).
   const enPistaAhora = propios.filter((p) => p.isOnPitch);
   const rotsActuales = enPistaAhora.map((p) => p.rotationTimeSeconds ?? 0);
-  const avgRotSeconds =
-    rotsActuales.length > 0
-      ? rotsActuales.reduce((a, b) => a + b, 0) / rotsActuales.length
-      : null;
-  const maxRotSeconds = rotsActuales.length > 0 ? Math.max(...rotsActuales) : null;
+  const avgRotSeconds = rotsActuales.length
+    ? rotsActuales.reduce((a, b) => a + b, 0) / rotsActuales.length
+    : null;
+  const maxRotSeconds = rotsActuales.length ? Math.max(...rotsActuales) : null;
   const totalRotationsCount = propios.reduce(
     (acc, p) => acc + countRotations(matchData.events, p.id),
-    0
+    0,
   );
 
   const sumStat = (key: keyof Player["stats"]) =>
-    propios.reduce((acc, p) => acc + (p.stats[key] as number), 0);
+    propios.reduce((acc, p) => acc + Number(p.stats[key] ?? 0), 0);
+
+  const shotEvents = eventosPropios.filter(isShotAttempt);
+  const shotsOffTarget = shotEvents.filter(
+    (e) => e.type === ActionType.SHOT && e.destinationGrid?.toUpperCase() === "OUT",
+  ).length;
+  const shotsOnTarget = shotEvents.filter((e) => {
+    const destination = e.destinationGrid?.toUpperCase();
+    return destination ? destination !== "OUT" : isGoalEvent(e);
+  }).length;
+  const shotsUnknownTarget = Math.max(0, shotEvents.length - shotsOnTarget - shotsOffTarget);
+  const recoveries = sumStat("steals") + sumStat("interceptions");
+  const lossesAndErrors = sumStat("losses") + sumStat("errors");
 
   const teamTotals = {
-    goals: sumStat("goals"),
-    shots: sumStat("shots"),
-    shotsOffTarget: sumStat("shotsOffTarget"),
+    goals: score.team,
+    shots: shotEvents.length,
+    shotsOnTarget,
+    shotsOffTarget,
+    shotsUnknownTarget,
+    shotAccuracyPct: pct(shotsOnTarget, shotsOnTarget + shotsOffTarget),
+    goalConversionPct: pct(score.team, shotEvents.length),
     steals: sumStat("steals"),
     interceptions: sumStat("interceptions"),
+    recoveries,
     losses: sumStat("losses"),
     errors: sumStat("errors"),
+    lossesAndErrors,
+    recoveryLossBalance: recoveries - lossesAndErrors,
     fouls: matchData.fouls.team,
     yellowCards: sumStat("yellowCards"),
     redCards: sumStat("redCards"),
   };
+
+  const topTot = playersUsed.length
+    ? playersUsed.slice().sort((a, b) => b.totSeconds - a.totSeconds || a.number - b.number)[0]
+    : null;
+  const scorerCandidates = playersUsed.filter((p) => p.goals > 0);
+  const topScorer = scorerCandidates.length
+    ? scorerCandidates.slice().sort((a, b) => b.goals - a.goals || a.number - b.number)[0]
+    : null;
+  const recovererCandidates = playersUsed
+    .map((p) => ({ ...p, recoveries: p.steals + p.interceptions }))
+    .filter((p) => p.recoveries > 0);
+  const topRecoverer = recovererCandidates.length
+    ? recovererCandidates.sort((a, b) => b.recoveries - a.recoveries || a.number - b.number)[0]
+    : null;
 
   const portero = propios.find((p) => p.role === Role.GOALKEEPER && p.isOnPitch) || null;
   const goalkeeper = portero
@@ -216,17 +264,14 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       }
     : null;
 
-  // Distribución por zonas: a partir de originGrid de los eventos propios
-  // que lo tengan (no se inventa zona para eventos sin ella).
   const zonaCount = new Map<string, number>();
   eventosPropios.forEach((e) => {
     if (e.originGrid) zonaCount.set(e.originGrid, (zonaCount.get(e.originGrid) || 0) + 1);
   });
   const zoneDistribution = Array.from(zonaCount.entries())
     .map(([zone, count]) => ({ zone, count }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => b.count - a.count || a.zone.localeCompare(b.zone));
 
-  // Estadísticas por periodo: solo periodos con al menos un evento propio.
   const periodosPresentes = Array.from(new Set(eventosPropios.map((e) => e.period)));
   const periodStats: MatchReportPeriodStats[] = periodosPresentes
     .sort((a, b) => a - b)
@@ -235,15 +280,14 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       return {
         period,
         label: PERIOD_LABEL[period] ?? `Periodo ${period}`,
-        goals: evs.filter((e) => e.type === ActionType.GOAL).length,
-        shots: evs.filter((e) => e.type === ActionType.SHOT).length,
-        steals: evs.filter((e) => e.type === ActionType.STEAL).length,
-        losses: evs.filter((e) => e.type === ActionType.LOSS).length,
+        goals: evs.filter(isGoalEvent).length,
+        shots: evs.filter(isShotAttempt).length,
+        steals: evs.filter((e) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
+        losses: evs.filter((e) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
         fouls: evs.filter((e) => e.type === ActionType.FOUL).length,
       };
     });
 
-  // Acciones relevantes: goles y tarjetas rojas, propias y rivales.
   const relevantTypes = new Set<string>([
     ActionType.GOAL,
     ActionType.RED_CARD,
@@ -251,11 +295,12 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   ]);
   const relevantEvents: MatchReportRelevantEvent[] = matchData.events
     .filter((e) => relevantTypes.has(e.type))
+    .slice()
     .sort((a, b) => a.timestamp - b.timestamp)
     .map((e) => {
       const isOpponent = !!e.metadata?.isOpponent;
       const player = !isOpponent
-        ? matchData.players.find((p) => e.playerIds.includes(p.id))
+        ? matchData.players.find((p) => e.playerIds.includes(p.id) && !p.isOpponent)
         : undefined;
       return {
         timeLabel: fmtMilliseconds(e.timestamp),
@@ -271,16 +316,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     isFinal: matchData.period === Period.FINISHED,
     teamName: matchData.teamName,
     opponentName: matchData.opponentName,
-    // Mismo cálculo de marcador que usa MatchTracker en el resto de la app:
-    // GOAL o GOAL_CONCEDED, distinguidos por metadata.isOpponent.
-    score: {
-      team: matchData.events.filter(
-        (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-      ).length,
-      opponent: matchData.events.filter(
-        (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-      ).length,
-    },
+    score,
     period: matchData.period,
     periodLabel: PERIOD_LABEL[matchData.period] ?? String(matchData.period),
     matchClockLabel: fmtMilliseconds(matchData.matchClock),
@@ -294,6 +330,11 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       totalRotationsCount,
     },
     teamTotals,
+    highlights: {
+      topTot: topTot ? { id: topTot.id, number: topTot.number, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
+      topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, name: topScorer.name, goals: topScorer.goals } : null,
+      topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
+    },
     goalkeeper,
     zoneDistribution,
     periodStats,
@@ -301,10 +342,6 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   };
 }
 
-/**
- * Formatea el informe determinista como Markdown legible, para mostrarlo
- * instantáneamente (sin red) en el mismo visor que usa el análisis IA.
- */
 export function formatMatchReportAsMarkdown(r: MatchReport): string {
   const lines: string[] = [];
   lines.push(`# ${r.isFinal ? "Informe Final" : "Informe Actual"} — ${r.teamName} vs ${r.opponentName}`);
@@ -314,20 +351,38 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   lines.push(`**Faltas:** ${r.fouls.team} (propias) / ${r.fouls.opponent} (rival)`);
   lines.push("");
 
+  lines.push("## Datos clave");
+  lines.push(
+    `Tiros totales **${r.teamTotals.shots}** · a portería **${r.teamTotals.shotsOnTarget}** · fuera **${r.teamTotals.shotsOffTarget}** · ` +
+      `precisión registrada **${r.teamTotals.shotAccuracyPct ?? "—"}%** · conversión **${r.teamTotals.goalConversionPct ?? "—"}%**`,
+  );
+  lines.push(
+    `Recuperaciones **${r.teamTotals.recoveries}** · pérdidas + errores **${r.teamTotals.lossesAndErrors}** · balance **${r.teamTotals.recoveryLossBalance >= 0 ? "+" : ""}${r.teamTotals.recoveryLossBalance}**`,
+  );
+  lines.push("");
+
   if (r.goalkeeper) {
     lines.push(
-      `**Portero:** ${r.goalkeeper.number} ${r.goalkeeper.name} — ${r.goalkeeper.saves} paradas, ${r.goalkeeper.conceded} goles encajados`
+      `**Portero en pista:** ${r.goalkeeper.number} ${r.goalkeeper.name} — ${r.goalkeeper.saves} paradas, ${r.goalkeeper.conceded} goles encajados`,
     );
     lines.push("");
   }
 
+  const highlights: string[] = [];
+  if (r.highlights.topTot) highlights.push(`Mayor TOT: **#${r.highlights.topTot.number} ${r.highlights.topTot.name} (${r.highlights.topTot.totLabel})**`);
+  if (r.highlights.topScorer) highlights.push(`Máximo goleador: **#${r.highlights.topScorer.number} ${r.highlights.topScorer.name} (${r.highlights.topScorer.goals})**`);
+  if (r.highlights.topRecoverer) highlights.push(`Más recuperaciones: **#${r.highlights.topRecoverer.number} ${r.highlights.topRecoverer.name} (${r.highlights.topRecoverer.recoveries})**`);
+  if (highlights.length) {
+    lines.push("## Destacados descriptivos");
+    highlights.forEach((h) => lines.push(`- ${h}`));
+    lines.push("");
+  }
+
   lines.push("## Rotaciones");
-  lines.push(
-    `Rotaciones totales registradas: **${r.rotationSummary.totalRotationsCount}**  `
-  );
+  lines.push(`Rotaciones totales registradas: **${r.rotationSummary.totalRotationsCount}**  `);
   if (r.rotationSummary.avgRotLabel) {
     lines.push(
-      `ROT medio (jugadores en pista ahora): **${r.rotationSummary.avgRotLabel}** · ROT máximo: **${r.rotationSummary.maxRotLabel}**`
+      `ROT medio (jugadores en pista ahora): **${r.rotationSummary.avgRotLabel}** · ROT máximo: **${r.rotationSummary.maxRotLabel}**`,
     );
   } else {
     lines.push("Sin jugadores en pista en este momento para calcular ROT medio/máximo.");
@@ -336,30 +391,20 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   lines.push("## Jugadores utilizados");
   lines.push("");
-  lines.push("| # | Jugador | Estado | TOT | ROT | Rotac. | G | T | Rec | Pér | F |");
+  lines.push("| # | Jugador | Estado | TOT | ROT | Rotac. | G | Tiros | Rec | Pér+Err | F |");
   lines.push("|---|---|---|---|---|---|---|---|---|---|---|");
   r.playersUsed.forEach((p) => {
     lines.push(
-      `| ${p.number} | ${p.name} | ${p.isOnPitch ? "En pista" : "Banquillo"} | ${p.totLabel} | ${
-        p.rotLabel ?? "—"
-      } | ${p.rotationsCount} | ${p.goals} | ${p.shots} | ${p.steals + p.interceptions} | ${p.losses} | ${p.fouls} |`
+      `| ${p.number} | ${p.name} | ${p.isOnPitch ? "En pista" : "Banquillo"} | ${p.totLabel} | ${p.rotLabel ?? "—"} | ${p.rotationsCount} | ${p.goals} | ${p.attempts} | ${p.steals + p.interceptions} | ${p.losses + p.errors} | ${p.fouls} |`,
     );
   });
-  lines.push("");
-
-  lines.push("## Totales del equipo");
-  lines.push(
-    `Goles ${r.teamTotals.goals} · Tiros ${r.teamTotals.shots} (${r.teamTotals.shotsOffTarget} fuera) · ` +
-      `Recuperaciones ${r.teamTotals.steals + r.teamTotals.interceptions} · Pérdidas ${r.teamTotals.losses} · ` +
-      `Errores ${r.teamTotals.errors} · Faltas ${r.teamTotals.fouls} · Amarillas ${r.teamTotals.yellowCards} · Rojas ${r.teamTotals.redCards}`
-  );
   lines.push("");
 
   if (r.periodStats.length) {
     lines.push("## Estadísticas por periodo");
     r.periodStats.forEach((ps) => {
       lines.push(
-        `**${ps.label}:** ${ps.goals} goles · ${ps.shots} tiros · ${ps.steals} recuperaciones · ${ps.losses} pérdidas · ${ps.fouls} faltas`
+        `**${ps.label}:** ${ps.goals} goles · ${ps.shots} tiros · ${ps.steals} recuperaciones · ${ps.losses} pérdidas/errores · ${ps.fouls} faltas`,
       );
     });
     lines.push("");
@@ -375,9 +420,7 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
     lines.push("## Acciones relevantes");
     r.relevantEvents.forEach((e) => {
       lines.push(
-        `- **${e.timeLabel}** (${e.isOpponent ? r.opponentName : r.teamName}) — ${e.type}${
-          e.playerName ? ` · ${e.playerName}` : ""
-        }`
+        `- **${e.timeLabel}** (${e.isOpponent ? r.opponentName : r.teamName}) — ${e.type}${e.playerName ? ` · ${e.playerName}` : ""}`,
       );
     });
     lines.push("");
@@ -385,9 +428,7 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   lines.push("---");
   lines.push(
-    `*Informe generado automáticamente a partir de los datos registrados — ${new Date(r.generatedAt).toLocaleString(
-      "es-ES"
-    )}. No requiere conexión ni IA.*`
+    `*Informe generado automáticamente a partir de los datos registrados — ${new Date(r.generatedAt).toLocaleString("es-ES")}. No requiere conexión ni IA.*`,
   );
 
   return lines.join("\n");

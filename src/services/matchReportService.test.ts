@@ -177,3 +177,54 @@ describe("generateMatchReport — no inventa datos", () => {
     expect(r.playersUsed.length).toBe(0);
   });
 });
+
+describe("generateMatchReport — tiros y destacados descriptivos", () => {
+  it("cuenta como tiros totales goles + tiros a portería + tiros fuera", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600, stats: {
+        goals: 1, assists: 0, steals: 2, interceptions: 1, losses: 1, errors: 1,
+        fouls: 0, yellowCards: 0, redCards: 0, shots: 1, shotsOffTarget: 1, saves: 0, conceded: 0,
+      } })],
+      events: [
+        event({ id: "g", type: ActionType.GOAL, playerIds: ["p1"], destinationGrid: "G1" }),
+        event({ id: "s", type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G2" }),
+        event({ id: "o", type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "OUT" }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.teamTotals.shots).toBe(3);
+    expect(r.teamTotals.shotsOnTarget).toBe(2);
+    expect(r.teamTotals.shotsOffTarget).toBe(1);
+    expect(r.teamTotals.shotAccuracyPct).toBe(67);
+    expect(r.teamTotals.goalConversionPct).toBe(33);
+    expect(r.playersUsed[0].attempts).toBe(3);
+  });
+
+  it("calcula balance recuperación-pérdida sin llamarlo posesión", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 300, stats: {
+        goals: 0, assists: 0, steals: 3, interceptions: 2, losses: 2, errors: 1,
+        fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: 0, conceded: 0,
+      } })],
+    });
+    const r = generateMatchReport(md);
+    expect(r.teamTotals.recoveries).toBe(5);
+    expect(r.teamTotals.lossesAndErrors).toBe(3);
+    expect(r.teamTotals.recoveryLossBalance).toBe(2);
+  });
+
+  it("destaca TOT, goleador y recuperador solo si hay datos", () => {
+    const p1 = player({ id: "p1", number: 7, name: "A", individualTimeSeconds: 500, stats: {
+      goals: 0, assists: 0, steals: 1, interceptions: 0, losses: 0, errors: 0,
+      fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: 0, conceded: 0,
+    } });
+    const p2 = player({ id: "p2", number: 8, name: "B", individualTimeSeconds: 700, stats: {
+      goals: 2, assists: 0, steals: 3, interceptions: 1, losses: 0, errors: 0,
+      fouls: 0, yellowCards: 0, redCards: 0, shots: 1, shotsOffTarget: 0, saves: 0, conceded: 0,
+    } });
+    const r = generateMatchReport(matchData({ players: [p1, p2] }));
+    expect(r.highlights.topTot?.id).toBe("p2");
+    expect(r.highlights.topScorer?.id).toBe("p2");
+    expect(r.highlights.topRecoverer?.recoveries).toBe(4);
+  });
+});

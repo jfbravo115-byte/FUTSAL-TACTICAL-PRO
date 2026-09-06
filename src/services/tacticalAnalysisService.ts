@@ -1,29 +1,35 @@
 import { MatchData } from '../types/futsal';
+import { generateMatchReport } from './matchReportService';
 
-// Mismo saneamiento que en MatchTracker.tsx: evita que un surrogate UTF-16
-// huérfano en un campo de texto libre (nombre de equipo/jugador) haga que
-// Safari/WebKit lance "TypeError: The string did not match the expected
-// pattern." al codificar el body de fetch() a UTF-8. Ver el comentario
-// junto a stripLoneSurrogates en MatchTracker.tsx para el detalle completo.
+// Evita que un surrogate UTF-16 huérfano haga fallar fetch() en Safari/WebKit.
 const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 const stripLoneSurrogates = (str: string): string =>
   str.replace(LONE_SURROGATE_RE, "\uFFFD");
 
 export async function generateTacticalReport(matchData: MatchData): Promise<string> {
+  // El resumen determinista viaja junto a los datos brutos para que la IA
+  // tenga una fuente canónica de métricas y no necesite reinterpretar campos.
+  const deterministicReport = generateMatchReport(matchData);
+
   const res = await fetch('/api/tactical-pro', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: stripLoneSurrogates(JSON.stringify({ matchData })),
+    body: stripLoneSurrogates(JSON.stringify({ matchData, deterministicReport })),
   });
 
-  if (!res.ok) {
-    throw new Error(`Error del servidor: ${res.status}`);
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    // Un error HTML/proxy no debe ocultar el status real.
   }
 
-  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || `Error del servidor: ${res.status}`);
+  }
 
-  if (!data.analysis) {
-    throw new Error(data.error || 'Respuesta vacía del servidor');
+  if (!data?.analysis || typeof data.analysis !== 'string') {
+    throw new Error(data?.error || 'Respuesta vacía del servidor');
   }
 
   return data.analysis;

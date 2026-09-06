@@ -1491,7 +1491,11 @@ export default function MatchTracker() {
   };
 
   const handleTacticalAnalysis = async () => {
-    await runTacticalAnalysis(matchData);
+    try {
+      await runTacticalAnalysis(matchData);
+    } finally {
+      setExportingType((current) => current === 'TACTICAL' ? null : current);
+    }
   };
 
   const playAlertSound = (count: number) => {

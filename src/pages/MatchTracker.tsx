@@ -62,6 +62,16 @@ import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
 import { generateTacticalReport } from "../services/tacticalAnalysisService";
 import { TacticalReportModal } from "../components/TacticalReportModal";
+import {
+  saveMatchSnapshot,
+  loadMatchSnapshot,
+  clearMatchSnapshot,
+  hasRecoverableMatch,
+  saveFinalLocalCopy,
+  importantChangeSignature,
+} from "../services/matchSnapshotService";
+import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
+import { applyFieldFlip } from "../utils/fieldOrientation";
 
 import Markdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
@@ -1157,15 +1167,6 @@ const StatsExportTemplate = React.forwardRef<
   );
 });
 
-// ── ORIENTACIÓN VISUAL DEL CAMPO (solo presentación) ────────────────────
-// Espeja una coordenada horizontal PORCENTUAL DE PANTALLA (0-100, 0 =
-// borde izquierdo del contenedor del campo) cuando la vista está
-// invertida. Es una función pura, sin efectos, que NUNCA toca datos del
-// modelo (matchData, events, coordenadas guardadas). Solo se usa para
-// decidir en qué lado de la pantalla se dibuja algo ya calculado.
-const applyFieldFlip = (uiLeftPercent: number, isFieldFlipped: boolean): number =>
-  isFieldFlipped ? 100 - uiLeftPercent : uiLeftPercent;
-
 // ── SANEAMIENTO DE SURROGATES HUÉRFANOS (fix real del bug reportado) ────
 // Si un campo de texto libre (nombre de equipo/jugador) contiene un
 // surrogate UTF-16 sin pareja — típicamente por un emoji cortado a mitad
@@ -1242,6 +1243,69 @@ export default function MatchTracker() {
 
   const [matchData, setMatchData] = useState<MatchData>(getInitialMatchData);
 
+  // ── GUARDADO LOCAL ROBUSTO (red de seguridad, independiente del backend) ──
+  // Al montar: si hay un snapshot recuperable de una sesión anterior, se
+  // avisa (nunca se recupera en silencio). El usuario decide continuar o
+  // descartar. No se toca matchData hasta que el usuario elige.
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
+  const recoveryHandledRef = useRef(false);
+  useEffect(() => {
+    if (recoveryHandledRef.current) return;
+    recoveryHandledRef.current = true;
+    // No interrumpir si esta instancia se abrió para exportar un PDF
+    // pendiente desde Historial (carga temporal de otro partido, no un
+    // partido activo real en este dispositivo).
+    if (sessionStorage.getItem('pendingPDFExport')) return;
+    if (hasRecoverableMatch()) setShowRecoveryPrompt(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleContinueRecoveredMatch = () => {
+    const snap = loadMatchSnapshot();
+    if (snap) setMatchData(snap.matchData);
+    setShowRecoveryPrompt(false);
+  };
+  const handleDiscardRecoveredMatch = () => {
+    clearMatchSnapshot();
+    setShowRecoveryPrompt(false);
+  };
+
+  // Guardado local throttled: escribe como máximo cada 3s durante el tick
+  // normal del reloj (evita escribir en cada render/tick de 100ms), pero
+  // fuerza guardado INMEDIATO ante cambios "importantes" (acción, sustitución,
+  // marcador, pausa, cambio de parte). No es un segundo cronómetro: se limita
+  // a reaccionar a los cambios de matchData ya producidos por la lógica
+  // existente (mismo estado, misma fuente de verdad).
+  const lastSnapshotSaveRef = useRef(0);
+  const lastSnapshotSigRef = useRef<string>("");
+  const snapshotThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (showRecoveryPrompt) return; // no pisar el snapshot mientras se decide
+    if (matchData.period === Period.FINISHED) return; // ya se congeló/copió aparte
+    const sig = importantChangeSignature(matchData);
+    const isImportant = sig !== lastSnapshotSigRef.current;
+    lastSnapshotSigRef.current = sig;
+
+    const THROTTLE_MS = 3000;
+    const now = Date.now();
+    if (isImportant || now - lastSnapshotSaveRef.current >= THROTTLE_MS) {
+      if (snapshotThrottleTimer.current) {
+        clearTimeout(snapshotThrottleTimer.current);
+        snapshotThrottleTimer.current = null;
+      }
+      saveMatchSnapshot(matchData);
+      lastSnapshotSaveRef.current = now;
+    } else if (!snapshotThrottleTimer.current) {
+      const remaining = THROTTLE_MS - (now - lastSnapshotSaveRef.current);
+      snapshotThrottleTimer.current = setTimeout(() => {
+        saveMatchSnapshot(matchData);
+        lastSnapshotSaveRef.current = Date.now();
+        snapshotThrottleTimer.current = null;
+      }, Math.max(0, remaining));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchData, showRecoveryPrompt]);
+
   const [gameState, setGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
   const [rivalGameState, setRivalGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
   const [isGameStateMenuOpen, setIsGameStateMenuOpen] = useState(false);
@@ -1261,6 +1325,10 @@ export default function MatchTracker() {
   const [isEndFirstConfirmOpen, setIsEndFirstConfirmOpen] = useState(false);
   const [isEndSecondConfirmOpen, setIsEndSecondConfirmOpen] = useState(false);
   const [isDataLocked, setIsDataLocked] = useState(false);
+  // ── VISTA RÁPIDA "TIEMPOS" ── overlay puro, deriva de matchData.players,
+  // no crea ningún cronómetro ni estado de tiempo propio.
+  const [isTiemposOpen, setIsTiemposOpen] = useState(false);
+  const [tiemposSort, setTiemposSort] = useState<"dorsal" | "totAsc" | "totDesc" | "rotDesc">("dorsal");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
   // ── ORIENTACIÓN VISUAL DEL CAMPO ──────────────────────────────────────
@@ -1328,25 +1396,53 @@ export default function MatchTracker() {
   const dynamicExportRef = useRef<HTMLDivElement>(null);
 
   const [isTacticalModalOpen, setIsTacticalModalOpen] = useState(false);
-  const [tacticalReport, setTacticalReport] = useState<string | null>(null);
+  // ── INFORME: base determinista (instantáneo, sin red/IA) + capa opcional
+  // de análisis IA. Un fallo de IA NUNCA borra el informe base — solo se
+  // muestra un aviso con reintento (ver Fase 6 del encargo).
+  const [baseReportMarkdown, setBaseReportMarkdown] = useState<string | null>(null);
+  const [aiAnalysisMarkdown, setAiAnalysisMarkdown] = useState<string | null>(null);
+  const [tacticalProError, setTacticalProError] = useState<string | null>(null);
+  const displayedReport = baseReportMarkdown
+    ? baseReportMarkdown +
+      (aiAnalysisMarkdown ? `\n\n---\n\n## ✨ Análisis Tactical Pro\n\n${aiAnalysisMarkdown}` : "")
+    : null;
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isEditingLocalName, setIsEditingLocalName] = useState(false);
   const [isEditingOpponentName, setIsEditingOpponentName] = useState(false);
   const [isSyncingTacticalPro, setIsSyncingTacticalPro] = useState(false);
 
+  // Genera y muestra el informe determinista al instante — disponible
+  // durante el partido ("informe actual") o tras finalizar ("informe final").
+  const handleShowInforme = () => {
+    const report = generateMatchReport(matchData);
+    setBaseReportMarkdown(formatMatchReportAsMarkdown(report));
+    setAiAnalysisMarkdown(null);
+    setTacticalProError(null);
+    setIsTacticalModalOpen(true);
+  };
+
   const handleTacticalAnalysis = async () => {
+    // Si el informe base todavía no se generó en esta sesión de modal
+    // (p.ej. se entra directo por el botón de IA), se genera primero.
+    if (!baseReportMarkdown) {
+      const report = generateMatchReport(matchData);
+      setBaseReportMarkdown(formatMatchReportAsMarkdown(report));
+    }
     setIsTacticalModalOpen(true);
     setIsGeneratingReport(true);
-    setTacticalReport(null);
+    setTacticalProError(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // timeout razonable
     try {
       const res = await fetch('/api/tactical-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: stripLoneSurrogates(JSON.stringify({ matchData })),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (data.analysis) {
-        setTacticalReport(data.analysis);
+        setAiAnalysisMarkdown(data.analysis);
         try {
           const cleanData = JSON.parse(JSON.stringify({
             ...matchData,
@@ -1358,12 +1454,17 @@ export default function MatchTracker() {
           console.warn('No se pudo guardar en Firestore:', saveErr);
         }
       } else {
-        alert('Error en el análisis: ' + JSON.stringify(data));
+        setTacticalProError('TACTICAL PRO no está disponible');
       }
     } catch (e: any) {
       console.error(e);
-      alert('Error al conectar con TACTICAL PRO: ' + (e.message || 'Error desconocido'));
+      setTacticalProError(
+        e?.name === 'AbortError'
+          ? 'TACTICAL PRO no está disponible (tiempo de espera agotado)'
+          : 'TACTICAL PRO no está disponible'
+      );
     } finally {
+      clearTimeout(timeoutId);
       setIsGeneratingReport(false);
     }
   };
@@ -1554,13 +1655,19 @@ export default function MatchTracker() {
     setIsEndSecondConfirmOpen(false);
     setIsDataLocked(true);
 
-    // Auto-save to Firestore
+    // 1. Congelar + copia local final PRIMERO: el partido queda a salvo
+    // pase lo que pase con la red, antes de intentar nada remoto.
+    const cleanData = JSON.parse(JSON.stringify(finalMatchData));
+    saveFinalLocalCopy(cleanData);
+    clearMatchSnapshot(); // ya no es "partido activo sin terminar"
+
+    // 2. Intentar guardado remoto (best-effort). Un fallo aquí NUNCA
+    // puede hacer perder el partido: la copia local ya existe.
     try {
-      const cleanData = JSON.parse(JSON.stringify(finalMatchData));
       await savePartido(cleanData);
       console.log('✅ Partido guardado automáticamente');
     } catch (err) {
-      console.warn('⚠️ No se pudo guardar el partido:', err);
+      console.warn('⚠️ No se pudo guardar el partido en el servidor (queda copia local):', err);
     }
   };
 
@@ -3823,6 +3930,28 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => { setIsSidebarOpen(false); handleShowInforme(); }}
+                  className="w-full p-5 bg-gradient-to-br from-blue-600/10 to-cyan-500/10 rounded-xl border border-blue-500/20 hover:border-blue-500/40 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
+                >
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-black text-white">INFORME</span>
+                    <span className="text-[10px] text-blue-400 font-black tracking-widest">AUTOMÁTICO · SIN IA</span>
+                  </div>
+                  <FileText size={24} className="text-blue-600 group-hover:text-blue-400 transition-colors" />
+                </button>
+
+                <button
+                  onClick={() => { setIsSidebarOpen(false); setIsTiemposOpen(true); }}
+                  className="w-full p-5 bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-xl border border-amber-500/20 hover:border-amber-500/40 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
+                >
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-black text-white">TIEMPOS</span>
+                    <span className="text-[10px] text-amber-400 font-black tracking-widest">TOT / ROT EN VIVO</span>
+                  </div>
+                  <TimerIcon size={24} className="text-amber-600 group-hover:text-amber-400 transition-colors" />
+                </button>
+
+                <button
                   onClick={() => { setIsSidebarOpen(false); navigate('/dashboard'); }}
                   className="w-full p-5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 flex items-center justify-between group transition-all active:scale-95 shadow-lg"
                 >
@@ -3888,8 +4017,10 @@ export default function MatchTracker() {
       <TacticalReportModal 
         isOpen={isTacticalModalOpen}
         onClose={() => setIsTacticalModalOpen(false)}
-        report={tacticalReport}
+        report={displayedReport}
         isLoading={isGeneratingReport}
+        errorMessage={tacticalProError}
+        onRetry={handleTacticalAnalysis}
       />
 
       <header
@@ -6948,6 +7079,178 @@ export default function MatchTracker() {
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* RECUPERACION DE PARTIDO SIN FINALIZAR (guardado local robusto) */}
+      <AnimatePresence>
+        {showRecoveryPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-slate-900 border border-amber-500/30 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 border border-amber-500/30">
+                  <ShieldAlert size={32} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white uppercase italic">Hay un partido sin finalizar</h3>
+                  <p className="text-slate-400 text-sm mt-1">
+                    Se encontró una copia local de un partido que no llegó a finalizarse.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 w-full mt-4">
+                  <button
+                    onClick={handleContinueRecoveredMatch}
+                    className="py-3 px-6 rounded-2xl bg-amber-500 text-slate-950 font-black uppercase text-xs shadow-lg shadow-amber-500/20 hover:bg-amber-400 transition-all font-sans"
+                  >
+                    Continuar partido
+                  </button>
+                  <button
+                    onClick={handleDiscardRecoveredMatch}
+                    className="py-3 px-6 rounded-2xl bg-white/5 border border-white/10 text-white font-black uppercase text-xs hover:bg-white/10 transition-all font-sans"
+                  >
+                    Descartar copia
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* VISTA RÁPIDA "TIEMPOS" — overlay puro, no reinicia ni toca el partido */}
+      <AnimatePresence>
+        {isTiemposOpen && (() => {
+          const propios = matchData.players.filter((p) => !p.isOpponent);
+          const enPista = propios.filter((p) => p.isOnPitch);
+          const banquillo = propios.filter((p) => !p.isOnPitch);
+          const sortFn = (a: Player, b: Player) => {
+            switch (tiemposSort) {
+              case "totAsc":
+                return a.individualTimeSeconds - b.individualTimeSeconds;
+              case "totDesc":
+                return b.individualTimeSeconds - a.individualTimeSeconds;
+              case "rotDesc":
+                return (b.rotationTimeSeconds ?? 0) - (a.rotationTimeSeconds ?? 0);
+              default:
+                return a.number - b.number;
+            }
+          };
+          const enPistaOrdenados = [...enPista].sort(sortFn);
+          const banquilloOrdenados = [...banquillo].sort(sortFn);
+          const SORTS: { key: typeof tiemposSort; label: string }[] = [
+            { key: "dorsal", label: "Dorsal" },
+            { key: "totAsc", label: "TOT ↑" },
+            { key: "totDesc", label: "TOT ↓" },
+            { key: "rotDesc", label: "ROT ↓" },
+          ];
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1500] flex flex-col bg-slate-950/98 backdrop-blur-sm overflow-y-auto"
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-white/10">
+                <h2 className="text-lg font-black text-white uppercase italic tracking-wide flex items-center gap-2">
+                  <TimerIcon size={20} className="text-amber-400" /> Tiempos
+                </h2>
+                <button
+                  onClick={() => setIsTiemposOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-white/10 text-white font-black uppercase text-xs hover:bg-white/20 transition-all"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 px-4 py-3 flex-wrap">
+                <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Ordenar:</span>
+                {SORTS.map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => setTiemposSort(s.key)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wide border transition-all ${
+                      tiemposSort === s.key
+                        ? "bg-amber-500 text-slate-950 border-amber-500"
+                        : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="px-4 pb-6 grid grid-cols-1 md:grid-cols-2 gap-4 max-w-5xl mx-auto w-full">
+                <div>
+                  <h3 className="text-emerald-400 font-black uppercase text-sm tracking-widest mb-2 px-1">
+                    En pista ({enPistaOrdenados.length})
+                  </h3>
+                  <div className="flex flex-col gap-2">
+                    {enPistaOrdenados.length === 0 && (
+                      <p className="text-slate-500 text-sm px-1">Nadie en pista.</p>
+                    )}
+                    {enPistaOrdenados.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-3 bg-white/5 border border-emerald-500/20 rounded-xl px-4 py-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-lg font-black text-emerald-400 w-8 text-center flex-shrink-0">
+                            {p.number}
+                          </span>
+                          <span className="text-base font-bold text-white uppercase truncate">{p.name}</span>
+                        </div>
+                        <div className="flex items-center gap-4 flex-shrink-0">
+                          <span className="text-sm font-mono font-black text-blue-400">
+                            TOT {formatPlayerTime(p.individualTimeSeconds)}
+                          </span>
+                          <span className="text-sm font-mono font-black text-emerald-400">
+                            ROT {formatPlayerTime(p.rotationTimeSeconds ?? 0)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-slate-400 font-black uppercase text-sm tracking-widest mb-2 px-1">
+                    Banquillo ({banquilloOrdenados.length})
+                  </h3>
+                  <div className="flex flex-col gap-2">
+                    {banquilloOrdenados.length === 0 && (
+                      <p className="text-slate-500 text-sm px-1">Banquillo vacío.</p>
+                    )}
+                    {banquilloOrdenados.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-lg font-black text-slate-400 w-8 text-center flex-shrink-0">
+                            {p.number}
+                          </span>
+                          <span className="text-base font-bold text-slate-200 uppercase truncate">{p.name}</span>
+                        </div>
+                        <span className="text-sm font-mono font-black text-blue-400 flex-shrink-0">
+                          TOT {formatPlayerTime(p.individualTimeSeconds)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* CONFIRM END FIRST HALF MODAL */}

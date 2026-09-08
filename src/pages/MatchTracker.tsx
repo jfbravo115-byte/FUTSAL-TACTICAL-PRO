@@ -76,6 +76,7 @@ import {
 } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import { applyFieldFlip } from "../utils/fieldOrientation";
+import { effectiveSlotIndex } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
@@ -6212,7 +6213,7 @@ export default function MatchTracker() {
                     const isOpp = pitchView === 'opponent';
                     const currentSlots = PITCH_SYSTEMS[currentGameState] || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
                     const onPitchPlayers = matchData.players.filter((p) => p.isOnPitch && !!p.isOpponent === isOpp);
-                    const occupiedSlots = onPitchPlayers.map((p) => p.pitchPosition);
+                    const occupiedSlots = onPitchPlayers.map((p) => effectiveSlotIndex(p.pitchPosition, currentSlots.length));
 
                     return (
                       <>
@@ -6248,7 +6249,7 @@ export default function MatchTracker() {
                         })}
 
                         {onPitchPlayers.map((player) => {
-                          const slot = currentSlots[player.pitchPosition ?? 0] || currentSlots[0];
+                          const slot = currentSlots[effectiveSlotIndex(player.pitchPosition, currentSlots.length)];
                           const uiLeft = applyFieldFlip(isOpp ? (100 - slot.left) : slot.left, isFieldFlipped);
                           const uiTop = slot.top;
 

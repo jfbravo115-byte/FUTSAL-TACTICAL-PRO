@@ -4,6 +4,8 @@ import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Role } from '../types/futsal';
+import { normalizeLineup } from '../utils/lineupIntegrity';
+import { loadTemplateLocalFirst, buildTemplatePayload, StoredTemplate } from '../services/templateLoadService';
 import {
   Plus, Trash2, Save, Play, Shield, Users, ChevronDown,
   Upload, Star, Edit3, Check, X, UserCheck, UserMinus
@@ -71,35 +73,26 @@ export default function PreMatch() {
   const [editRole, setEditRole] = useState<Role>(Role.PLAYER);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Load template from Firestore ──────────────────────────────
+  // ── Load template: LOCAL-FIRST, Firestore solo como respaldo ────────────
+  // Si hay copia local válida se usa y no se consulta red. Iniciar partido
+  // nunca depende de Firestore.
   useEffect(() => {
     const loadTemplate = async () => {
-      // Try Firestore first (if logged in)
-      if (user) {
-        try {
-          const ref = doc(db, 'plantillas', user.uid);
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const data = snap.data() as TeamTemplate;
-            setTeamName(data.teamName || 'MI EQUIPO');
-            setTeamLogo(data.teamLogo);
-            setPlayers(data.players || []);
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          console.warn('Firestore template load failed:', e);
-        }
-      }
-      // Fallback to localStorage
-      const local = localStorage.getItem('futsal_template');
-      if (local) {
-        try {
-          const data = JSON.parse(local) as TeamTemplate;
-          setTeamName(data.teamName || 'MI EQUIPO');
-          setTeamLogo(data.teamLogo);
-          setPlayers(data.players || []);
-        } catch {}
+      const { template } = await loadTemplateLocalFirst(
+        () => localStorage.getItem('futsal_template'),
+        user
+          ? async () => {
+              const ref = doc(db, 'plantillas', user.uid);
+              const snap = await getDoc(ref);
+              return snap.exists() ? (snap.data() as StoredTemplate) : null;
+            }
+          : null,
+        (json) => localStorage.setItem('futsal_template', json),
+      );
+      if (template) {
+        setTeamName(template.teamName || 'MI EQUIPO');
+        setTeamLogo(template.teamLogo);
+        setPlayers((template.players as TemplatPlayer[]) || []);
       }
       setLoading(false);
     };
@@ -109,12 +102,7 @@ export default function PreMatch() {
   // ── Save template ──────────────────────────────────────────────
   const saveTemplate = async () => {
     setSaving(true);
-    const template: TeamTemplate = {
-      teamName,
-      teamLogo,
-      players,
-      updatedAt: new Date().toISOString(),
-    };
+    const template = buildTemplatePayload(teamName, teamLogo, players);
     // Save to localStorage always
     localStorage.setItem('futsal_template', JSON.stringify(template));
     // Save to Firestore if logged in
@@ -134,37 +122,38 @@ export default function PreMatch() {
   const startMatch = () => {
     // Guarda automáticamente MI EQUIPO antes de iniciar el partido.
     // Es persistencia únicamente local: no guarda ni sincroniza el rival.
-    const template: TeamTemplate = {
-      teamName,
-      teamLogo,
-      players,
-      updatedAt: new Date().toISOString(),
-    };
+    const template = buildTemplatePayload(teamName, teamLogo, players);
     localStorage.setItem('futsal_template', JSON.stringify(template));
-    // Build MatchTracker-compatible players
-    let pitchPos = 0;
-    const starters = players.filter(p => p.isStarter && !p.isOpponent);
-    const bench = players.filter(p => !p.isStarter && !p.isOpponent);
+    // Build MatchTracker-compatible players.
+    // Integridad de alineación: normalizeLineup garantiza —
+    // - como máximo 1 portero activo (slot de portero, pitchPosition 0);
+    // - hasta 4 jugadores de campo (pitchPosition 1-4), sin duplicados;
+    // - ningún pitchPosition fuera de 0-4;
+    // - un segundo portero marcado como titular NO queda en pista, pero se
+    //   conserva en la plantilla (banquillo).
+    const localCandidates = players
+      .filter((p) => !p.isOpponent)
+      .map((p) => ({ id: p.id, role: p.role, wantsOnPitch: p.isStarter }));
+    const normalized = new Map(normalizeLineup(localCandidates).map((n) => [n.id, n]));
 
-    const buildPlayer = (p: TemplatPlayer, onPitch: boolean) => ({
-      id: p.id,
-      number: p.number,
-      name: p.name,
-      role: p.role,
-      isOnPitch: onPitch,
-      pitchPosition: onPitch ? pitchPos++ : undefined,
-      plusMinus: 0,
-      individualTimeSeconds: 0,
-      isStarter: p.isStarter,
-      isOpponent: false,
-      stats: { ...INITIAL_STATS },
-    });
+    const buildPlayer = (p: TemplatPlayer) => {
+      const n = normalized.get(p.id);
+      return {
+        id: p.id,
+        number: p.number,
+        name: p.name,
+        role: p.role,
+        isOnPitch: n?.isOnPitch ?? false,
+        pitchPosition: n?.pitchPosition,
+        plusMinus: 0,
+        individualTimeSeconds: 0,
+        isStarter: p.isStarter,
+        isOpponent: false,
+        stats: { ...INITIAL_STATS },
+      };
+    };
 
-    pitchPos = 0;
-    const localPlayers = [
-      ...starters.map(p => buildPlayer(p, true)),
-      ...bench.map(p => buildPlayer(p, false)),
-    ];
+    const localPlayers = players.filter((p) => !p.isOpponent).map((p) => buildPlayer(p));
 
     // Garantiza que siempre exista cuerpo técnico LOCAL para poder
     // registrar tarjetas, aunque el usuario no lo haya añadido manualmente

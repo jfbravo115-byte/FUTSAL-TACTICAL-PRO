@@ -88,17 +88,115 @@ export function normalizeLineup(candidates: LineupCandidate[]): NormalizedLineup
 }
 
 /**
- * Índice de slot EFECTIVO para un pitchPosition dado, exactamente con la
- * misma normalización tanto para decidir "qué slot ocupa este jugador al
- * renderizar" como para decidir "qué slots están ocupados" — evita que un
- * pitchPosition inválido/indefinido/fuera de rango se renderice en un slot
- * (por defecto el 0, el del portero) que a la vez se siga considerando
- * libre por otro cálculo que no aplicase el mismo fallback.
+ * ¿Puede este rol ocupar este slot?
+ * - Slot 0 (portero): SOLO Role.GOALKEEPER.
+ * - Resto de slots (1..slotsLength-1): nunca GOALKEEPER, nunca COACH,
+ *   nunca DELEGATE.
+ */
+export function isRoleAllowedInSlot(role: Role, slotIndex: number): boolean {
+  if (role === Role.COACH || role === Role.DELEGATE) return false;
+  if (slotIndex === GOALKEEPER_SLOT_INDEX) return role === Role.GOALKEEPER;
+  return role !== Role.GOALKEEPER;
+}
+
+/**
+ * Busca un slot libre COMPATIBLE con el rol dado, entre los slots ya
+ * ocupados (occupiedIndices). Reemplaza cualquier bucle "primer slot
+ * libre 0..4" que no distinguía portero/jugador de campo:
+ * - GOALKEEPER: solo el slot 0, y solo si está libre.
+ * - COACH/DELEGATE: nunca hay slot (siempre undefined) — staff no entra
+ *   en pista por esta vía.
+ * - Resto (jugador de campo): el primer slot libre entre 1..slotsLength-1.
+ * Devuelve undefined si no hay slot disponible (equipo completo o rol sin
+ * hueco), en cuyo caso el llamante NO debe introducir al jugador en pista.
+ */
+export function findAvailableSlotForRole(
+  role: Role,
+  occupiedIndices: Set<number>,
+  slotsLength: number = MAX_OWN_TEAM_SLOTS,
+): number | undefined {
+  if (role === Role.COACH || role === Role.DELEGATE) return undefined;
+  if (role === Role.GOALKEEPER) {
+    return occupiedIndices.has(GOALKEEPER_SLOT_INDEX) ? undefined : GOALKEEPER_SLOT_INDEX;
+  }
+  for (let i = GOALKEEPER_SLOT_INDEX + 1; i < slotsLength; i++) {
+    if (!occupiedIndices.has(i)) return i;
+  }
+  return undefined;
+}
+
+export type RuntimeLineupPlayer = {
+  id: string;
+  role: Role;
+  isOnPitch: boolean;
+  pitchPosition?: number;
+};
+
+/**
+ * Revalida/normaliza el estado runtime YA EXISTENTE de un equipo (p.ej. al
+ * ingerir un matchSetup o un snapshot recuperado, que pudieran contener
+ * datos corruptos o de una versión anterior sin estas garantías).
+ * Reutiliza normalizeLineup: el estado actual (isOnPitch) se trata como
+ * "quiere estar en pista", y se aplican las mismas reglas deterministas
+ * (1 portero, máx. 4 de campo, sin duplicados, staff nunca en pista, sin
+ * segundo sistema de validación paralelo).
+ */
+export function normalizeRuntimeLineup(players: RuntimeLineupPlayer[]): NormalizedLineupEntry[] {
+  const candidates: LineupCandidate[] = players.map((p) => ({
+    id: p.id,
+    role: p.role,
+    wantsOnPitch: p.isOnPitch,
+  }));
+  return normalizeLineup(candidates);
+}
+
+/**
+ * Normaliza un array completo de jugadores (ambos equipos, local + rival)
+ * preservando el orden original y CUALQUIER otro campo del objeto (stats,
+ * nombre, etc.) — solo corrige isOnPitch/pitchPosition. Pensada para los
+ * puntos de INGESTIÓN de datos externos/no confiables (matchSetup desde
+ * PreMatch, o un snapshot recuperado tras un cierre inesperado), no para
+ * cada actualización en caliente (esas ya se validan en cada handler).
+ */
+export function normalizeMatchPlayers<
+  T extends RuntimeLineupPlayer & { isOpponent: boolean },
+>(players: T[]): T[] {
+  const local = players.filter((p) => !p.isOpponent);
+  const rival = players.filter((p) => p.isOpponent);
+
+  const applyFix = (group: T[]): T[] => {
+    const normalized = new Map(normalizeRuntimeLineup(group).map((n) => [n.id, n]));
+    return group.map((p) => {
+      const n = normalized.get(p.id);
+      if (!n) return p;
+      return { ...p, isOnPitch: n.isOnPitch, pitchPosition: n.pitchPosition };
+    });
+  };
+
+  const fixedById = new Map(
+    [...applyFix(local), ...applyFix(rival)].map((p) => [p.id, p]),
+  );
+  return players.map((p) => fixedById.get(p.id) ?? p);
+}
+
+/**
+ * Índice de slot EFECTIVO para un pitchPosition dado.
+ *
+ * DECISIÓN DE DISEÑO (revisada a petición explícita): la versión anterior
+ * devolvía 0 (el slot del portero) para cualquier posición inválida, lo
+ * que podía canalizar datos corruptos/legacy silenciosamente hacia el
+ * slot POR. Ahora devuelve `null` -- el llamante debe tratarlo como "no
+ * renderizable" (omitir esa tarjeta) en lugar de asumir el slot 0. Con
+ * los guardas de escritura añadidos en cada handler (isRoleAllowedInSlot/
+ * findAvailableSlotForRole) y la normalización aplicada al ingerir
+ * matchSetup/snapshots (normalizeRuntimeLineup), un pitchPosition inválido
+ * no debería producirse ya en uso normal; esto es la última línea de
+ * defensa para datos legacy/corruptos que se hubieran colado igualmente.
  */
 export function effectiveSlotIndex(
   pitchPosition: number | undefined,
   slotsLength: number,
-): number {
+): number | null {
   if (
     pitchPosition !== undefined &&
     Number.isInteger(pitchPosition) &&
@@ -107,5 +205,5 @@ export function effectiveSlotIndex(
   ) {
     return pitchPosition;
   }
-  return 0;
+  return null;
 }

@@ -76,7 +76,7 @@ import {
 } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import { applyFieldFlip } from "../utils/fieldOrientation";
-import { effectiveSlotIndex } from "../utils/lineupIntegrity";
+import { effectiveSlotIndex, isRoleAllowedInSlot, findAvailableSlotForRole, normalizeMatchPlayers } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
@@ -1227,7 +1227,7 @@ export default function MatchTracker() {
             team: { period1: false, period2: false },
             opponent: { period1: false, period2: false },
           },
-          players: s.players || INITIAL_PLAYERS,
+          players: normalizeMatchPlayers<Player>(s.players || INITIAL_PLAYERS),
           events: [],
         };
       } catch {}
@@ -1266,7 +1266,9 @@ export default function MatchTracker() {
   const handleContinueRecoveredMatch = () => {
     const snap = loadMatchSnapshot();
     if (snap) {
-      setMatchData(snap.matchData);
+      // Normaliza al recuperar: un snapshot de una sesión anterior podría
+      // contener alineación corrupta/legacy (previa a estas garantías).
+      setMatchData({ ...snap.matchData, players: normalizeMatchPlayers<Player>(snap.matchData.players) });
       if (typeof snap.uiState?.isFieldFlipped === "boolean") setIsFieldFlipped(snap.uiState.isFieldFlipped);
       if (snap.uiState?.gameState) setGameState(snap.uiState.gameState);
       if (snap.uiState?.rivalGameState) setRivalGameState(snap.uiState.rivalGameState);
@@ -2435,6 +2437,31 @@ export default function MatchTracker() {
       const sourceId = swapSelection;
       const targetId = id;
 
+      const sourcePlayer = matchData.players.find((p) => p.id === sourceId);
+      const targetPlayer = matchData.players.find((p) => p.id === targetId);
+      if (!sourcePlayer || !targetPlayer) {
+        setSwapSelection(null);
+        return;
+      }
+
+      // Integridad de alineación: el intercambio solo es válido si CADA
+      // jugador resultante es compatible con el slot que va a ocupar.
+      // Bloquea, p.ej., que un portero acabe en un slot de campo o
+      // viceversa. Si no es válido, se cancela SIN registrar sustitución
+      // ni tocar el estado (evita un evento fantasma).
+      const targetSwapValid =
+        !targetPlayer.isOnPitch ||
+        targetPlayer.pitchPosition === undefined ||
+        isRoleAllowedInSlot(sourcePlayer.role, targetPlayer.pitchPosition);
+      const sourceSwapValid =
+        !sourcePlayer.isOnPitch ||
+        sourcePlayer.pitchPosition === undefined ||
+        isRoleAllowedInSlot(targetPlayer.role, sourcePlayer.pitchPosition);
+      if (!targetSwapValid || !sourceSwapValid) {
+        setSwapSelection(null);
+        return;
+      }
+
       setMatchData((prev) => {
         const sourcePlayer = prev.players.find((p) => p.id === sourceId);
         const targetPlayer = prev.players.find((p) => p.id === targetId);
@@ -2486,8 +2513,18 @@ export default function MatchTracker() {
     }
   };
 
+  // NOTA: actualmente sin puntos de llamada activos en la UI (código no
+  // conectado), pero se corrige igualmente por si se reactiva en el futuro
+  // (auditoría explícita solicitada de "sustitución directa a un slot").
   const executeDirectSub = (benchPlayerId: string, slotIndex: number) => {
     if (isDataLocked) return;
+    const benchPlayer = matchData.players.find((p) => p.id === benchPlayerId);
+    if (!benchPlayer) return;
+    if (!isRoleAllowedInSlot(benchPlayer.role, slotIndex)) return; // rol incompatible con el slot
+    const alreadyOccupied = matchData.players.some(
+      (p) => p.isOnPitch && p.isOpponent === benchPlayer.isOpponent && p.pitchPosition === slotIndex,
+    );
+    if (alreadyOccupied) return; // integridad: nunca dos jugadores en el mismo slot
     setMatchData((prev) => ({
       ...prev,
       players: prev.players.map((p) =>
@@ -2513,6 +2550,17 @@ export default function MatchTracker() {
       if (!sourcePlayer.isOnPitch || !targetPlayer.isOnPitch) return prev;
       // Safety: only swap within the same team (local-local or rival-rival)
       if (!!sourcePlayer.isOpponent !== !!targetPlayer.isOpponent) return prev;
+      // Integridad de alineación: intercambiar posiciones no puede dejar
+      // a un portero en un slot de campo ni a un jugador de campo en el
+      // slot de portero.
+      if (
+        targetPlayer.pitchPosition === undefined ||
+        sourcePlayer.pitchPosition === undefined ||
+        !isRoleAllowedInSlot(sourcePlayer.role, targetPlayer.pitchPosition) ||
+        !isRoleAllowedInSlot(targetPlayer.role, sourcePlayer.pitchPosition)
+      ) {
+        return prev;
+      }
 
       return {
         ...prev,
@@ -2548,6 +2596,9 @@ export default function MatchTracker() {
     }
   };
 
+  // NOTA: sin puntos de llamada activos (no está conectado a ningún
+  // onDragEnd) — corregido igualmente por auditoría explícita de todos los
+  // caminos de drag/drop.
   const handlePitchDragEnd = (playerId: string, info: any) => {
     if (!pitchRef.current || isDataLocked) return;
 
@@ -2589,6 +2640,20 @@ export default function MatchTracker() {
           (targetPlayer && movingPlayer.id === targetPlayer.id)
         )
           return prev;
+
+        // Integridad de alineación: el jugador que entra en nearestSlotIndex
+        // debe ser compatible con ese slot; si hay alguien a quien
+        // desplazar (targetPlayer), su rol también debe encajar en el slot
+        // que le queda libre al moverse.
+        if (!isRoleAllowedInSlot(movingPlayer.role, nearestSlotIndex)) return prev;
+        if (
+          targetPlayer &&
+          movingPlayer.isOnPitch &&
+          movingPlayer.pitchPosition !== undefined &&
+          !isRoleAllowedInSlot(targetPlayer.role, movingPlayer.pitchPosition)
+        ) {
+          return prev;
+        }
 
         // If movingPlayer is not on pitch, it's a substitution
         const isSubstitution = !movingPlayer.isOnPitch;
@@ -2695,25 +2760,29 @@ export default function MatchTracker() {
           const isStarter = !p.isStarter;
           // If match hasn't started, also toggle pitch presence
           const shouldBeOnPitch = prev.events.length === 0 ? isStarter : p.isOnPitch;
-          
+
+          // Integridad de alineación: el slot debe ser compatible con el
+          // rol (portero -> slot 0 únicamente; staff nunca en pista;
+          // jugador de campo -> nunca slot 0). Si no hay slot compatible
+          // libre, el jugador NO entra en pista (se conserva en banquillo).
           let finalPitchPos = p.pitchPosition;
           if (shouldBeOnPitch && !p.isOnPitch) {
-            const maxSlots = 5;
-            const occupied = new Set(prev.players.filter(pl => pl.isOnPitch && pl.isOpponent === p.isOpponent).map(pl => pl.pitchPosition));
-            for (let i = 0; i < maxSlots; i++) {
-              if (!occupied.has(i)) {
-                finalPitchPos = i;
-                break;
-              }
-            }
+            const occupied = new Set(
+              prev.players
+                .filter(pl => pl.isOnPitch && pl.isOpponent === p.isOpponent)
+                .map(pl => pl.pitchPosition)
+                .filter((pos): pos is number => pos !== undefined),
+            );
+            finalPitchPos = findAvailableSlotForRole(p.role, occupied);
           }
+          const actuallyOnPitch = shouldBeOnPitch && finalPitchPos !== undefined;
 
           return {
             ...p,
             isStarter,
-            isOnPitch: shouldBeOnPitch,
-            pitchPosition: shouldBeOnPitch ? finalPitchPos : undefined,
-            rotationTimeSeconds: shouldBeOnPitch && !p.isOnPitch ? 0 : p.rotationTimeSeconds,
+            isOnPitch: actuallyOnPitch,
+            pitchPosition: actuallyOnPitch ? finalPitchPos : undefined,
+            rotationTimeSeconds: actuallyOnPitch && !p.isOnPitch ? 0 : p.rotationTimeSeconds,
           };
         }
         return p;
@@ -2725,32 +2794,37 @@ export default function MatchTracker() {
     setMatchData((prev) => {
       const player = prev.players.find(p => p.id === playerId);
       if (!player) return prev;
-      
+
       const isNowOnPitch = !player.isOnPitch;
-      const maxSlots = 5;
-      const currentOnPitchCount = prev.players.filter((p) => p.isOpponent === player.isOpponent && p.isOnPitch).length;
-      
-      if (isNowOnPitch && currentOnPitchCount >= maxSlots) return prev;
-      
+
+      if (isNowOnPitch) {
+        // Integridad de alineación: mismo criterio que toggleStarter —
+        // slot compatible con el rol, respetando el máximo de 1 portero y
+        // 4 jugadores de campo (implícito en findAvailableSlotForRole).
+        const occupied = new Set(
+          prev.players
+            .filter((pl) => pl.isOnPitch && pl.isOpponent === player.isOpponent)
+            .map((pl) => pl.pitchPosition)
+            .filter((pos): pos is number => pos !== undefined),
+        );
+        const slot = findAvailableSlotForRole(player.role, occupied);
+        if (slot === undefined) return prev; // equipo completo / sin slot compatible
+
+        return {
+          ...prev,
+          players: prev.players.map((p) =>
+            p.id === playerId
+              ? { ...p, isOnPitch: true, pitchPosition: slot, rotationTimeSeconds: 0 }
+              : p,
+          ),
+        };
+      }
+
       return {
         ...prev,
-        players: prev.players.map((p) => {
-          if (p.id === playerId) {
-            if (isNowOnPitch) {
-              const occupied = new Set(prev.players.filter((pl) => pl.isOnPitch && pl.isOpponent === player.isOpponent).map((pl) => pl.pitchPosition));
-              let firstFree = 0;
-              for (let i = 0; i < maxSlots; i++) {
-                if (!occupied.has(i)) {
-                  firstFree = i;
-                  break;
-                }
-              }
-              return { ...p, isOnPitch: true, pitchPosition: firstFree, rotationTimeSeconds: 0 };
-            }
-            return { ...p, isOnPitch: false, pitchPosition: undefined };
-          }
-          return p;
-        }),
+        players: prev.players.map((p) =>
+          p.id === playerId ? { ...p, isOnPitch: false, pitchPosition: undefined } : p,
+        ),
       };
     });
   };
@@ -6213,7 +6287,13 @@ export default function MatchTracker() {
                     const isOpp = pitchView === 'opponent';
                     const currentSlots = PITCH_SYSTEMS[currentGameState] || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
                     const onPitchPlayers = matchData.players.filter((p) => p.isOnPitch && !!p.isOpponent === isOpp);
-                    const occupiedSlots = onPitchPlayers.map((p) => effectiveSlotIndex(p.pitchPosition, currentSlots.length));
+                    // effectiveSlotIndex devuelve null para pitchPosition inválido: se
+                    // excluye de "ocupados" (no bloquea un slot real) y NO se renderiza
+                    // como si estuviera en el slot del portero por defecto (ver diseño
+                    // revisado en lineupIntegrity.ts).
+                    const occupiedSlots = onPitchPlayers
+                      .map((p) => effectiveSlotIndex(p.pitchPosition, currentSlots.length))
+                      .filter((i): i is number => i !== null);
 
                     return (
                       <>
@@ -6229,7 +6309,10 @@ export default function MatchTracker() {
                               onClick={() => {
                                 if (swapSelection) {
                                   const p = matchData.players.find(pl => pl.id === swapSelection);
-                                  if (p && !!p.isOpponent === isOpp) {
+                                  // Integridad de alineación: además del equipo, el slot pulsado
+                                  // debe ser compatible con el rol del jugador seleccionado
+                                  // (portero -> solo slot 0; nunca staff en pista).
+                                  if (p && !!p.isOpponent === isOpp && isRoleAllowedInSlot(p.role, index)) {
                                     setMatchData(prev => ({
                                       ...prev,
                                       players: prev.players.map(pl => pl.id === swapSelection ? { ...pl, isOnPitch: true, pitchPosition: index, rotationTimeSeconds: p.isOnPitch ? pl.rotationTimeSeconds : 0 } : pl)
@@ -6249,7 +6332,9 @@ export default function MatchTracker() {
                         })}
 
                         {onPitchPlayers.map((player) => {
-                          const slot = currentSlots[effectiveSlotIndex(player.pitchPosition, currentSlots.length)];
+                          const slotIdx = effectiveSlotIndex(player.pitchPosition, currentSlots.length);
+                          if (slotIdx === null) return null; // pitchPosition inválido/legacy: no se renderiza (nunca cae al slot POR por defecto)
+                          const slot = currentSlots[slotIdx];
                           const uiLeft = applyFieldFlip(isOpp ? (100 - slot.left) : slot.left, isFieldFlipped);
                           const uiTop = slot.top;
 
@@ -7009,6 +7094,14 @@ export default function MatchTracker() {
             return true;
           })}
           onSelect={(benchId) => {
+            // Defensa en profundidad: el filtro de arriba ya restringe los
+            // candidatos por rol, pero se revalida aquí también antes de
+            // escribir el estado (isRoleAllowedInSlot centraliza la regla).
+            const candidate = matchData.players.find((p) => p.id === benchId);
+            if (!candidate || !isRoleAllowedInSlot(candidate.role, activeSlotToAdd.index)) {
+              setActiveSlotToAdd(null);
+              return;
+            }
             setMatchData((prev) => ({
                 ...prev,
                 players: prev.players.map((p) =>

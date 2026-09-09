@@ -30,7 +30,7 @@ import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
 import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
-import { MatchData, Role } from "../types/futsal";
+import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
 import { buildZoneDashboard, ZoneDashboard, GOAL_ZONE_IDS, QUICK_ZONE_IDS } from "./matchZonesService";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
@@ -215,7 +215,7 @@ function PlayersTable({ report }: { report: MatchReport }) {
   );
 }
 
-function GoalkeeperCard({ gk }: { gk: GoalkeeperReportEntry }) {
+function GoalkeeperCard({ gk, allEvents }: { gk: GoalkeeperReportEntry; allEvents: GameEvent[] }) {
   return (
     <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -235,10 +235,19 @@ function GoalkeeperCard({ gk }: { gk: GoalkeeperReportEntry }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen (pista)</div>
-          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={gk.events} compact />
+          {/* IMPORTANTE: el mapa de ORIGEN necesita el conjunto COMPLETO de
+              eventos del partido (matchData.events), no solo los propios
+              del portero — la lógica original (extraída de MatchTracker.tsx,
+              ver GoalkeeperMaps.tsx) también contabiliza disparos del rival
+              mientras este portero está en pista, que NO llevan su id en
+              playerIds. gk.events (filtrado a playerIds.includes) se
+              queda corto para este mapa concreto. */}
+          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} compact />
         </div>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Impacto (portería)</div>
+          {/* El mapa de IMPACTO sí debe usar solo intervenciones propias
+              del portero (gk.events) — no se toca, es correcto tal cual. */}
           <GoalkeeperImpactMap events={gk.events} />
         </div>
         <div>
@@ -278,14 +287,65 @@ function EventsSection({ report }: { report: MatchReport }) {
   );
 }
 
-// ── PLANTILLA: INFORME COMPLETO (3 páginas) ─────────────────────────────
+// ── PLANTILLA: INFORME COMPLETO ──────────────────────────────────────
 // ── Tactical Pro: divide en bloques/páginas en vez de escalar o truncar ──
-// Reparte por PÁRRAFOS (nunca corta uno a mitad) hasta un presupuesto de
-// caracteres razonable por página A4 a este tamaño de fuente. Si un solo
-// párrafo ya supera el presupuesto, se deja íntegro en su propia página
-// (la página crece, pero el texto NUNCA se trunca ni se escala a un
-// tamaño ilegible).
+// Reparte por PÁRRAFOS (nunca corta una palabra) hasta un presupuesto de
+// caracteres razonable por página A4 a este tamaño de fuente. A
+// diferencia de la primera versión, un párrafo que por sí solo SUPERE el
+// presupuesto YA NO se deja entero: se subdivide también por frases/
+// palabras (splitLongTextIntoChunks) para garantizar que ningún nodo
+// capturado por toJpeg crezca de forma significativa por encima de la
+// altura A4 definida por pageStyle — evita que capturePagesToPdf tenga
+// que comprimir una captura más alta que A4 en una sola página,
+// dejándola ilegible. El texto nunca se trunca: todo el contenido acaba
+// repartido en tantas páginas como haga falta.
 const TACTICAL_PRO_CHARS_PER_PAGE = 3200;
+
+/**
+ * Divide un texto largo (una unidad que por sí sola excede maxChars) en
+ * fragmentos más pequeños, respetando límites de PALABRA/FRASE — nunca
+ * corta una palabra a mitad. Primero intenta dividir por frases
+ * (terminadas en . ! ? :); si una sola frase sigue excediendo maxChars
+ * (caso extremo), se divide por palabras como último recurso.
+ */
+function splitLongTextIntoChunks(text: string, maxChars: number): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const sentences = text.match(/[^.!?:]+[.!?:]+(?:\s+|$)|[^.!?:]+$/g) ?? [text];
+  const chunks: string[] = [];
+  let current = "";
+
+  const flushCurrent = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = "";
+  };
+
+  for (const sentence of sentences) {
+    if (sentence.length > maxChars) {
+      // La propia frase es demasiado larga (caso extremo): se divide por
+      // palabras, nunca a mitad de una.
+      flushCurrent();
+      const words = sentence.split(/\s+/).filter(Boolean);
+      let wordChunk = "";
+      for (const word of words) {
+        if (wordChunk.length + word.length + 1 > maxChars) {
+          if (wordChunk) chunks.push(wordChunk.trim());
+          wordChunk = word;
+        } else {
+          wordChunk = wordChunk ? `${wordChunk} ${word}` : word;
+        }
+      }
+      if (wordChunk.trim()) chunks.push(wordChunk.trim());
+      continue;
+    }
+    if (current.length + sentence.length > maxChars) {
+      flushCurrent();
+    }
+    current += sentence;
+  }
+  flushCurrent();
+  return chunks;
+}
 
 export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TACTICAL_PRO_CHARS_PER_PAGE): string[] {
   const paragraphs = markdown
@@ -294,17 +354,24 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
     .filter(Boolean);
   if (paragraphs.length === 0) return [];
 
+  // Cualquier párrafo que por sí solo exceda el presupuesto se expande en
+  // varios bloques más pequeños ANTES de empaquetar páginas — garantiza
+  // que ninguna unidad individual supere maxCharsPerPage.
+  const units = paragraphs.flatMap((p) =>
+    p.length > maxCharsPerPage ? splitLongTextIntoChunks(p, maxCharsPerPage) : [p],
+  );
+
   const pages: string[] = [];
   let current: string[] = [];
   let currentLen = 0;
-  for (const para of paragraphs) {
-    if (currentLen > 0 && currentLen + para.length + 2 > maxCharsPerPage) {
+  for (const unit of units) {
+    if (currentLen > 0 && currentLen + unit.length + 2 > maxCharsPerPage) {
       pages.push(current.join("\n\n"));
       current = [];
       currentLen = 0;
     }
-    current.push(para);
-    currentLen += para.length + 2;
+    current.push(unit);
+    currentLen += unit.length + 2;
   }
   if (current.length) pages.push(current.join("\n\n"));
   return pages;
@@ -363,7 +430,7 @@ function buildMatchReportPages(
         <>
           <ReportHeader matchData={matchData} report={report} />
           <div style={sectionTitleStyle}>Portero</div>
-          <GoalkeeperCard gk={gk} />
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} />
         </>
       ),
     });
@@ -416,7 +483,7 @@ function buildGoalkeeperReportPages(
         <>
           <ReportHeader matchData={matchData} report={report} />
           <div style={sectionTitleStyle}>Informe de porteros</div>
-          <GoalkeeperCard gk={gk} />
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} />
         </>
       ),
     });

@@ -10,9 +10,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Period, Role, ActionType, GoalieAction, MatchData, Player, GameEvent } from "../types/futsal";
 
-const toJpegMock = vi.fn(async () => "data:image/jpeg;base64," + "A".repeat(2000));
+const toJpegMock = vi.fn(async (_node?: HTMLElement) => "data:image/jpeg;base64," + "A".repeat(2000));
 vi.mock("html-to-image", () => ({
-  toJpeg: () => toJpegMock(),
+  toJpeg: (node: HTMLElement) => toJpegMock(node),
 }));
 
 const pdfSaveMock = vi.fn();
@@ -250,6 +250,45 @@ describe("exportGoalkeeperReportPdf", () => {
   });
 });
 
+// Problema 1 de la revisión externa: el mapa de ORIGEN del portero debe
+// recibir matchData.events COMPLETO (no gk.events, ya filtrado a solo
+// eventos propios), para poder contabilizar disparos del rival mientras
+// el portero está en pista — igual que la lógica original de MatchTracker.
+describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1)", () => {
+  it("cuenta un SHOT del rival con originGrid aunque el evento no contenga el id del portero", async () => {
+    const md = matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: true })],
+      events: [
+        // Evento del RIVAL: no lleva "gk1" en playerIds. gk.events (filtrado
+        // a playerIds.includes) NO incluiría este evento — el mapa de
+        // origen debe recibir matchData.events completo para contabilizarlo.
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B2", metadata: { isOpponent: true } }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    // Páginas: 0=resumen/zonas, 1=jugadores, 2=portero (único GK, sin
+    // eventos relevantes de tipo GOAL/RED_CARD/GOAL_CONCEDED -> sin página
+    // de eventos adicional).
+    const gkPageNode = toJpegMock.mock.calls[2][0] as HTMLElement;
+    const zoneLabelNode = Array.from(gkPageNode.querySelectorAll("span")).find((el) => el.textContent === "B2");
+    expect(zoneLabelNode).toBeTruthy();
+    // El conteo (span hermano dentro de la misma celda) debe reflejar el
+    // disparo rival contabilizado.
+    const cell = zoneLabelNode!.parentElement!;
+    expect(cell.textContent).toContain("1");
+  });
+
+  it("sin ningún evento con originGrid relevante, el mapa de origen muestra 'Sin datos registrados'", async () => {
+    const md = matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1 })],
+      events: [],
+    });
+    await exportMatchReportPdf(md);
+    const gkPageNode = toJpegMock.mock.calls[2][0] as HTMLElement;
+    expect(gkPageNode.textContent).toContain("Sin datos registrados");
+  });
+});
+
 // C. informe con 2 porteros genera páginas independientes (ninguna se
 // amontona: cada portero + cada bloque de Tactical Pro es una página).
 describe("paginación dinámica — punto 2 de la revisión", () => {
@@ -313,11 +352,47 @@ describe("paginación dinámica — punto 2 de la revisión", () => {
     expect(chunks.join("\n\n")).toBe(largo);
   });
 
-  it("E: un único párrafo que por sí solo supera el presupuesto se conserva íntegro en su propia página (no se trunca)", () => {
-    const parrafoGigante = "Frase larga repetida. ".repeat(500); // sin dobles saltos de línea
+  // Un único párrafo >10.000 caracteres YA NO se deja entero (eso podía
+  // hacer que capturePagesToPdf comprimiera una captura mucho más alta
+  // que A4 en una sola página, dejando el texto ilegible sin truncarlo).
+  // Ahora se subdivide también por frases/palabras.
+  it("E: un único párrafo >10.000 caracteres genera varias páginas (ya no se deja entero)", () => {
+    const parrafoGigante = "Frase larga repetida con contenido táctico relevante. ".repeat(200); // sin dobles saltos de línea
+    expect(parrafoGigante.length).toBeGreaterThan(10000);
     const chunks = splitTacticalProIntoPages(parrafoGigante);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it("E: concatenando los chunks de un párrafo gigante se conserva todo el contenido textual (mismas palabras, mismo orden)", () => {
+    const parrafoGigante = "Frase larga repetida con contenido táctico relevante. ".repeat(200);
+    const chunks = splitTacticalProIntoPages(parrafoGigante);
+    const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
+    expect(normalize(chunks.join(" "))).toBe(normalize(parrafoGigante));
+  });
+
+  it("E: ningún chunk generado a partir de un párrafo largo excede el límite definido (3200 caracteres)", () => {
+    const parrafoGigante = "Frase larga repetida con contenido táctico relevante. ".repeat(200);
+    const chunks = splitTacticalProIntoPages(parrafoGigante);
+    chunks.forEach((c) => expect(c.length).toBeLessThanOrEqual(3200));
+  });
+
+  it("E: incluso una única 'frase' sin puntuación que por sí sola supera el límite se divide por palabras, sin cortar ninguna a mitad", () => {
+    const sinPuntuacion = Array.from({ length: 2000 }, (_, i) => `palabra${i}`).join(" "); // >10000 chars, sin . ! ? :
+    const chunks = splitTacticalProIntoPages(sinPuntuacion);
+    expect(chunks.length).toBeGreaterThan(1);
+    chunks.forEach((c) => expect(c.length).toBeLessThanOrEqual(3200));
+    // Ninguna palabra se corte a mitad: cada chunk empieza y termina en un límite de palabra completo.
+    chunks.forEach((c) => {
+      c.split(" ").forEach((w) => expect(/^palabra\d+$/.test(w)).toBe(true));
+    });
+  });
+
+  // Tactical Pro corto sigue generando una sola página.
+  it("E: Tactical Pro corto (por debajo del límite) sigue generando exactamente 1 página", () => {
+    const corto = "Un análisis breve de una sola línea, muy por debajo del límite por página.";
+    const chunks = splitTacticalProIntoPages(corto);
     expect(chunks.length).toBe(1);
-    expect(chunks[0]).toBe(parrafoGigante.trim());
+    expect(chunks[0]).toBe(corto);
   });
 
   it("Tactical Pro largo en la exportación real genera varias páginas de Tactical Pro (no se escala ni se pierde)", async () => {
@@ -328,6 +403,15 @@ describe("paginación dinámica — punto 2 de la revisión", () => {
     // resumen/zonas + jugadores + N páginas de Tactical Pro (N = chunks.length)
     expect(toJpegMock).toHaveBeenCalledTimes(2 + chunks.length);
     expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it("Tactical Pro >10.000 caracteres en un único párrafo, en la exportación real, genera varias páginas de Tactical Pro", async () => {
+    const parrafoGigante = "Frase larga repetida con contenido táctico relevante. ".repeat(200);
+    const md = matchData({ players: [player()], tacticalAnalysis: parrafoGigante });
+    const chunks = splitTacticalProIntoPages(md.tacticalAnalysis!);
+    expect(chunks.length).toBeGreaterThan(1);
+    await exportMatchReportPdf(md);
+    expect(toJpegMock).toHaveBeenCalledTimes(2 + chunks.length);
   });
 
   it("splitTacticalProIntoPages con texto vacío no genera páginas", () => {

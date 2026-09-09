@@ -215,7 +215,19 @@ function PlayersTable({ report }: { report: MatchReport }) {
   );
 }
 
-function GoalkeeperCard({ gk, allEvents }: { gk: GoalkeeperReportEntry; allEvents: GameEvent[] }) {
+function GoalkeeperCard({
+  gk,
+  allEvents,
+  isOnlyRelevantGoalkeeper,
+}: {
+  gk: GoalkeeperReportEntry;
+  allEvents: GameEvent[];
+  /** ¿Es este el único portero relevante de SU equipo en todo el
+   *  partido? Determina el fallback legacy del mapa de origen (ver
+   *  GoalkeeperOriginMap) — evita atribuir un disparo rival ambiguo a
+   *  más de un portero cuando hubo varios. */
+  isOnlyRelevantGoalkeeper: boolean;
+}) {
   return (
     <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -242,7 +254,7 @@ function GoalkeeperCard({ gk, allEvents }: { gk: GoalkeeperReportEntry; allEvent
               mientras este portero está en pista, que NO llevan su id en
               playerIds. gk.events (filtrado a playerIds.includes) se
               queda corto para este mapa concreto. */}
-          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} compact />
+          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact />
         </div>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Impacto (portería)</div>
@@ -424,13 +436,17 @@ function buildMatchReportPages(
   });
 
   goalkeepers.forEach((gk) => {
+    // ¿Es este el único portero relevante de SU equipo? (mismo isOpponent)
+    // Sin ambigüedad posible → se permite el fallback legacy en el mapa de origen.
+    const isOnlyRelevantGoalkeeper =
+      goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
     pages.push({
       key: `gk-${gk.id}`,
       content: (
         <>
           <ReportHeader matchData={matchData} report={report} />
           <div style={sectionTitleStyle}>Portero</div>
-          <GoalkeeperCard gk={gk} allEvents={matchData.events} />
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} />
         </>
       ),
     });
@@ -477,13 +493,17 @@ function buildGoalkeeperReportPages(
   const pages: { key: string; content: React.ReactNode }[] = [];
 
   goalkeepers.forEach((gk) => {
+    // ¿Es este el único portero relevante de SU equipo? (mismo isOpponent)
+    // Sin ambigüedad posible → se permite el fallback legacy en el mapa de origen.
+    const isOnlyRelevantGoalkeeper =
+      goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
     pages.push({
       key: `gk-${gk.id}`,
       content: (
         <>
           <ReportHeader matchData={matchData} report={report} />
           <div style={sectionTitleStyle}>Informe de porteros</div>
-          <GoalkeeperCard gk={gk} allEvents={matchData.events} />
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} />
         </>
       ),
     });

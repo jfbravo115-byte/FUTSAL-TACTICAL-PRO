@@ -85,6 +85,24 @@ function matchData(overrides: Partial<MatchData> = {}): MatchData {
   };
 }
 
+// Helpers para leer el mapa de origen del portero de forma robusta. Cada
+// celda de zona SIEMPRE renderiza un <span> con la etiqueta de la zona
+// (p.ej. "A1"), y opcionalmente un segundo <span> hermano con el conteo
+// (solo si count>0). OJO: no se puede comprobar el conteo buscando el
+// dígito como substring del textContent de la celda, porque etiquetas
+// como "A1"/"C1" ya contienen el dígito "1" — hay que distinguir el span
+// de conteo del span de etiqueta explícitamente.
+function findZoneCell(pageNode: HTMLElement, zoneId: string): HTMLElement {
+  const labelSpan = Array.from(pageNode.querySelectorAll("span")).find((el) => el.textContent === zoneId);
+  if (!labelSpan) throw new Error(`zona ${zoneId} no encontrada en la página`);
+  return labelSpan.parentElement as HTMLElement;
+}
+function zoneCellCount(cell: HTMLElement, zoneId: string): number {
+  const spans = Array.from(cell.querySelectorAll("span"));
+  const countSpan = spans.find((s) => s.textContent !== zoneId);
+  return countSpan ? Number(countSpan.textContent) : 0;
+}
+
 let windowOpenSpy: ReturnType<typeof vi.spyOn>;
 let originalImage: typeof Image;
 
@@ -286,6 +304,121 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
     await exportMatchReportPdf(md);
     const gkPageNode = toJpegMock.mock.calls[2][0] as HTMLElement;
     expect(gkPageNode.textContent).toContain("Sin datos registrados");
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // ATRIBUCIÓN TEMPORAL (revisión final): con 2+ porteros del mismo
+  // equipo, un disparo rival solo debe atribuirse al mapa del portero
+  // que REALMENTE estaba en pista en ese momento (onPitchPlayerIds del
+  // propio evento), no al que tiene isOnPitch=true al FINAL del partido.
+  // ════════════════════════════════════════════════════════════════
+
+  // 1. Dos porteros, cada evento con su propio onPitchPlayerIds.
+  it("1: con 2 porteros, cada mapa cuenta únicamente los disparos rivales en los que su onPitchPlayerIds coincide", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "A1", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-2"], originGrid: "C3", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk2"] }),
+      ],
+    });
+    await exportGoalkeeperReportPdf(md); // 1 página por portero, en orden de dorsal: gk1, gk2
+    const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement;
+
+    expect(zoneCellCount(findZoneCell(gk1Page, "A1"), "A1")).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "C3"), "C3")).toBe(0);
+
+    expect(zoneCellCount(findZoneCell(gk2Page, "C3"), "C3")).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk2Page, "A1"), "A1")).toBe(0);
+  });
+
+  // 2. Portero sustituido (isOnPitch=false ahora), pero el evento
+  // histórico sí lo marca en onPitchPlayerIds -> debe contabilizarse.
+  it("2: portero sustituido (isOnPitch=false actual) SÍ cuenta un evento histórico donde onPitchPlayerIds lo incluye", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B1", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement; // sustituido, pero el evento es suyo
+    expect(zoneCellCount(findZoneCell(gk1Page, "B1"), "B1")).toBe(1);
+  });
+
+  // 3. Portero actualmente en pista (isOnPitch=true), pero un evento
+  // antiguo NO lo incluye en onPitchPlayerIds -> NO debe contabilizarse.
+  it("3: portero actualmente en pista (isOnPitch=true) NO cuenta un evento antiguo cuyo onPitchPlayerIds no lo incluye", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        // Evento de la 1ª parte, cuando jugaba gk1 — gk2 NO estaba en pista.
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "A2", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement; // isOnPitch=true actualmente
+    expect(zoneCellCount(findZoneCell(gk2Page, "A2"), "A2")).toBe(0);
+  });
+
+  // 4. Evento propio del portero (playerIds lo incluye) sigue contando
+  // siempre, sin depender de onPitchPlayerIds.
+  it("4: un evento propio del portero (playerIds lo incluye) sigue contándose siempre", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], originGrid: "C2" }),
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    expect(zoneCellCount(findZoneCell(gk1Page, "C2"), "C2")).toBe(1);
+  });
+
+  // 5. Legacy sin onPitchPlayerIds + un ÚNICO portero relevante: sin
+  // ambigüedad posible -> se mantiene el fallback legacy razonable.
+  it("5: evento legacy sin onPitchPlayerIds, con un único portero relevante, se cuenta (fallback legacy)", async () => {
+    const md = matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: true })],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B3", metadata: { isOpponent: true } }), // sin onPitchPlayerIds
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    expect(zoneCellCount(findZoneCell(gk1Page, "B3"), "B3")).toBe(1);
+  });
+
+  // 6. Legacy sin onPitchPlayerIds + DOS porteros: ambiguo -> NO se
+  // atribuye a ninguno de los dos (mejor infra-contar que mal-atribuir).
+  it("6: evento legacy sin onPitchPlayerIds, con dos porteros, NO se atribuye a ninguno de los dos", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "C1", metadata: { isOpponent: true } }), // sin onPitchPlayerIds, ambiguo
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement;
+    expect(zoneCellCount(findZoneCell(gk1Page, "C1"), "C1")).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk2Page, "C1"), "C1")).toBe(0);
   });
 });
 

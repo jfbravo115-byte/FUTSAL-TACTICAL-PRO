@@ -16,33 +16,76 @@ import { ActionType, GameEvent, GoalieAction, Player } from "../../types/futsal"
  * afectan a este portero. Reutiliza exactamente la misma selección de
  * eventos que la versión original: acciones propias del portero MÁS
  * disparos del equipo rival mientras este portero está en pista.
+ *
+ * ATRIBUCIÓN TEMPORAL (con 2+ porteros del mismo equipo, la única fuente
+ * fiable de "quién estaba en pista en ESE momento" es el propio evento,
+ * no el estado final/actual del jugador — goalie.isOnPitch es solo un
+ * snapshot del final del partido):
+ * 1. Si e.playerIds incluye goalie.id -> el evento es propio del portero,
+ *    se cuenta siempre (sin ambigüedad posible).
+ * 2. Para un disparo/gol del RIVAL: si el evento trae
+ *    e.onPitchPlayerIds, se atribuye SOLO si esa lista incluye
+ *    goalie.id (dato real del momento del evento, no el estado actual).
+ * 3. LEGACY (evento sin onPitchPlayerIds): no puede saberse con certeza
+ *    qué portero de varios estaba en pista. Fallback conservador — ver
+ *    prop `isOnlyRelevantGoalkeeper`: si este portero es el ÚNICO
+ *    portero relevante de su equipo en todo el partido, no hay
+ *    ambigüedad posible y se mantiene el comportamiento legacy
+ *    (se cuenta). Si hay 2+ porteros del mismo equipo, NO se atribuye
+ *    ese disparo a ninguno de forma individual antes que arriesgarse a
+ *    asignarlo al portero equivocado — se prefiere infra-contar a
+ *    mal-atribuir. `isOnlyRelevantGoalkeeper` se resuelve fuera de este
+ *    componente (quien conoce el conjunto completo de porteros del
+ *    partido) y se pasa como prop.
  */
 export function GoalkeeperOriginMap({
   goalie,
   isOpponent,
   events,
   compact = false,
+  isOnlyRelevantGoalkeeper = false,
 }: {
   goalie: Player;
   isOpponent: boolean;
   events: GameEvent[];
   compact?: boolean;
+  /** ¿Es este el único portero relevante de su equipo en el partido?
+   *  Determina el fallback para eventos legacy sin onPitchPlayerIds.
+   *  Por defecto false (conservador: sin esta información, se prefiere
+   *  no atribuir eventos legacy ambiguos). */
+  isOnlyRelevantGoalkeeper?: boolean;
 }) {
   const rows = ["A", "B", "C"];
   const cols = ["1", "2", "3"];
+  const RELEVANT_TYPES = new Set<string>([
+    GoalieAction.SAVE,
+    GoalieAction.SAVE_PARRY,
+    GoalieAction.SAVE_CATCH,
+    GoalieAction.GOAL_CONCEDED,
+    ActionType.SHOT,
+    ActionType.GOAL,
+  ]);
   const goalieEvents = events.filter((e) => {
-    const isGoalieInvolved =
-      e.playerIds.includes(goalie.id) ||
-      (e.metadata?.isOpponent !== goalie.isOpponent && (goalie.isOnPitch ?? true));
-    return (
-      isGoalieInvolved &&
-      (e.type === GoalieAction.SAVE ||
-        e.type === GoalieAction.SAVE_PARRY ||
-        e.type === GoalieAction.SAVE_CATCH ||
-        e.type === GoalieAction.GOAL_CONCEDED ||
-        e.type === ActionType.SHOT ||
-        e.type === ActionType.GOAL)
-    );
+    if (!RELEVANT_TYPES.has(e.type)) return false;
+
+    // 1. Evento propio del portero: siempre se cuenta, sin ambigüedad.
+    if (e.playerIds.includes(goalie.id)) return true;
+
+    // Evento del rival (equipo contrario al del portero) — candidato a
+    // "disparo que este portero pudo encarar".
+    const isRivalEvent = (e.metadata?.isOpponent ?? false) !== goalie.isOpponent;
+    if (!isRivalEvent) return false;
+
+    // 2. Con onPitchPlayerIds disponible: dato real del momento del
+    //    evento — es la fuente de verdad, no goalie.isOnPitch (estado
+    //    final del partido).
+    if (e.onPitchPlayerIds) {
+      return e.onPitchPlayerIds.includes(goalie.id);
+    }
+
+    // 3. LEGACY sin onPitchPlayerIds: solo se atribuye si este portero es
+    //    el único relevante de su equipo (sin ambigüedad posible).
+    return isOnlyRelevantGoalkeeper;
   });
 
   const hasAnyZoneData = goalieEvents.some((e) => e.originGrid);

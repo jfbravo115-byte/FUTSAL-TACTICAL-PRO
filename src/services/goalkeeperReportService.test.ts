@@ -130,4 +130,28 @@ describe("buildGoalkeeperReports", () => {
     const [gk] = buildGoalkeeperReports(md);
     expect(gk.saveParry).toBe(0);
   });
+
+  // A. SAVE_CATCH se reporta como Blocaje.
+  it("A: un evento SAVE_CATCH incrementa gk.saveCatch y aparece en la cronología como 'Blocaje'", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 500 })],
+      events: [event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], timestamp: 1000 })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveCatch).toBe(1);
+    expect(gk.saveParry).toBe(0);
+    expect(gk.timeline[0].type).toBe("Blocaje");
+  });
+
+  // B. SAVE_PARRY se reporta como Despeje/Rechace.
+  it("B: un evento SAVE_PARRY incrementa gk.saveParry y aparece en la cronología como 'Despeje'", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 500 })],
+      events: [event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], timestamp: 1000 })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveParry).toBe(1);
+    expect(gk.saveCatch).toBe(0);
+    expect(gk.timeline[0].type).toBe("Despeje");
+  });
 });

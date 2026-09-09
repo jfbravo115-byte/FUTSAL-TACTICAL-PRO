@@ -37,7 +37,7 @@ vi.mock("./tacticalAnalysisService", () => ({
   generateTacticalReport: (...args: any[]) => generateTacticalReportMock(...args),
 }));
 
-import { exportMatchReportPdf, exportGoalkeeperReportPdf } from "./pdfExportService";
+import { exportMatchReportPdf, exportGoalkeeperReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
 
 function player(overrides: Partial<Player> = {}): Player {
   return {
@@ -127,7 +127,7 @@ describe("exportMatchReportPdf", () => {
     await exportMatchReportPdf(md);
     expect(pdfSaveMock).toHaveBeenCalledTimes(1);
     expect(pdfSaveMock.mock.calls[0][0]).toMatch(/^informe_Mi_Equipo_\d+\.pdf$/);
-    expect(toJpegMock).toHaveBeenCalledTimes(3); // 3 páginas
+    expect(toJpegMock).toHaveBeenCalledTimes(4); // resumen/zonas + jugadores + 1 portero + eventos (hay un GOAL relevante)
   });
 
   // 3. sin Tactical Pro
@@ -247,5 +247,128 @@ describe("exportGoalkeeperReportPdf", () => {
     await exportGoalkeeperReportPdf(md);
     expect(generateTacticalReportMock).not.toHaveBeenCalled();
     expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+});
+
+// C. informe con 2 porteros genera páginas independientes (ninguna se
+// amontona: cada portero + cada bloque de Tactical Pro es una página).
+describe("paginación dinámica — punto 2 de la revisión", () => {
+  it("C: informe COMPLETO con 2 porteros genera una página por portero, sin amontonar", async () => {
+    const md = matchData({
+      players: [
+        player(),
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 13, isOnPitch: false, individualTimeSeconds: 300 }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    // resumen/zonas + jugadores + gk1 + gk2 = 4 páginas (sin Tactical, sin eventos)
+    expect(toJpegMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("sin porteros, sin Tactical, sin eventos: exactamente 2 páginas (resumen + jugadores)", async () => {
+    const md = matchData({ players: [player()] });
+    await exportMatchReportPdf(md);
+    expect(toJpegMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("1 portero, sin Tactical, sin eventos: exactamente 3 páginas", async () => {
+    const md = matchData({ players: [player(), player({ id: "gk1", role: Role.GOALKEEPER })] });
+    await exportMatchReportPdf(md);
+    expect(toJpegMock).toHaveBeenCalledTimes(3);
+  });
+
+  // D. Tactical Pro crea página independiente (no se amontona con jugadores/porteros).
+  it("D: Tactical Pro corto añade exactamente 1 página independiente", async () => {
+    const md = matchData({
+      players: [player()],
+      tacticalAnalysis: "Un análisis breve de una sola línea.",
+    });
+    await exportMatchReportPdf(md);
+    // resumen/zonas + jugadores + 1 página de Tactical Pro = 3
+    expect(toJpegMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("2 porteros + Tactical Pro corto: 5 páginas (resumen+jugadores+gk1+gk2+tactical)", async () => {
+    const md = matchData({
+      players: [
+        player(),
+        player({ id: "gk1", role: Role.GOALKEEPER, number: 1 }),
+        player({ id: "gk2", role: Role.GOALKEEPER, number: 13, isOnPitch: false, individualTimeSeconds: 300 }),
+      ],
+      tacticalAnalysis: "Análisis breve.",
+    });
+    await exportMatchReportPdf(md);
+    expect(toJpegMock).toHaveBeenCalledTimes(5);
+  });
+
+  // E. Tactical Pro largo no se trunca silenciosamente: se reparte en
+  // varias páginas, todo el texto se conserva íntegro.
+  it("E: Tactical Pro largo (varios párrafos, supera el presupuesto por página) se divide en más de 1 página, sin perder texto", () => {
+    const parrafos = Array.from({ length: 20 }, (_, i) => `Párrafo número ${i + 1}. `.repeat(30).trim());
+    const largo = parrafos.join("\n\n");
+    const chunks = splitTacticalProIntoPages(largo);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Ningún carácter se pierde: unir todos los bloques reconstruye el original.
+    expect(chunks.join("\n\n")).toBe(largo);
+  });
+
+  it("E: un único párrafo que por sí solo supera el presupuesto se conserva íntegro en su propia página (no se trunca)", () => {
+    const parrafoGigante = "Frase larga repetida. ".repeat(500); // sin dobles saltos de línea
+    const chunks = splitTacticalProIntoPages(parrafoGigante);
+    expect(chunks.length).toBe(1);
+    expect(chunks[0]).toBe(parrafoGigante.trim());
+  });
+
+  it("Tactical Pro largo en la exportación real genera varias páginas de Tactical Pro (no se escala ni se pierde)", async () => {
+    const parrafos = Array.from({ length: 20 }, (_, i) => `Párrafo número ${i + 1}. `.repeat(30));
+    const md = matchData({ players: [player()], tacticalAnalysis: parrafos.join("\n\n") });
+    const chunks = splitTacticalProIntoPages(md.tacticalAnalysis!);
+    await exportMatchReportPdf(md);
+    // resumen/zonas + jugadores + N páginas de Tactical Pro (N = chunks.length)
+    expect(toJpegMock).toHaveBeenCalledTimes(2 + chunks.length);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it("splitTacticalProIntoPages con texto vacío no genera páginas", () => {
+    expect(splitTacticalProIntoPages("")).toEqual([]);
+    expect(splitTacticalProIntoPages("   ")).toEqual([]);
+  });
+});
+
+// H / I. Limpieza del DOM incluso si falla la captura o el guardado.
+describe("cleanup del contenedor fuera de pantalla ante errores", () => {
+  it("H: si toJpeg lanza, el contenedor offscreen se limpia igualmente y el error se propaga", async () => {
+    toJpegMock.mockRejectedValueOnce(new Error("fallo de captura simulado"));
+    const md = matchData({ players: [player()] });
+    const before = document.body.childElementCount;
+    await expect(exportMatchReportPdf(md)).rejects.toThrow(/fallo de captura simulado/);
+    expect(document.body.childElementCount).toBe(before);
+    expect(pdfSaveMock).not.toHaveBeenCalled();
+  });
+
+  it("I: si pdf.save lanza, el contenedor offscreen se limpia igualmente y el error se propaga", async () => {
+    pdfSaveMock.mockImplementationOnce(() => {
+      throw new Error("fallo de guardado simulado");
+    });
+    const md = matchData({ players: [player()] });
+    const before = document.body.childElementCount;
+    await expect(exportMatchReportPdf(md)).rejects.toThrow(/fallo de guardado simulado/);
+    expect(document.body.childElementCount).toBe(before);
+  });
+
+  it("H/I: lo mismo aplica al informe de porteros (toJpeg y pdf.save)", async () => {
+    const md = matchData({ players: [player({ id: "gk1", role: Role.GOALKEEPER })] });
+    const before = document.body.childElementCount;
+
+    toJpegMock.mockRejectedValueOnce(new Error("captura porteros falló"));
+    await expect(exportGoalkeeperReportPdf(md)).rejects.toThrow(/captura porteros falló/);
+    expect(document.body.childElementCount).toBe(before);
+
+    pdfSaveMock.mockImplementationOnce(() => {
+      throw new Error("guardado porteros falló");
+    });
+    await expect(exportGoalkeeperReportPdf(md)).rejects.toThrow(/guardado porteros falló/);
+    expect(document.body.childElementCount).toBe(before);
   });
 });

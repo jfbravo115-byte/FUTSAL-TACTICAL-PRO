@@ -35,6 +35,7 @@ import { generateMatchReport, MatchReport } from "./matchReportService";
 import { buildZoneDashboard, ZoneDashboard, GOAL_ZONE_IDS, QUICK_ZONE_IDS } from "./matchZonesService";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { GoalkeeperOriginMap, GoalkeeperImpactMap } from "../components/export/GoalkeeperMaps";
+import { safeImageSrc } from "../utils/safeImageSrc";
 
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
@@ -69,11 +70,13 @@ function safeName(value: string): string {
 
 // ── CABECERA (equipo, rival, logos si existen, fecha, resultado) ───────
 function ReportHeader({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
+  const teamLogoSrc = safeImageSrc(matchData.teamLogo);
+  const opponentLogoSrc = safeImageSrc(matchData.opponentLogo);
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #111827", paddingBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {matchData.teamLogo && (
-          <img src={matchData.teamLogo} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
+        {teamLogoSrc && (
+          <img src={teamLogoSrc} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
         )}
         <div>
           <div style={{ fontSize: 22, fontWeight: 900 }}>{matchData.teamName}</div>
@@ -82,8 +85,8 @@ function ReportHeader({ matchData, report }: { matchData: MatchData; report: Mat
       </div>
       <div style={{ fontSize: 30, fontWeight: 900 }}>{report.score.team} - {report.score.opponent}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexDirection: "row-reverse" }}>
-        {matchData.opponentLogo && (
-          <img src={matchData.opponentLogo} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
+        {opponentLogoSrc && (
+          <img src={opponentLogoSrc} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
         )}
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 22, fontWeight: 900 }}>{matchData.opponentName}</div>
@@ -223,8 +226,8 @@ function GoalkeeperCard({ gk }: { gk: GoalkeeperReportEntry }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
-          <span>Blocajes <b>{gk.saveParry}</b></span>
-          <span>Despejes <b>{gk.saveCatch}</b></span>
+          <span>Blocajes <b>{gk.saveCatch}</b></span>
+          <span>Despejes <b>{gk.saveParry}</b></span>
           <span>Encajados <b>{gk.conceded}</b></span>
           <span>Efectividad <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b></span>
         </div>
@@ -258,18 +261,6 @@ function GoalkeeperCard({ gk }: { gk: GoalkeeperReportEntry }) {
   );
 }
 
-function TacticalProSection({ matchData }: { matchData: MatchData }) {
-  if (!matchData.tacticalAnalysis || !matchData.tacticalAnalysis.trim()) return null;
-  return (
-    <div>
-      <div style={sectionTitleStyle}>Tactical Pro</div>
-      <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-        <Markdown>{matchData.tacticalAnalysis}</Markdown>
-      </div>
-    </div>
-  );
-}
-
 function EventsSection({ report }: { report: MatchReport }) {
   if (report.relevantEvents.length === 0) return null;
   return (
@@ -288,69 +279,179 @@ function EventsSection({ report }: { report: MatchReport }) {
 }
 
 // ── PLANTILLA: INFORME COMPLETO (3 páginas) ─────────────────────────────
-function MatchReportPdfPages({
-  matchData,
-  report,
-  zones,
-  goalkeepers,
-  refs,
-}: {
-  matchData: MatchData;
-  report: MatchReport;
-  zones: ZoneDashboard;
-  goalkeepers: GoalkeeperReportEntry[];
-  refs: React.RefObject<HTMLDivElement>[];
-}) {
+// ── Tactical Pro: divide en bloques/páginas en vez de escalar o truncar ──
+// Reparte por PÁRRAFOS (nunca corta uno a mitad) hasta un presupuesto de
+// caracteres razonable por página A4 a este tamaño de fuente. Si un solo
+// párrafo ya supera el presupuesto, se deja íntegro en su propia página
+// (la página crece, pero el texto NUNCA se trunca ni se escala a un
+// tamaño ilegible).
+const TACTICAL_PRO_CHARS_PER_PAGE = 3200;
+
+export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TACTICAL_PRO_CHARS_PER_PAGE): string[] {
+  const paragraphs = markdown
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return [];
+
+  const pages: string[] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+  for (const para of paragraphs) {
+    if (currentLen > 0 && currentLen + para.length + 2 > maxCharsPerPage) {
+      pages.push(current.join("\n\n"));
+      current = [];
+      currentLen = 0;
+    }
+    current.push(para);
+    currentLen += para.length + 2;
+  }
+  if (current.length) pages.push(current.join("\n\n"));
+  return pages;
+}
+
+function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
   return (
-    <>
-      <div ref={refs[0]} style={pageStyle}>
-        <ReportHeader matchData={matchData} report={report} />
-        <SummaryKpis report={report} />
-        <ZonesSection zones={zones} />
+    <div>
+      <div style={sectionTitleStyle}>Tactical Pro{total > 1 ? ` (${index + 1}/${total})` : ""}</div>
+      <div style={{ fontSize: 11, lineHeight: 1.5 }}>
+        <Markdown>{chunk}</Markdown>
       </div>
-      <div ref={refs[1]} style={pageStyle}>
-        <ReportHeader matchData={matchData} report={report} />
-        <PlayersTable report={report} />
-      </div>
-      <div ref={refs[2]} style={pageStyle}>
-        <ReportHeader matchData={matchData} report={report} />
-        {goalkeepers.length > 0 && (
-          <div>
-            <div style={sectionTitleStyle}>Porteros</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {goalkeepers.map((gk) => <GoalkeeperCard key={gk.id} gk={gk} />)}
-            </div>
-          </div>
-        )}
-        <TacticalProSection matchData={matchData} />
-        <EventsSection report={report} />
-      </div>
-    </>
+    </div>
   );
 }
 
-// ── PLANTILLA: INFORME DE PORTEROS (1 página por portero) ───────────────
-function GoalkeeperReportPdfPages({
-  matchData,
-  report,
-  goalkeepers,
-  includeTacticalPro,
+// ── Páginas del INFORME COMPLETO: número de páginas DINÁMICO ────────────
+// 1 resumen/zonas + 1 jugadores (fijas) + 1 por portero + N por Tactical
+// Pro (dividido en bloques, nunca amontonado) + 1 de eventos si existen.
+// Nunca se agrupan varios porteros ni Tactical Pro largo en una sola
+// página — evita que capturePagesToPdf tenga que escalar contenido
+// desbordado a un tamaño ilegible.
+function buildMatchReportPages(
+  matchData: MatchData,
+  report: MatchReport,
+  zones: ZoneDashboard,
+  goalkeepers: GoalkeeperReportEntry[],
+): { key: string; content: React.ReactNode }[] {
+  const pages: { key: string; content: React.ReactNode }[] = [];
+
+  pages.push({
+    key: "summary",
+    content: (
+      <>
+        <ReportHeader matchData={matchData} report={report} />
+        <SummaryKpis report={report} />
+        <ZonesSection zones={zones} />
+      </>
+    ),
+  });
+
+  pages.push({
+    key: "players",
+    content: (
+      <>
+        <ReportHeader matchData={matchData} report={report} />
+        <PlayersTable report={report} />
+      </>
+    ),
+  });
+
+  goalkeepers.forEach((gk) => {
+    pages.push({
+      key: `gk-${gk.id}`,
+      content: (
+        <>
+          <ReportHeader matchData={matchData} report={report} />
+          <div style={sectionTitleStyle}>Portero</div>
+          <GoalkeeperCard gk={gk} />
+        </>
+      ),
+    });
+  });
+
+  if (matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim()) {
+    const chunks = splitTacticalProIntoPages(matchData.tacticalAnalysis);
+    chunks.forEach((chunk, i) => {
+      pages.push({
+        key: `tactical-${i}`,
+        content: (
+          <>
+            <ReportHeader matchData={matchData} report={report} />
+            <TacticalProChunk chunk={chunk} index={i} total={chunks.length} />
+          </>
+        ),
+      });
+    });
+  }
+
+  if (report.relevantEvents.length > 0) {
+    pages.push({
+      key: "events",
+      content: (
+        <>
+          <ReportHeader matchData={matchData} report={report} />
+          <EventsSection report={report} />
+        </>
+      ),
+    });
+  }
+
+  return pages;
+}
+
+// ── Páginas del INFORME DE PORTEROS: una por portero + N de Tactical Pro
+// (mismo criterio de división que el informe completo — nunca amontonado
+// junto al último portero) ───────────────────────────────────────────
+function buildGoalkeeperReportPages(
+  matchData: MatchData,
+  report: MatchReport,
+  goalkeepers: GoalkeeperReportEntry[],
+): { key: string; content: React.ReactNode }[] {
+  const pages: { key: string; content: React.ReactNode }[] = [];
+
+  goalkeepers.forEach((gk) => {
+    pages.push({
+      key: `gk-${gk.id}`,
+      content: (
+        <>
+          <ReportHeader matchData={matchData} report={report} />
+          <div style={sectionTitleStyle}>Informe de porteros</div>
+          <GoalkeeperCard gk={gk} />
+        </>
+      ),
+    });
+  });
+
+  if (matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim()) {
+    const chunks = splitTacticalProIntoPages(matchData.tacticalAnalysis);
+    chunks.forEach((chunk, i) => {
+      pages.push({
+        key: `tactical-${i}`,
+        content: (
+          <>
+            <ReportHeader matchData={matchData} report={report} />
+            <TacticalProChunk chunk={chunk} index={i} total={chunks.length} />
+          </>
+        ),
+      });
+    });
+  }
+
+  return pages;
+}
+
+function PdfPagesRenderer({
+  pages,
   refs,
 }: {
-  matchData: MatchData;
-  report: MatchReport;
-  goalkeepers: GoalkeeperReportEntry[];
-  includeTacticalPro: boolean;
+  pages: { key: string; content: React.ReactNode }[];
   refs: React.RefObject<HTMLDivElement>[];
 }) {
   return (
     <>
-      {goalkeepers.map((gk, i) => (
-        <div key={gk.id} ref={refs[i]} style={pageStyle}>
-          <ReportHeader matchData={matchData} report={report} />
-          <div style={sectionTitleStyle}>Informe de porteros</div>
-          <GoalkeeperCard gk={gk} />
-          {i === goalkeepers.length - 1 && includeTacticalPro && <TacticalProSection matchData={matchData} />}
+      {pages.map((p, i) => (
+        <div key={p.key} ref={refs[i]} style={pageStyle}>
+          {p.content}
         </div>
       ))}
     </>
@@ -391,7 +492,10 @@ async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
  * Monta `element` en un contenedor fuera de la pantalla (nunca visible,
  * nunca requiere gesto de ventana emergente), espera a que se aplique el
  * layout, ejecuta `onReady` con los nodos ya renderizados, y desmonta +
- * limpia el contenedor al terminar (éxito o error).
+ * limpia el contenedor SIEMPRE al terminar — éxito, error en toJpeg,
+ * error en pdf.save, o cualquier otro fallo dentro de onReady. El
+ * `finally` garantiza que nunca queda un contenedor huérfano en el DOM
+ * aunque la captura o el guardado del PDF lancen.
  */
 async function renderOffscreen(
   element: React.ReactElement,
@@ -422,18 +526,22 @@ function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
 }
 
 /**
- * Exporta el INFORME COMPLETO como PDF de 3 páginas. Sin popup, sin
- * llamada a IA (usa exclusivamente matchData.tacticalAnalysis si ya
- * existe). Descarga directa vía pdf.save().
+ * Exporta el INFORME COMPLETO como PDF. Número de páginas DINÁMICO (ver
+ * buildMatchReportPages): 2 páginas fijas (resumen/zonas + jugadores) +
+ * 1 por portero + N por Tactical Pro (si existe, dividido en bloques) +
+ * 1 de eventos (si hay eventos relevantes). Sin popup, sin llamada a IA
+ * (usa exclusivamente matchData.tacticalAnalysis si ya existe). Descarga
+ * directa vía pdf.save().
  */
 export async function exportMatchReportPdf(matchData: MatchData): Promise<void> {
   const report = generateMatchReport(matchData);
   const zones = buildZoneDashboard(matchData, false);
   const goalkeepers = buildGoalkeeperReports(matchData);
-  const refs = makeRefs(3);
+  const pages = buildMatchReportPages(matchData, report, zones, goalkeepers);
+  const refs = makeRefs(pages.length);
 
   await renderOffscreen(
-    <MatchReportPdfPages matchData={matchData} report={report} zones={zones} goalkeepers={goalkeepers} refs={refs} />,
+    <PdfPagesRenderer pages={pages} refs={refs} />,
     refs,
     async () => {
       const nodes = refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n);
@@ -444,12 +552,13 @@ export async function exportMatchReportPdf(matchData: MatchData): Promise<void> 
 }
 
 /**
- * Exporta el INFORME DE PORTEROS como PDF independiente (una página por
- * portero relevante). Soporta 0 (no genera nada, ver comprobación en el
- * llamante), 1, 2 o más porteros, incluyendo porteros sustituidos.
- * Tactical Pro se incluye COMPLETO (no se intenta extraer una sección
- * "solo porteros" del texto de IA) en la última página, solo si ya existe
- * — ver documentación de la decisión en el propio código.
+ * Exporta el INFORME DE PORTEROS como PDF independiente. Número de
+ * páginas DINÁMICO: una por portero relevante + N por Tactical Pro (si
+ * existe, dividido en bloques, NUNCA amontonado junto al último
+ * portero). Soporta 0 (lanza un error claro, ver más abajo), 1, 2 o más
+ * porteros, incluyendo porteros sustituidos. Tactical Pro se incluye
+ * COMPLETO (no se intenta extraer una sección "solo porteros" del texto
+ * de IA) — ver documentación de la decisión en buildGoalkeeperReportPages.
  */
 export async function exportGoalkeeperReportPdf(matchData: MatchData): Promise<void> {
   const report = generateMatchReport(matchData);
@@ -457,11 +566,11 @@ export async function exportGoalkeeperReportPdf(matchData: MatchData): Promise<v
   if (goalkeepers.length === 0) {
     throw new Error("No hay porteros con datos registrados en este partido.");
   }
-  const refs = makeRefs(goalkeepers.length);
-  const includeTacticalPro = !!matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim().length > 0;
+  const pages = buildGoalkeeperReportPages(matchData, report, goalkeepers);
+  const refs = makeRefs(pages.length);
 
   await renderOffscreen(
-    <GoalkeeperReportPdfPages matchData={matchData} report={report} goalkeepers={goalkeepers} includeTacticalPro={includeTacticalPro} refs={refs} />,
+    <PdfPagesRenderer pages={pages} refs={refs} />,
     refs,
     async () => {
       const nodes = refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n);

@@ -27,8 +27,10 @@ export type GoalkeeperReportEntry = {
   isOnPitch: boolean;
   totSeconds: number;
   totLabel: string;
-  saveParry: number;
+  /** Nº de eventos GoalieAction.SAVE_CATCH — se presenta como "Blocaje/Atrapada". */
   saveCatch: number;
+  /** Nº de eventos GoalieAction.SAVE_PARRY — se presenta como "Despeje/Rechace". */
+  saveParry: number;
   saveGeneric: number;
   totalSaves: number;
   conceded: number;
@@ -49,8 +51,8 @@ const fmtMilliseconds = (ms: number): string => fmtSeconds(Math.max(0, ms) / 100
 
 const GOALIE_ACTION_LABEL: Record<string, string> = {
   [GoalieAction.SAVE]: "Parada",
-  [GoalieAction.SAVE_PARRY]: "Blocaje",
-  [GoalieAction.SAVE_CATCH]: "Despeje",
+  [GoalieAction.SAVE_CATCH]: "Blocaje",
+  [GoalieAction.SAVE_PARRY]: "Despeje",
   [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
 };
 

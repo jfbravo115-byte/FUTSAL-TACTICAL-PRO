@@ -20,6 +20,7 @@ import { getFinalLocalCopy } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import {
   buildZoneDashboard,
+  mirrorTally,
   primaryBucket,
   tallyActionZones,
   ZONE_PREDICATES,
@@ -182,6 +183,16 @@ export default function MatchAnalysis() {
   const textualTop =
     textualTally && textualMetric ? describeTopZone(textualTally, ACTION_NOUN[textualMetric]!) : null;
 
+  // Faltas RECIBIDAS por zona: las comete el rival y se espejan a la
+  // perspectiva de quien las recibe. Solo presentación.
+  const foulsAgainstLines =
+    match && bucket?.system === "zone12" && zoneMetric === "fouls"
+      ? describeAllBands(
+          mirrorTally(tallyActionZones(match, ZONE_PREDICATES.fouls, !zoneOpponent)),
+          ACTION_NOUN[ActionType.FOUL]!,
+        )
+      : [];
+
   return (
     <div className="bg-[#0A0B0E] text-slate-200 font-sans overflow-y-auto allow-scroll" style={{ height: "var(--app-height, 100vh)" }}>
       <header className="border-b border-white/10 bg-[#0E1015]/95 sticky top-0 z-50 backdrop-blur-xl">
@@ -308,6 +319,15 @@ export default function MatchAnalysis() {
                     <div key={line} className="text-[10px] text-slate-300 font-bold">{line}</div>
                   ))}
                   {textualTop && <div className="text-[10px] text-cyan-300 font-black pt-1">{textualTop}.</div>}
+                </div>
+              )}
+
+              {foulsAgainstLines.length > 0 && (
+                <div className="mt-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-1">
+                  <div className="text-[9px] uppercase font-black text-amber-300">Faltas recibidas</div>
+                  {foulsAgainstLines.map((line) => (
+                    <div key={line} className="text-[10px] text-slate-300 font-bold">{line}</div>
+                  ))}
                 </div>
               )}
 

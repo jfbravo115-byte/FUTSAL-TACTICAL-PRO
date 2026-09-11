@@ -34,6 +34,7 @@ import { ActionType, MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
 import {
   buildZoneDashboard,
+  mirrorTally,
   primaryBucket,
   tallyActionZones,
   ZONE_PREDICATES,
@@ -153,6 +154,16 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         )
     : [];
 
+  // Faltas RECIBIDAS: son las que comete el rival, espejadas a mi
+  // perspectiva. Transformación de presentación — no se guarda una segunda
+  // zona ni se toca el evento original.
+  const foulsAgainst = !isLegacy
+    ? describeAllBands(
+        mirrorTally(tallyActionZones(matchData, ZONE_PREDICATES.fouls, true)),
+        ACTION_NOUN[ActionType.FOUL]!,
+      )
+    : [];
+
   return (
     <div>
       <div style={sectionTitleStyle}>Mapas / Zonas</div>
@@ -208,6 +219,15 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         <div style={{ fontSize: 9, color: "#374151", marginTop: 6, lineHeight: 1.5 }}>
           {textual.map((line) => (
             <div key={line}>{line}</div>
+          ))}
+        </div>
+      )}
+
+      {foulsAgainst.length > 0 && (
+        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700 }}>Faltas recibidas</div>
+          {foulsAgainst.map((line) => (
+            <div key={`against-${line}`}>{line}</div>
           ))}
         </div>
       )}

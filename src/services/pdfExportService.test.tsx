@@ -733,3 +733,22 @@ describe("Informes sobre la pista de 12 zonas", () => {
     expect(text).toContain("despejes 0");
   });
 });
+
+describe("Faltas recibidas", () => {
+  it("espeja la zona del que comete a la del que recibe, sin tocar el evento", async () => {
+    // El rival comete una falta en SU Zona 1 · izquierda. Para mi equipo es
+    // una falta recibida en MI Zona 4 · derecha.
+    const md = matchData({
+      events: [
+        event({ type: ActionType.FOUL, playerIds: ["rival-1"], originGrid: "Z1L", metadata: { isOpponent: true } }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    const text = (toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "";
+
+    expect(text).toContain("Faltas recibidas");
+    expect(text).toContain("Zona 4: 1 falta — 1 derecha");
+    // El evento original conserva su zona tal cual se registró.
+    expect(md.events[0].originGrid).toBe("Z1L");
+  });
+});

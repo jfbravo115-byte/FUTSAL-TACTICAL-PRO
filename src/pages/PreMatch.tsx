@@ -53,6 +53,14 @@ export default function PreMatch() {
   const [teamName, setTeamName] = useState('MI EQUIPO');
   const [teamLogo, setTeamLogo] = useState<string | undefined>();
   const [opponentName, setOpponentName] = useState('EQUIPO VISITANTE');
+  /**
+   * Portería que defiende MI EQUIPO en la 1ª parte. Es el único dato desde el
+   * que se deriva la perspectiva de ataque de cada acción, y no puede
+   * reconstruirse después: sin él, las zonas quedarían sin orientación como
+   * ocurre en los partidos históricos. El valor por defecto reproduce la
+   * convención que ya usaba la pizarra de alineación (local a la izquierda).
+   */
+  const [teamDefendsAtKickoff, setTeamDefendsAtKickoff] = useState<'left' | 'right'>('left');
   const [players, setPlayers] = useState<TemplatPlayer[]>([
     { id: 'tp1', number: 1,  name: 'Portero 1',   role: Role.GOALKEEPER, isStarter: true,  isOpponent: false },
     { id: 'tp2', number: 7,  name: 'Jugador 1',   role: Role.PLAYER,     isStarter: true,  isOpponent: false },
@@ -191,6 +199,7 @@ export default function PreMatch() {
       teamName: teamName.toUpperCase(),
       opponentName: opponentName.toUpperCase(),
       teamLogo,
+      teamDefendsAtKickoff,
       players: [...localPlayers, ...rivalPlayers],
     };
 
@@ -320,6 +329,38 @@ export default function PreMatch() {
             placeholder="EQUIPO VISITANTE"
             className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[13px] font-black text-red-400 uppercase outline-none focus:border-red-500/50"
           />
+        </section>
+
+        {/* Orientación del partido. Sin este dato las zonas quedarían sin
+            perspectiva y no podría reconstruirse después. */}
+        <section className="bg-white/[0.03] border border-white/5 rounded-2xl p-4">
+          <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">
+            ¿Qué portería defiende tu equipo en la 1ª parte?
+          </p>
+          <p className="text-[9px] text-slate-600 mb-3 leading-relaxed">
+            Sirve para leer todas las zonas desde la perspectiva del equipo que ataca.
+            El cambio de campo del descanso se aplica solo.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: 'left' as const, label: 'Izquierda', hint: 'Atacamos hacia la derecha' },
+              { value: 'right' as const, label: 'Derecha', hint: 'Atacamos hacia la izquierda' },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setTeamDefendsAtKickoff(opt.value)}
+                className={`py-3 px-2 rounded-xl border text-center transition-all ${
+                  teamDefendsAtKickoff === opt.value
+                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="block text-[11px] font-black uppercase">{opt.label}</span>
+                <span className="block text-[8px] mt-0.5 opacity-70">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
         </section>
 
         {/* Starters */}

@@ -4,6 +4,8 @@ import {
   Trophy, Target, AlertTriangle, Zap, RefreshCw, Handshake, RotateCcw, X
 } from 'lucide-react';
 import { ActionType, GoalieAction, Player, Role } from '../types/futsal';
+import { FutsalPitch } from './field/FutsalPitch';
+import { formatGoalZoneLabel } from '../utils/goalZones';
 
 interface PlayerActionRadialMenuProps {
   player: Player;
@@ -20,7 +22,11 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const [pendingActionType, setPendingActionType] = React.useState<GoalieAction | null>(null);
   const [selectingSubtype, setSelectingSubtype] = React.useState<'steal' | 'loss' | null>(null);
 
-  const goalZones = Array.from({ length: 9 }).map((_, i) => ({ id: `G${i + 1}`, label: '' }));
+  // Etiqueta en lenguaje natural: el usuario no debe leer G1-G9.
+  const goalZones = Array.from({ length: 9 }).map((_, i) => {
+    const id = `G${i + 1}`;
+    return { id, label: formatGoalZoneLabel(id) ?? '' };
+  });
 
   const playerActions = [
     { type: ActionType.GOAL,        label: 'GOL',    icon: '⚽',                         color: 'bg-green-500',  count: player.stats.goals },
@@ -162,43 +168,18 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
           </h3>
 
           {selectionStep === 'shot' ? (
-            /* ── ZONA DE TIRO: cuadrícula 3×3 sobre imagen de pista (horizontal) ── */
-            <div className="relative aspect-[3/2] w-full max-w-[320px] mx-auto rounded-2xl border-4 border-slate-800 overflow-hidden shadow-2xl"
-              style={{ background: 'linear-gradient(90deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
-              {/* Franjas de césped (verticales) */}
-              <div className="absolute inset-0 pointer-events-none">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / 6) * 100}%`, width: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'transparent' }} />
-                ))}
-              </div>
-              {/* Marcas de pista (horizontal) */}
-              <div className="absolute inset-0 pointer-events-none opacity-60">
-                <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
-                <div className="absolute left-1/2 top-2 bottom-2 w-[2px] bg-white/70 -translate-x-1/2" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border-2 border-white/70 rounded-full" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 h-24 w-10 border-y-2 border-r-2 border-white/70 rounded-r-[3rem]" />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 h-24 w-10 border-y-2 border-l-2 border-white/70 rounded-l-[3rem]" />
-                <div className="absolute left-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
-              </div>
-              <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-1 p-1">
-                {Array.from({ length: 9 }).map((_, i) => {
-                  const row = Math.floor(i / 3);
-                  const col = i % 3;
-                  const id = `${'ABC'[row]}${col + 1}`;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => handleShotZoneSelect(id)}
-                      className="rounded-lg border border-white/20 bg-black/10 flex items-center justify-center text-[10px] font-black text-white/80 hover:bg-amber-500/40 hover:border-white/50 hover:text-white transition-all active:scale-95"
-                    >
-                      <span className="bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-md">{id}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            /* ── ZONA DE TIRO: pista real de 12 zonas ──────────────────── */
+            /* Misma pista y misma orientación que el selector principal: la
+               portería propia siempre a la izquierda, desde la perspectiva de
+               quien ejecuta. El toque devuelve el sector ya normalizado. */
+            <FutsalPitch
+              mode="zone12"
+              theme="dark"
+              onSelect={handleShotZoneSelect}
+              selected={pendingShotZone ?? undefined}
+              accent="#f59e0b"
+              maxWidth={320}
+            />
           ) : (
             /* ── ZONA DE PORTERÍA: cuadrícula 3×3 con forma de portería ── */
             <div className="relative pt-3 px-3 w-full max-w-[300px] mx-auto">
@@ -217,7 +198,9 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
                   <button
                     key={zone.id}
                     onClick={() => handleGoalZoneSelect(zone.id)}
-                    className="rounded-md border border-white/10 bg-white/[0.03] flex items-center justify-center text-[10px] font-black text-slate-400 hover:bg-amber-500/30 hover:text-amber-300 hover:border-white/30 transition-all active:scale-95"
+                    aria-label={zone.label}
+                    title={zone.label}
+                    className="rounded-md border border-white/10 bg-white/[0.03] flex items-center justify-center text-center leading-tight px-1 text-[8px] font-black uppercase text-slate-400 hover:bg-amber-500/30 hover:text-amber-300 hover:border-white/30 transition-all active:scale-95"
                   >
                     {zone.label}
                   </button>

@@ -1221,6 +1221,13 @@ export default function MatchTracker() {
             team: { period1: false, period2: false },
             opponent: { period1: false, period2: false },
           },
+          // Orientación elegida en PreMatch. Si falta (p. ej. un setup antiguo
+          // en sessionStorage), se deja ausente: las zonas quedarán sin
+          // perspectiva, que es la verdad, en vez de elegir un lado al azar.
+          teamDefendsAtKickoff:
+            s.teamDefendsAtKickoff === "left" || s.teamDefendsAtKickoff === "right"
+              ? s.teamDefendsAtKickoff
+              : undefined,
           players: normalizeMatchPlayers<Player>(s.players || INITIAL_PLAYERS),
           events: [],
         };

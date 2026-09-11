@@ -8010,8 +8010,9 @@ const GoalHeatMap = ({
                     style={{ opacity: intensity * 0.5 + 0.1 }}
                   />
                 )}
-                <span className={`relative z-10 text-[8px] font-black uppercase transition-colors ${isSelected ? 'text-white' : 'text-slate-500'}`}>
-                  {id}
+                {/* Etiqueta legible; el usuario no debe leer G1-G9. */}
+                <span className={`relative z-10 text-[7px] font-black uppercase leading-tight text-center px-0.5 transition-colors ${isSelected ? 'text-white' : 'text-slate-500'}`}>
+                  {formatGoalZoneLabel(id)}
                 </span>
                 {count > 0 && (
                   <span className="relative z-10 text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
@@ -8039,7 +8040,7 @@ const GoalHeatMap = ({
             <div className="bg-slate-900/80 border border-slate-700 rounded-[2rem] p-5 shadow-2xl backdrop-blur-2xl">
               <div className="flex items-center justify-between mb-4 px-1">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">A puerta: {selectedZone}</span>
+                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">A puerta: {formatGoalZoneLabel(selectedZone) ?? "—"}</span>
                   <span className="text-[7px] font-bold text-slate-500 uppercase italic mt-0.5">Efectividad por jugador</span>
                 </div>
                 <button onClick={() => setSelectedZone(null)} className="p-2 hover:bg-white/5 rounded-full transition-colors">

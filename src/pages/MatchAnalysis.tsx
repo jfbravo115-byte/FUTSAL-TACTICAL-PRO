@@ -14,7 +14,7 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { MatchData, SavedMatch, Role } from "../types/futsal";
+import { ActionType, MatchData, SavedMatch, Role } from "../types/futsal";
 import { getPartido } from "../services/partidosService";
 import { getFinalLocalCopy } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
@@ -29,7 +29,6 @@ import {
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
-import { ActionType } from "../types/futsal";
 import { generateTacticalReport } from "../services/tacticalAnalysisService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 

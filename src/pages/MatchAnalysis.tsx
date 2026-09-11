@@ -20,9 +20,16 @@ import { getFinalLocalCopy } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import {
   buildZoneDashboard,
+  primaryBucket,
+  tallyActionZones,
+  ZONE_PREDICATES,
   ZoneMetric,
   zoneMetricValue,
 } from "../services/matchZonesService";
+import { FutsalPitch } from "../components/field/FutsalPitch";
+import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
+import { describeCorners } from "../utils/cornerModel";
+import { ActionType } from "../types/futsal";
 import { generateTacticalReport } from "../services/tacticalAnalysisService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
@@ -36,6 +43,17 @@ const METRIC_LABEL: Record<ZoneMetric, string> = {
   shots: "Tiros",
   recoveries: "Recuper.",
   losses: "Pérdidas",
+  fouls: "Faltas",
+  corners: "Córners",
+};
+
+/** Sustantivo con el que se redacta la lectura textual de cada métrica. */
+const METRIC_NOUN: Record<Exclude<ZoneMetric, "all">, ActionType> = {
+  shots: ActionType.SHOT,
+  recoveries: ActionType.STEAL,
+  losses: ActionType.LOSS,
+  fouls: ActionType.FOUL,
+  corners: ActionType.CORNER,
 };
 
 export default function MatchAnalysis() {
@@ -148,7 +166,22 @@ export default function MatchAnalysis() {
   const players = match.players
     .filter((p) => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE)
     .sort((a, b) => a.number - b.number);
-  const maxZoneValue = Math.max(...zones.origin.map((z) => zoneMetricValue(z, zoneMetric)), 1);
+  const bucket = primaryBucket(zones);
+  const bucketZones = bucket?.zones ?? [];
+  const maxZoneValue = Math.max(...bucketZones.map((z) => zoneMetricValue(z, zoneMetric)), 1);
+
+  // Lectura textual agregada. Solo tiene sentido sobre el sistema nuevo: en un
+  // partido histórico la perspectiva del atacante no se registró y hablar de
+  // "Zona 2 · centro" sería una precisión que el dato no permite.
+  const textualMetric = zoneMetric === "all" ? null : METRIC_NOUN[zoneMetric];
+  const textualTally =
+    match && bucket?.system === "zone12" && textualMetric
+      ? tallyActionZones(match, ZONE_PREDICATES[zoneMetric as Exclude<ZoneMetric, "all">], zoneOpponent)
+      : null;
+  const textualLines =
+    textualTally && textualMetric ? describeAllBands(textualTally, ACTION_NOUN[textualMetric]!) : [];
+  const textualTop =
+    textualTally && textualMetric ? describeTopZone(textualTally, ACTION_NOUN[textualMetric]!) : null;
 
   return (
     <div className="bg-[#0A0B0E] text-slate-200 font-sans overflow-y-auto allow-scroll" style={{ height: "var(--app-height, 100vh)" }}>
@@ -237,23 +270,63 @@ export default function MatchAnalysis() {
           <div className="grid md:grid-cols-[1fr_1fr] gap-5 items-start">
             <div>
               <div className="text-[9px] uppercase font-black text-slate-500 mb-2">Origen de acciones · {METRIC_LABEL[zoneMetric]}</div>
-              <div className="grid grid-cols-3 gap-2 max-w-md">
-                {zones.origin.map((z) => {
-                  const value = zoneMetricValue(z, zoneMetric);
-                  const intensity = value / maxZoneValue;
-                  return (
-                    <div key={z.zone} className={`rounded-2xl border p-3 min-h-[82px] ${value ? "border-cyan-500/30 bg-cyan-500/10" : "border-white/5 bg-black/20"}`}>
-                      <div className="flex justify-between items-start"><b className="font-mono text-slate-400">{z.zone}</b><b className="text-cyan-300 text-2xl">{value}</b></div>
-                      {value > 0 && <div className="h-1 rounded-full bg-cyan-400/20 mt-2 overflow-hidden"><div className="h-full bg-cyan-300" style={{ width: `${Math.max(12, intensity * 100)}%` }}/></div>}
-                      <div className="text-[8px] text-slate-600 mt-2">T {z.shots} · G {z.goals} · R {z.recoveries} · P {z.losses}</div>
-                    </div>
-                  );
-                })}
+
+              <FutsalPitch
+                mode={bucket?.system === "legacy3x3" ? "legacy3x3" : "zone12"}
+                counts={Object.fromEntries(bucketZones.map((z) => [z.zone, zoneMetricValue(z, zoneMetric)]))}
+                corners={zoneMetric === "all" || zoneMetric === "corners"
+                  ? { left: zones.corners.left, right: zones.corners.right }
+                  : undefined}
+                accent={zoneOpponent ? "#f87171" : "#22d3ee"}
+                emptyLabel="Sin acciones ubicadas"
+              />
+
+              <div className="grid grid-cols-2 gap-2 max-w-md mt-3">
+                {bucketZones
+                  .filter((z) => zoneMetricValue(z, zoneMetric) > 0)
+                  .map((z) => {
+                    const value = zoneMetricValue(z, zoneMetric);
+                    const intensity = value / maxZoneValue;
+                    return (
+                      <div key={z.zone} className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <b className="text-[10px] uppercase text-slate-300 leading-tight">{z.label}</b>
+                          <b className="text-cyan-300 text-2xl leading-none">{value}</b>
+                        </div>
+                        <div className="h-1 rounded-full bg-cyan-400/20 mt-2 overflow-hidden">
+                          <div className="h-full bg-cyan-300" style={{ width: `${Math.max(12, intensity * 100)}%` }}/>
+                        </div>
+                        <div className="text-[8px] text-slate-600 mt-2">T {z.shots} · G {z.goals} · R {z.recoveries} · P {z.losses} · F {z.fouls} · C {z.corners}</div>
+                      </div>
+                    );
+                  })}
               </div>
+
+              {/* Lectura textual agregada: el usuario no tiene que interpretar la rejilla a ojo. */}
+              {textualLines.length > 0 && (
+                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3 space-y-1">
+                  {textualLines.map((line) => (
+                    <div key={line} className="text-[10px] text-slate-300 font-bold">{line}</div>
+                  ))}
+                  {textualTop && <div className="text-[10px] text-cyan-300 font-black pt-1">{textualTop}.</div>}
+                </div>
+              )}
+
               <div className="mt-3 text-[10px] text-slate-500">
-                {zones.mostActiveZone ? <>Zona con más acciones: <b className="text-cyan-300">{zones.mostActiveZone.zone} ({zones.mostActiveZone.total})</b>.</> : "Sin acciones con zona de origen registrada."}
-                {zones.mostDangerousZone && <> Zona de tiro más productiva: <b className="text-lime-300">{zones.mostDangerousZone.zone} ({zones.mostDangerousZone.goals} G / {zones.mostDangerousZone.shots} T)</b>.</>}
+                {bucket?.mostActive
+                  ? <>Zona con más acciones: <b className="text-cyan-300">{bucket.mostActive.label} ({bucket.mostActive.total})</b>.</>
+                  : "Sin acciones con zona de origen registrada."}
+                {bucket?.mostDangerous && <> Zona de tiro más productiva: <b className="text-lime-300">{bucket.mostDangerous.label} ({bucket.mostDangerous.goals} G / {bucket.mostDangerous.shots} T)</b>.</>}
               </div>
+
+              {describeCorners(zones.corners) && (
+                <div className="mt-2 text-[10px] text-violet-300 font-black">{describeCorners(zones.corners)}</div>
+              )}
+              {zones.unlocated > 0 && (
+                <div className="mt-1 text-[9px] text-slate-500">
+                  {zones.unlocated} acción(es) registradas sin ubicación.
+                </div>
+              )}
             </div>
 
             <div>
@@ -261,7 +334,7 @@ export default function MatchAnalysis() {
               <div className="grid grid-cols-3 gap-2 max-w-md">
                 {zones.goal.map((z) => (
                   <div key={z.zone} className={`rounded-2xl border p-3 min-h-[72px] ${z.attempts ? "border-lime-500/25 bg-lime-500/5" : "border-white/5 bg-black/20"}`}>
-                    <div className="flex justify-between"><b className="font-mono text-slate-400">{z.zone}</b><b className="text-lime-300 text-xl">{z.attempts}</b></div>
+                    <div className="flex justify-between gap-2"><b className="text-[10px] uppercase text-slate-400 leading-tight">{z.label}</b><b className="text-lime-300 text-xl leading-none">{z.attempts}</b></div>
                     <div className="text-[8px] text-slate-600 mt-2">{z.goals} gol{z.goals === 1 ? "" : "es"}</div>
                   </div>
                 ))}

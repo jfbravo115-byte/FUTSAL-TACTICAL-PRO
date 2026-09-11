@@ -30,9 +30,19 @@ import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
 import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
-import { MatchData, Role, GameEvent } from "../types/futsal";
+import { ActionType, MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
-import { buildZoneDashboard, ZoneDashboard, GOAL_ZONE_IDS, QUICK_ZONE_IDS } from "./matchZonesService";
+import {
+  buildZoneDashboard,
+  primaryBucket,
+  tallyActionZones,
+  ZONE_PREDICATES,
+  ZoneDashboard,
+} from "./matchZonesService";
+import { FutsalPitch } from "../components/field/FutsalPitch";
+import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
+import { describeCorners } from "../utils/cornerModel";
+import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { GoalkeeperOriginMap, GoalkeeperImpactMap } from "../components/export/GoalkeeperMaps";
 import { safeImageSrc } from "../utils/safeImageSrc";
@@ -122,9 +132,27 @@ function SummaryKpis({ report }: { report: MatchReport }) {
   );
 }
 
-function ZonesSection({ zones }: { zones: ZoneDashboard }) {
-  const hasOrigin = zones.totals.zonedActions > 0;
+function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
+  const bucket = primaryBucket(zones);
+  const isLegacy = bucket?.system === "legacy3x3";
+  const hasOrigin = (bucket?.total ?? 0) > 0 || zones.corners.total > 0;
   const hasGoal = zones.goal.some((z) => z.attempts > 0) || zones.out > 0;
+
+  // Lectura textual: solo sobre el sistema nuevo. En un partido histórico la
+  // perspectiva del atacante no se registró, así que redactar "Zona 2 · centro"
+  // sería una precisión que el dato no permite.
+  const textual = !isLegacy
+    ? ([
+        ["losses", ActionType.LOSS],
+        ["recoveries", ActionType.STEAL],
+        ["shots", ActionType.SHOT],
+        ["fouls", ActionType.FOUL],
+      ] as const)
+        .flatMap(([key, action]) =>
+          describeAllBands(tallyActionZones(matchData, ZONE_PREDICATES[key]), ACTION_NOUN[action]!),
+        )
+    : [];
+
   return (
     <div>
       <div style={sectionTitleStyle}>Mapas / Zonas</div>
@@ -132,17 +160,15 @@ function ZonesSection({ zones }: { zones: ZoneDashboard }) {
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Origen en pista</div>
           {hasOrigin ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, maxWidth: 180 }}>
-              {QUICK_ZONE_IDS.map((zid) => {
-                const z = zones.origin.find((o) => o.zone === zid)!;
-                return (
-                  <div key={zid} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: 6, textAlign: "center", background: z.total > 0 ? "#eff6ff" : "#f9fafb" }}>
-                    <div style={{ fontSize: 9, color: "#6b7280" }}>{zid}</div>
-                    <div style={{ fontSize: 14, fontWeight: 900 }}>{z.total}</div>
-                  </div>
-                );
-              })}
-            </div>
+            <FutsalPitch
+              mode={isLegacy ? "legacy3x3" : "zone12"}
+              theme="light"
+              counts={Object.fromEntries((bucket?.zones ?? []).map((z) => [z.zone, z.total]))}
+              corners={{ left: zones.corners.left, right: zones.corners.right }}
+              accent="#2563eb"
+              compact
+              maxWidth={240}
+            />
           ) : (
             <div style={{ fontSize: 11, color: "#9ca3af" }}>Sin datos registrados.</div>
           )}
@@ -150,26 +176,62 @@ function ZonesSection({ zones }: { zones: ZoneDashboard }) {
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Destino de tiro (portería)</div>
           {hasGoal ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, maxWidth: 180 }}>
-              {GOAL_ZONE_IDS.map((zid) => {
-                const z = zones.goal.find((g) => g.zone === zid)!;
-                return (
-                  <div key={zid} style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: 6, textAlign: "center", background: z.attempts > 0 ? "#fef2f2" : "#f9fafb" }}>
-                    <div style={{ fontSize: 9, color: "#6b7280" }}>{zid}</div>
-                    <div style={{ fontSize: 14, fontWeight: 900 }}>{z.attempts}{z.goals > 0 ? ` (${z.goals}G)` : ""}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, maxWidth: 200 }}>
+              {zones.goal.map((z) => (
+                <div
+                  key={z.zone}
+                  style={{
+                    border: "1px solid #d1d5db",
+                    borderRadius: 6,
+                    padding: 5,
+                    textAlign: "center",
+                    background: z.attempts > 0 ? "#fef2f2" : "#f9fafb",
+                  }}
+                >
+                  <div style={{ fontSize: 7, color: "#6b7280", lineHeight: 1.2 }}>{z.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 900 }}>
+                    {z.attempts}{z.goals > 0 ? ` (${z.goals}G)` : ""}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           ) : (
             <div style={{ fontSize: 11, color: "#9ca3af" }}>Sin datos registrados.</div>
           )}
+          <div style={{ fontSize: 9, color: "#6b7280", marginTop: 4 }}>
+            Fuera / desviado: {zones.out}
+          </div>
         </div>
       </div>
-      {zones.mostActiveZone && (
-        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 6 }}>
-          Zona más activa: {zones.mostActiveZone.zone} ({zones.mostActiveZone.total}) · fuera de zona: {zones.out}
+
+      {textual.length > 0 && (
+        <div style={{ fontSize: 9, color: "#374151", marginTop: 6, lineHeight: 1.5 }}>
+          {textual.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
+      )}
+
+      {describeCorners(zones.corners) && (
+        <div style={{ fontSize: 10, color: "#374151", marginTop: 4, fontWeight: 700 }}>
+          {describeCorners(zones.corners)}
+        </div>
+      )}
+
+      {bucket?.mostActive && (
+        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+          Zona más activa: {bucket.mostActive.label} ({bucket.mostActive.total})
+        </div>
+      )}
+
+      {zones.unlocated > 0 && (
+        <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
+          {zones.unlocated} acción(es) sin ubicación registrada.
+        </div>
+      )}
+
+      {isLegacy && (
+        <div style={{ fontSize: 9, color: "#9ca3af", marginTop: 4 }}>{LEGACY_DISCLAIMER}</div>
       )}
     </div>
   );
@@ -237,16 +299,27 @@ function GoalkeeperCard({
             {gk.totLabel} en pista{!gk.isOnPitch ? " · sustituido" : ""}{gk.isOpponent ? " · rival" : ""}
           </div>
         </div>
+        {/* La cifra que manda es "Paradas": es la misma que pinta de verde el
+            mapa de impacto. El desglose por subtipo va debajo y solo declara
+            lo que realmente se registró — un disparo detenido sin subtipo no
+            se convierte en blocaje ni en despeje. */}
         <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
-          <span>Blocajes <b>{gk.saveCatch}</b></span>
-          <span>Despejes <b>{gk.saveParry}</b></span>
+          <span>Paradas <b>{gk.totalSaves}</b></span>
           <span>Encajados <b>{gk.conceded}</b></span>
           <span>Efectividad <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b></span>
         </div>
       </div>
+      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>
+        Desglose de paradas: blocajes {gk.saveCatch} · despejes {gk.saveParry}
+        {gk.saveGeneric > 0 ? ` · genéricas ${gk.saveGeneric}` : ""}
+        {gk.saveUnspecified > 0 ? ` · sin subtipo registrado ${gk.saveUnspecified}` : ""}
+        {gk.shotsFaced > 0 && gk.mappedInterventions < gk.shotsFaced
+          ? ` — el mapa de portería muestra ${gk.mappedInterventions} de ${gk.shotsFaced} (el resto no tiene zona registrada)`
+          : ""}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen (pista)</div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen del tiro (pista)</div>
           {/* IMPORTANTE: el mapa de ORIGEN necesita el conjunto COMPLETO de
               eventos del partido (matchData.events), no solo los propios
               del portero — la lógica original (extraída de MatchTracker.tsx,
@@ -254,10 +327,10 @@ function GoalkeeperCard({
               mientras este portero está en pista, que NO llevan su id en
               playerIds. gk.events (filtrado a playerIds.includes) se
               queda corto para este mapa concreto. */}
-          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact />
+          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact theme="light" />
         </div>
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Impacto (portería)</div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Destino del tiro (portería) · verde parada / rojo gol</div>
           {/* El mapa de IMPACTO sí debe usar solo intervenciones propias
               del portero (gk.events) — no se toca, es correcto tal cual. */}
           <GoalkeeperImpactMap events={gk.events} />
@@ -420,7 +493,7 @@ function buildMatchReportPages(
       <>
         <ReportHeader matchData={matchData} report={report} />
         <SummaryKpis report={report} />
-        <ZonesSection zones={zones} />
+        <ZonesSection zones={zones} matchData={matchData} />
       </>
     ),
   });

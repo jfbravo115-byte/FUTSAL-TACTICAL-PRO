@@ -11,6 +11,7 @@ import {
   Period,
   Role,
 } from "../types/futsal";
+import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 
 export type MatchReportPlayerLine = {
   id: string;
@@ -103,7 +104,7 @@ export type MatchReport = {
     saves: number;
     conceded: number;
   } | null;
-  zoneDistribution: { zone: string; count: number }[];
+  zoneDistribution: { zone: string; label: string; count: number }[];
   periodStats: MatchReportPeriodStats[];
   relevantEvents: MatchReportRelevantEvent[];
 };
@@ -131,6 +132,7 @@ const ACTION_LABEL: Record<string, string> = {
   [ActionType.GOAL]: "Gol",
   [ActionType.RED_CARD]: "Tarjeta roja",
   [ActionType.YELLOW_CARD]: "Tarjeta amarilla",
+  [ActionType.CORNER]: "Córner",
   [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
 };
 
@@ -266,10 +268,13 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
 
   const zonaCount = new Map<string, number>();
   eventosPropios.forEach((e) => {
-    if (e.originGrid) zonaCount.set(e.originGrid, (zonaCount.get(e.originGrid) || 0) + 1);
+    const zone = typeof e.originGrid === "string" ? e.originGrid.toUpperCase() : null;
+    if (zone) zonaCount.set(zone, (zonaCount.get(zone) || 0) + 1);
   });
+  // Cada zona viaja con su etiqueta de usuario: ni el informe ni el texto que
+  // se envía a Tactical Pro deben contener códigos internos.
   const zoneDistribution = Array.from(zonaCount.entries())
-    .map(([zone, count]) => ({ zone, count }))
+    .map(([zone, count]) => ({ zone, label: formatAnyZoneLabel(zone), count }))
     .sort((a, b) => b.count - a.count || a.zone.localeCompare(b.zone));
 
   const periodosPresentes = Array.from(new Set(eventosPropios.map((e) => e.period)));
@@ -412,7 +417,7 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   if (r.zoneDistribution.length) {
     lines.push("## Distribución por zonas");
-    r.zoneDistribution.forEach((z) => lines.push(`- ${z.zone}: ${z.count}`));
+    r.zoneDistribution.forEach((z) => lines.push(`- ${z.label}: ${z.count}`));
     lines.push("");
   }
 

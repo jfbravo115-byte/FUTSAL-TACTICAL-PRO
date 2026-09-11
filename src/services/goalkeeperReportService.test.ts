@@ -155,3 +155,108 @@ describe("buildGoalkeeperReports", () => {
     expect(gk.timeline[0].type).toBe("Despeje");
   });
 });
+
+// ── FASE 3: COHERENCIA ENTRE CABECERA Y MAPA ──────────────────────────
+describe("Paradas sin subtipo registrado", () => {
+  it("un SHOT rival detenido cuenta como parada, no desaparece de las estadísticas", () => {
+    // Este es el caso que producía "Blocajes 0 · Despejes 0" bajo un mapa
+    // lleno de círculos verdes: el evento existe y el mapa lo pintaba, pero
+    // la cabecera solo miraba los tipos GoalieAction.SAVE*.
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({
+          type: ActionType.SHOT,
+          playerIds: ["rival-1", "gk1"],
+          destinationGrid: "G5",
+          metadata: { isOpponent: true },
+        }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveUnspecified).toBe(1);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.shotsFaced).toBe(1);
+    expect(gk.effectivenessPct).toBe(100);
+  });
+
+  it("NO se inventa el subtipo de una parada genérica", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["gk1"], destinationGrid: "G2", metadata: { isOpponent: true } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveCatch).toBe(0);
+    expect(gk.saveParry).toBe(0);
+    expect(gk.saveUnspecified).toBe(1);
+  });
+
+  it("un tiro fuera NO cuenta como parada", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["gk1"], destinationGrid: "OUT", metadata: { isOpponent: true } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(0);
+    expect(gk.shotsFaced).toBe(0);
+  });
+
+  it("un ActionType.GOAL del rival cuenta como gol encajado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.GOAL, playerIds: ["rival-1", "gk1"], metadata: { isOpponent: true } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.conceded).toBe(1);
+    expect(gk.totalSaves).toBe(0);
+  });
+
+  it("el desglose de paradas suma siempre el total", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"] }),
+        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"] }),
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"] }),
+        event({ type: ActionType.SHOT, playerIds: ["gk1"], destinationGrid: "G1", metadata: { isOpponent: true } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveCatch + gk.saveParry + gk.saveGeneric + gk.saveUnspecified).toBe(gk.totalSaves);
+    expect(gk.totalSaves).toBe(4);
+  });
+
+  it("declara cuántas intervenciones puede dibujar el mapa de portería", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        // Con zona: el mapa puede pintarla.
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], destinationGrid: "G4" }),
+        // Sin zona: cuenta en la cabecera pero el mapa no puede dibujarla,
+        // y por eso la diferencia se explica en vez de esconderse.
+        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"] }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(2);
+    expect(gk.mappedInterventions).toBe(1);
+  });
+
+  it("la cronología incluye las paradas sin subtipo, nombradas por lo que se sabe", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["gk1"], destinationGrid: "G5", timestamp: 1000, metadata: { isOpponent: true } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.timeline).toHaveLength(1);
+    expect(gk.timeline[0].type).toBe("Parada (sin subtipo registrado)");
+  });
+});

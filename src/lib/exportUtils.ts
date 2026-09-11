@@ -1,4 +1,6 @@
 import { MatchData, ActionType, GoalieAction, Role } from '../types/futsal';
+import { formatAnyZoneLabel } from '../utils/legacyZoneMap';
+import { formatDestinationLabel } from '../utils/goalZones';
 
 const formatPlayerTime = (totalSeconds: number) => {
   const mins = Math.floor(totalSeconds / 60);
@@ -77,8 +79,8 @@ export function exportToCSV(matchData: MatchData) {
         player?.name || 'Equipo',
         String(player?.number || ''),
         e.metadata?.isOpponent ? matchData.opponentName : matchData.teamName,
-        e.originGrid || '',
-        e.destinationGrid || '',
+        formatAnyZoneLabel(e.originGrid),
+        formatDestinationLabel(e.destinationGrid),
         score,
       ]);
     });

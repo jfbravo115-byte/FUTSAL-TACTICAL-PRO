@@ -100,7 +100,10 @@ function withAlpha(hex: string, alpha: number): string {
 function PitchMarkings({ tokens }: { tokens: Tokens }) {
   const line = tokens.line;
   return (
-    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.85 }}>
+    <div
+      data-testid="pitch-markings"
+      style={{ position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.85 }}
+    >
       {/* Franjas de césped */}
       {Array.from({ length: 8 }).map((_, i) => (
         <div

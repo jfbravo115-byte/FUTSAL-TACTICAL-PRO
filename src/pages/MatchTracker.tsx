@@ -79,7 +79,7 @@ import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/ma
 import { applyFieldFlip } from "../utils/fieldOrientation";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperOriginMap } from "../components/export/GoalkeeperMaps";
-import { ZoneHeatGrid } from "../components/export/ZoneHeatGrid";
+import { ZoneMapBoard, ZONE_MAP_PAGE } from "../components/export/ZoneMapBoard";
 import {
   ACTION_NOUN,
   acceptsOrigin,
@@ -1425,6 +1425,7 @@ export default function MatchTracker() {
   const pdfPage4Ref = useRef<HTMLDivElement>(null);
   const pdfPage5Ref = useRef<HTMLDivElement>(null);
   const pdfPage6Ref = useRef<HTMLDivElement>(null);
+  const pdfPage7Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1888,7 +1889,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -3195,7 +3196,7 @@ export default function MatchTracker() {
           </div>
         );
 
-        const totalPages = allTeamsForPDF.length * 3;
+        const totalPages = allTeamsForPDF.length * 3 + 1;
         let pageCounter = 0;
 
         return (
@@ -3207,7 +3208,7 @@ export default function MatchTracker() {
                 if (!team) return null;
                 return (
                   <>
-                    <Header page={1} total={allTeamsForPDF.length * 3} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
+                    <Header page={1} total={allTeamsForPDF.length * 3 + 1} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3227,7 +3228,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={1} total={allTeamsForPDF.length * 3} />
+                    <Footer page={1} total={allTeamsForPDF.length * 3 + 1} />
                   </>
                 );
               })()}
@@ -3238,7 +3239,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -3265,7 +3266,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 const ACT_COLORS: Record<string, string> = {
                   'Goles':   '#16a34a',
                   'Tiros':   '#2563eb',
@@ -3323,19 +3324,9 @@ export default function MatchTracker() {
                     </div>
                   );
                 };
-                // Matriz de zona extraída a src/components/export/ZoneHeatGrid.tsx
-                // para poder testearla sin montar esta página entera.
-                const HeatGrid = ZoneHeatGrid;
-                const localEvs = matchData.events.filter((e: any) => !e.metadata?.isOpponent);
-                const rivalEvs = matchData.events.filter((e: any) => !!e.metadata?.isOpponent);
-                const heatMaps = [
-                  { title: 'Goles',          color: '#16a34a', evs: localEvs.filter((e: any) => e.type === ActionType.GOAL) },
-                  { title: 'Tiros',          color: '#2563eb', evs: localEvs.filter((e: any) => e.type === ActionType.SHOT) },
-                  { title: 'Recuperaciones', color: '#9333ea', evs: localEvs.filter((e: any) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION) },
-                  { title: 'Perdidas',       color: '#ea580c', evs: localEvs.filter((e: any) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR) },
-                  { title: 'Goles encajados',color: '#dc2626', evs: rivalEvs.filter((e: any) => e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) },
-                  { title: 'Tiros recibidos',color: '#0ea5e9', evs: rivalEvs.filter((e: any) => e.type === ActionType.SHOT || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH) },
-                ];
+                // Los mapas de zona ya no comparten página con los perfiles
+                // circulares: seis pistas reconocibles no caben legibles aquí,
+                // así que tienen página propia (ver ZoneMapBoard).
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -3356,12 +3347,6 @@ export default function MatchTracker() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 20 }}>
                       {team.players.map((p: Player) => <DonutChart key={p.id} p={p} accent={team.accent} />)}
                     </div>
-                    <div style={{ borderTop: '0.5px solid #e2e8f0', paddingTop: 14, marginBottom: 10 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>mapas de zona del partido</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-                        {heatMaps.map((h: any) => <HeatGrid key={h.title} events={h.evs} color={h.color} title={h.title} />)}
-                      </div>
-                    </div>
                     <Footer page={3} total={total} />
                   </>
                 );
@@ -3373,7 +3358,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <Header page={4} total={total} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
@@ -3406,7 +3391,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -3432,7 +3417,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
@@ -3477,6 +3462,30 @@ export default function MatchTracker() {
                   </>
                 );
               })()}
+            </div>
+
+            {/* ── MAPAS DE ZONA: página propia ──────────────────────────
+                Seis pistas reconocibles en 2 columnas × 3 filas. No comparten
+                página con los perfiles circulares porque a ese tamaño dejaban
+                de ser legibles, que es justo lo que esta página viene a
+                resolver. minHeight fija el alto A4: la captura se inserta con
+                addImage(..., pdfW, min(pdfH, pdfW*aspecto)), así que una
+                página más corta quedaría estirada y una más larga comprimida. */}
+            <div
+              ref={pdfPage7Ref}
+              style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
+            >
+              <Header
+                page={totalPages}
+                total={totalPages}
+                mainTeam={matchData.teamName}
+                vsTeam={matchData.opponentName}
+                accent="#3b82f6"
+              />
+              <div style={{ flex: 1 }}>
+                <ZoneMapBoard events={matchData.events} />
+              </div>
+              <Footer page={totalPages} total={totalPages} />
             </div>
           </>
         );

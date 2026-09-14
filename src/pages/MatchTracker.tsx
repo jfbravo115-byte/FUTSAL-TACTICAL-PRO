@@ -79,6 +79,7 @@ import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/ma
 import { applyFieldFlip } from "../utils/fieldOrientation";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperOriginMap } from "../components/export/GoalkeeperMaps";
+import { ZoneHeatGrid } from "../components/export/ZoneHeatGrid";
 import {
   ACTION_NOUN,
   acceptsOrigin,
@@ -3001,7 +3002,7 @@ export default function MatchTracker() {
                 const total = saves + goals;
 
                 return (
-                  <div key={z} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
+                  <div key={z} title={formatGoalZoneLabel(z) ?? undefined} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
                     {total > 0 && (
                       <div className="flex flex-col items-center justify-center leading-none gap-0.5">
                         <span className={`text-[11px] font-black ${textColor} drop-shadow-sm`}>{total}</span>
@@ -3013,7 +3014,8 @@ export default function MatchTracker() {
                         )}
                       </div>
                     )}
-                    <div className="absolute bottom-0.5 left-0.5 opacity-20 text-[5px] font-mono text-white">{z}</div>
+                    {/* Etiqueta accesible; el codigo interno G1-G9 no se imprime. */}
+                    <span className="sr-only">{formatGoalZoneLabel(z)}</span>
                   </div>
                 );
               })}
@@ -3321,40 +3323,9 @@ export default function MatchTracker() {
                     </div>
                   );
                 };
-                const HeatGrid = ({ events, color, title }: { events: GameEvent[], color: string, title: string }) => {
-                  const rows = ['A','B','C'], cols = ['1','2','3'];
-                  const counts: Record<string, number> = {};
-                  events.forEach((e: any) => { if (e.originGrid) counts[e.originGrid] = (counts[e.originGrid] || 0) + 1; });
-                  const maxC = Math.max(...Object.values(counts) as number[], 1);
-                  const W = 90, H = 70, cW = (W-4)/3, cH = (H-4)/3;
-                  const toRgb: Record<string, string> = {
-                    '#16a34a': '22,163,74', '#2563eb': '37,99,235', '#9333ea': '147,51,234',
-                    '#ea580c': '234,88,12', '#dc2626': '220,38,38', '#0ea5e9': '14,165,233',
-                  };
-                  return (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                      <div style={{ fontSize: 7, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>{title}</div>
-                      <div style={{ fontSize: 7, color: '#94a3b8' }}>{events.length} eventos</div>
-                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc' }}>
-                        {rows.map((r, ri) => cols.map((c, ci) => {
-                          const zId = `${r}${c}`;
-                          const cnt = counts[zId] || 0;
-                          const intensity = cnt / maxC;
-                          const x = 2 + ci * cW, y = 2 + ri * cH;
-                          const rgb = toRgb[color] || '14,165,233';
-                          const fill = cnt === 0 ? '#f8fafc' : `rgba(${rgb},${0.15 + intensity * 0.75})`;
-                          return (
-                            <g key={zId}>
-                              <rect x={x} y={y} width={cW-1} height={cH-1} fill={fill} rx={2} />
-                              {cnt > 0 && <text x={x+cW/2-0.5} y={y+cH/2} textAnchor="middle" dominantBaseline="central" fontSize="8" fontWeight="600" fill={intensity > 0.5 ? 'white' : color}>{cnt}</text>}
-                              <text x={x+2} y={y+cH-2} fontSize="5" fill="#cbd5e1">{zId}</text>
-                            </g>
-                          );
-                        }))}
-                      </svg>
-                    </div>
-                  );
-                };
+                // Matriz de zona extraída a src/components/export/ZoneHeatGrid.tsx
+                // para poder testearla sin montar esta página entera.
+                const HeatGrid = ZoneHeatGrid;
                 const localEvs = matchData.events.filter((e: any) => !e.metadata?.isOpponent);
                 const rivalEvs = matchData.events.filter((e: any) => !!e.metadata?.isOpponent);
                 const heatMaps = [

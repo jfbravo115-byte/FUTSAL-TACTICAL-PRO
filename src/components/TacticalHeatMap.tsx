@@ -1,19 +1,20 @@
 import React, { useMemo, useState } from 'react';
 import { SavedMatch, ActionType, GoalieAction } from '../types/futsal';
+import { FutsalPitch } from './field/FutsalPitch';
+import { ZONE_12_IDS, isZone12Id } from '../utils/fieldZones';
+import { LEGACY_ZONE_IDS, formatAnyZoneLabel, isLegacyZoneId } from '../utils/legacyZoneMap';
 
-// ─── FIELD ZONES ───────────────────────────────────────────────
-// The field is divided into a 3x3 grid (cols x rows):
-//   A1 A2 A3   ← Attacking third  (opponent goal end)
-//   B1 B2 B3   ← Middle third
-//   C1 C2 C3   ← Defensive third  (own goal end)
-// Column: 1=left, 2=center, 3=right
-
-const ZONES = ['A1','A2','A3','B1','B2','B3','C1','C2','C3'];
-const ZONE_LABELS: Record<string, string> = {
-  A1: 'Atq\nIzq', A2: 'Atq\nCen', A3: 'Atq\nDer',
-  B1: 'Med\nIzq', B2: 'Med\nCen', B3: 'Med\nDer',
-  C1: 'Def\nIzq', C2: 'Def\nCen', C3: 'Def\nDer',
-};
+// ─── ZONAS ──────────────────────────────────────────────────────
+// CORRECCIÓN DE FASE 3. Este componente interpretaba A1-C3 como
+// "letra = tercio de ataque/medio/defensa" y lo pintaba sobre una pista
+// VERTICAL, es decir girado 90° respecto a la pantalla en la que el usuario
+// registraba los datos: el selector de captura siempre fue una pista
+// HORIZONTAL, donde el eje longitudinal es la COLUMNA y la letra es la banda
+// transversal.
+//
+// Se elimina la interpretación propia y se pasa al modelo compartido, que
+// decide el sistema (12 zonas o rejilla histórica) a partir de los datos del
+// propio partido y nunca convierte de uno a otro.
 
 type Layer = 'all' | 'attack' | 'defense' | 'loss' | 'recovery';
 type Team = 'local' | 'rival';
@@ -77,20 +78,29 @@ export default function TacticalHeatMap({ match }: HeatMapProps) {
   const [layer, setLayer] = useState<Layer>('all');
   const [team, setTeam] = useState<Team>('local');
 
-  const { zoneCounts, maxCount, totalActions, topZone } = useMemo(() => {
+  const { zoneCounts, maxCount, totalActions, topZone, isLegacyData } = useMemo(() => {
     const config = LAYER_CONFIG[layer];
+
+    const scoped = (match.events ?? []).filter(e => {
+      const isLocal = !e.metadata?.isOpponent;
+      if (team === 'local' && !isLocal) return false;
+      if (team === 'rival' && isLocal) return false;
+      return config.actions.includes(e.type as any);
+    });
+
+    // Un partido histórico solo si NO hay ningún sector del sistema nuevo.
+    const legacy =
+      !scoped.some(e => isZone12Id(e.originGrid?.toUpperCase())) &&
+      scoped.some(e => isLegacyZoneId(e.originGrid));
+
+    const ids: readonly string[] = legacy ? LEGACY_ZONE_IDS : ZONE_12_IDS;
     const counts: Record<string, number> = {};
-    ZONES.forEach(z => counts[z] = 0);
+    ids.forEach(z => { counts[z] = 0; });
     let total = 0;
 
-    match.events?.forEach(e => {
-      const isLocal = !e.metadata?.isOpponent;
-      if (team === 'local' && !isLocal) return;
-      if (team === 'rival' && isLocal) return;
-      if (!config.actions.includes(e.type as any)) return;
-      if (!e.originGrid) return;
-      const zone = e.originGrid.toUpperCase();
-      if (ZONES.includes(zone)) {
+    scoped.forEach(e => {
+      const zone = e.originGrid?.toUpperCase();
+      if (zone && ids.includes(zone)) {
         counts[zone] = (counts[zone] || 0) + 1;
         total++;
       }
@@ -99,7 +109,13 @@ export default function TacticalHeatMap({ match }: HeatMapProps) {
     const maxC = Math.max(...Object.values(counts), 1);
     const topZ = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
 
-    return { zoneCounts: counts, maxCount: maxC, totalActions: total, topZone: topZ };
+    return {
+      zoneCounts: counts,
+      maxCount: maxC,
+      totalActions: total,
+      topZone: topZ,
+      isLegacyData: legacy,
+    };
   }, [match, layer, team]);
 
   const config = LAYER_CONFIG[layer];
@@ -159,78 +175,16 @@ export default function TacticalHeatMap({ match }: HeatMapProps) {
 
       {/* Heat map pitch */}
       <div className="p-5">
-        <div className="relative mx-auto max-w-[280px]">
-          {/* Pitch background */}
-          <div className="relative bg-slate-950 rounded-xl border-2 border-slate-700 overflow-hidden"
-               style={{ aspectRatio: '2/3' }}>
-
-            {/* Pitch lines */}
-            <svg className="absolute inset-0 w-full h-full opacity-15 pointer-events-none" viewBox="0 0 200 300">
-              {/* Center line */}
-              <line x1="0" y1="150" x2="200" y2="150" stroke="white" strokeWidth="1.5"/>
-              {/* Center circle */}
-              <circle cx="100" cy="150" r="30" stroke="white" strokeWidth="1.5" fill="none"/>
-              {/* Top penalty area */}
-              <rect x="55" y="0" width="90" height="55" stroke="white" strokeWidth="1.5" fill="none"/>
-              {/* Top goal */}
-              <rect x="75" y="0" width="50" height="15" stroke="white" strokeWidth="1.5" fill="none"/>
-              {/* Bottom penalty area */}
-              <rect x="55" y="245" width="90" height="55" stroke="white" strokeWidth="1.5" fill="none"/>
-              {/* Bottom goal */}
-              <rect x="75" y="285" width="50" height="15" stroke="white" strokeWidth="1.5" fill="none"/>
-            </svg>
-
-            {/* Zone grid — 3 cols × 3 rows */}
-            <div className="absolute inset-0 grid grid-cols-3 grid-rows-3">
-              {['A','B','C'].map((row, rowIdx) =>
-                ['1','2','3'].map((col, colIdx) => {
-                  const zoneId = `${row}${col}`;
-                  const count = zoneCounts[zoneId] || 0;
-                  const intensity = maxCount > 0 ? count / maxCount : 0;
-                  const isTop = topZone && topZone[0] === zoneId && topZone[1] > 0;
-
-                  return (
-                    <div
-                      key={zoneId}
-                      className="relative flex flex-col items-center justify-center border border-white/5 transition-all"
-                      style={{ backgroundColor: interpolateColor(intensity, config.color) }}
-                    >
-                      {count > 0 && (
-                        <>
-                          <span className={`text-[10px] font-black leading-none ${
-                            isTop ? 'text-white' : 'text-white/70'
-                          }`}
-                            style={isTop ? { textShadow: `0 0 8px ${config.color}` } : {}}
-                          >
-                            {count}
-                          </span>
-                          {isTop && (
-                            <div className="absolute inset-0 rounded-[2px] pointer-events-none"
-                                 style={{ boxShadow: `inset 0 0 0 1.5px ${config.color}` }} />
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          {/* Zone labels left axis */}
-          <div className="absolute -left-8 inset-y-0 flex flex-col justify-around py-1">
-            {['ATQ', 'MED', 'DEF'].map(label => (
-              <span key={label} className="text-[8px] font-black text-slate-600 uppercase">{label}</span>
-            ))}
-          </div>
-
-          {/* Zone labels bottom axis */}
-          <div className="flex justify-around mt-1.5 px-1">
-            {['IZQ', 'CEN', 'DER'].map(label => (
-              <span key={label} className="text-[8px] font-black text-slate-600 uppercase flex-1 text-center">{label}</span>
-            ))}
-          </div>
-        </div>
+        {/* Pista compartida, en la MISMA orientación en la que se registró:
+            horizontal, portería propia a la izquierda. */}
+        <FutsalPitch
+          mode={isLegacyData ? 'legacy3x3' : 'zone12'}
+          theme="dark"
+          counts={zoneCounts}
+          accent={config.color}
+          maxWidth={320}
+          emptyLabel="Sin acciones ubicadas"
+        />
 
         {/* Legend */}
         <div className="mt-4 flex items-center gap-2 justify-center">
@@ -251,37 +205,36 @@ export default function TacticalHeatMap({ match }: HeatMapProps) {
           {/* Top zone */}
           <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-center">
             <div className="text-[9px] font-black text-slate-500 uppercase mb-1">Zona top</div>
-            <div className="text-lg font-black font-mono" style={{ color: config.color }}>
-              {topZone?.[0] || '—'}
+            <div className="text-[11px] font-black uppercase leading-tight" style={{ color: config.color }}>
+              {topZone?.[0] ? formatAnyZoneLabel(topZone[0]) : '—'}
             </div>
             <div className="text-[9px] text-slate-500">{topZone?.[1] || 0} acciones</div>
           </div>
 
-          {/* Attacking third total */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-center">
-            <div className="text-[9px] font-black text-slate-500 uppercase mb-1">Tercio atq</div>
-            <div className="text-lg font-black font-mono text-emerald-400">
-              {['A1','A2','A3'].reduce((acc, z) => acc + (zoneCounts[z] || 0), 0)}
-            </div>
-            <div className="text-[9px] text-slate-500">
-              {totalActions > 0
-                ? Math.round(['A1','A2','A3'].reduce((acc, z) => acc + (zoneCounts[z] || 0), 0) / totalActions * 100)
-                : 0}%
-            </div>
-          </div>
-
-          {/* Defensive third total */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-center">
-            <div className="text-[9px] font-black text-slate-500 uppercase mb-1">Tercio def</div>
-            <div className="text-lg font-black font-mono text-blue-400">
-              {['C1','C2','C3'].reduce((acc, z) => acc + (zoneCounts[z] || 0), 0)}
-            </div>
-            <div className="text-[9px] text-slate-500">
-              {totalActions > 0
-                ? Math.round(['C1','C2','C3'].reduce((acc, z) => acc + (zoneCounts[z] || 0), 0) / totalActions * 100)
-                : 0}%
-            </div>
-          </div>
+          {/* Zona más ofensiva y más defensiva. En datos históricos no puede
+              afirmarse cuál es cuál — la perspectiva no se registró — así que
+              se nombran por franja y no por "ataque"/"defensa". */}
+          {(isLegacyData
+            ? ([
+                { label: 'Franja 3', ids: ['A3', 'B3', 'C3'], color: '#34d399' },
+                { label: 'Franja 1', ids: ['A1', 'B1', 'C1'], color: '#60a5fa' },
+              ] as const)
+            : ([
+                { label: 'Zona 4', ids: ['Z4L', 'Z4C', 'Z4R'], color: '#34d399' },
+                { label: 'Zona 1', ids: ['Z1L', 'Z1C', 'Z1R'], color: '#60a5fa' },
+              ] as const)
+          ).map(band => {
+            const value = band.ids.reduce((acc, z) => acc + (zoneCounts[z] || 0), 0);
+            return (
+              <div key={band.label} className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-center">
+                <div className="text-[9px] font-black text-slate-500 uppercase mb-1">{band.label}</div>
+                <div className="text-lg font-black" style={{ color: band.color }}>{value}</div>
+                <div className="text-[9px] text-slate-500">
+                  {totalActions > 0 ? Math.round((value / totalActions) * 100) : 0}%
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

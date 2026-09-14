@@ -36,6 +36,7 @@ export enum ActionType {
   UNFORCED_ERROR = 'UNFORCED_ERROR',
   YELLOW_CARD = 'YELLOW_CARD',
   RED_CARD = 'RED_CARD',
+  CORNER = 'CORNER',
   SUBSTITUTION = 'SUBSTITUTION',
   TIMEOUT = 'TIMEOUT',
   FORMATION_CHANGE = 'FORMATION_CHANGE',
@@ -101,6 +102,16 @@ export type GameEvent = {
   gameState: GameState;
   originGrid?: string;
   destinationGrid?: string;
+  /**
+   * Dirección de ataque del equipo que EJECUTA la acción, en el momento del
+   * evento. Desnormalizado a propósito: hace que el evento sea autodescriptivo
+   * y por tanto inmune a una edición posterior de la cabecera del partido.
+   *
+   * Ausente = evento legacy, anterior al sistema de 12 zonas. Su ausencia
+   * NUNCA se rellena por defecto ni se deduce: sin este dato la perspectiva
+   * real es desconocida y así debe presentarse.
+   */
+  attackDirection?: 'ltr' | 'rtl';
   metadata?: Record<string, any>;
   scoreAtEvent?: { team: number; opponent: number };
 };
@@ -122,6 +133,15 @@ export type MatchData = {
   events: GameEvent[];
   timestamp?: string;
   tacticalAnalysis?: string;
+  /**
+   * Portería que defiende MI EQUIPO en la 1ª parte, sobre la pista horizontal
+   * de captura. Es el único dato desde el que se deriva la perspectiva de
+   * ataque de cualquier evento (ver src/utils/attackDirection.ts).
+   *
+   * Ausente = partido legacy: no se registró la orientación y no puede
+   * reconstruirse. No inventar un valor por defecto al leer.
+   */
+  teamDefendsAtKickoff?: 'left' | 'right';
 };
 
 export type SavedMatch = MatchData & { id: string };

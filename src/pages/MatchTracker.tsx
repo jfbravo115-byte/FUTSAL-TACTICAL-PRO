@@ -43,6 +43,7 @@ import {
   Edit2,
   Pencil,
   Loader2,
+  Flag,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toJpeg } from "html-to-image";
@@ -76,6 +77,22 @@ import {
 } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import { applyFieldFlip } from "../utils/fieldOrientation";
+import { FutsalPitch } from "../components/field/FutsalPitch";
+import { GoalkeeperOriginMap } from "../components/export/GoalkeeperMaps";
+import { ZoneMapBoard, ZONE_MAP_PAGE } from "../components/export/ZoneMapBoard";
+import {
+  ACTION_NOUN,
+  acceptsOrigin,
+  acceptsTarget,
+  describeAllBands,
+  formatZoneLabel,
+  isZone12Id,
+  originIsOptional,
+} from "../utils/fieldZones";
+import { attackDirection } from "../utils/attackDirection";
+import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
+import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
+import { formatGoalZoneLabel } from "../utils/goalZones";
 import { effectiveSlotIndex, isRoleAllowedInSlot, findAvailableSlotForRole, normalizeMatchPlayers } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
@@ -556,52 +573,30 @@ interface StatsExportTemplateProps {
   reportType?: "TEAM" | Role;
 }
 
-const renderPitchOriginMap = (goalie: Player, isOpponent: boolean, events: GameEvent[], compact: boolean = false) => {
-  const rows = ["A", "B", "C"];
-  const cols = ["1", "2", "3"];
-  const goalieEvents = events.filter((e) => {
-    // Note: In some contexts (like the report) we might not have goalie.isOnPitch reliably if it's a static snapshot
-    // but usually report only includes relevant players.
-    const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && (goalie.isOnPitch ?? true));
-    return isGoalieInvolved && (
-      e.type === GoalieAction.SAVE || 
-      e.type === GoalieAction.SAVE_PARRY || 
-      e.type === GoalieAction.SAVE_CATCH || 
-      e.type === GoalieAction.GOAL_CONCEDED || 
-      e.type === ActionType.SHOT ||
-      e.type === ActionType.GOAL
-    );
-  });
-
-  return (
-    <div className={`grid grid-cols-3 grid-rows-3 gap-1 aspect-[2/3] w-full ${compact ? 'max-w-[100px]' : 'max-w-[140px]'} mx-auto border border-white/10 rounded-lg bg-black/40 p-1 relative overflow-hidden`}>
-      <div className="absolute inset-0 pointer-events-none opacity-20 flex flex-col">
-        <div className="flex-1 border-b border-dashed border-white/30" />
-        <div className="flex-1" />
-      </div>
-      
-      {rows.map((r) =>
-        cols.map((c) => {
-          const id = `${r}${c}`;
-          const count = goalieEvents.filter((e) => e.originGrid === id).length;
-          return (
-            <div
-              key={id}
-              className={`relative flex items-center justify-center rounded-sm border ${count > 0 ? (isOpponent ? "bg-red-500/20 border-red-500/30" : "bg-blue-500/20 border-blue-500/30") : "bg-white/[0.02] border-white/5"}`}
-            >
-              {count > 0 && (
-                <span className={`text-[10px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'}`}>
-                  {count}
-                </span>
-              )}
-              <span className="absolute bottom-0.5 right-0.5 text-[5px] font-mono opacity-10 text-white uppercase">{id}</span>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-};
+/**
+ * Mapa de ORIGEN del tiro para un portero.
+ *
+ * Delega en el componente compartido GoalkeeperOriginMap. Antes había aquí una
+ * copia con rejilla abstracta 3×3 que además atribuía los disparos usando
+ * `goalie.isOnPitch` — el estado FINAL del partido, no el del momento del
+ * evento. Esa copia se elimina: la versión compartida usa `onPitchPlayerIds`
+ * y conserva el fallback conservador para eventos antiguos que no lo traen.
+ */
+const renderPitchOriginMap = (
+  goalie: Player,
+  isOpponent: boolean,
+  events: GameEvent[],
+  compact: boolean = false,
+  isOnlyRelevantGoalkeeper: boolean = false,
+) => (
+  <GoalkeeperOriginMap
+    goalie={goalie}
+    isOpponent={isOpponent}
+    events={events}
+    compact={compact}
+    isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper}
+  />
+);
 
 const StatsExportTemplate = React.forwardRef<
   HTMLDivElement,
@@ -1227,6 +1222,13 @@ export default function MatchTracker() {
             team: { period1: false, period2: false },
             opponent: { period1: false, period2: false },
           },
+          // Orientación elegida en PreMatch. Si falta (p. ej. un setup antiguo
+          // en sessionStorage), se deja ausente: las zonas quedarán sin
+          // perspectiva, que es la verdad, en vez de elegir un lado al azar.
+          teamDefendsAtKickoff:
+            s.teamDefendsAtKickoff === "left" || s.teamDefendsAtKickoff === "right"
+              ? s.teamDefendsAtKickoff
+              : undefined,
           players: normalizeMatchPlayers<Player>(s.players || INITIAL_PLAYERS),
           events: [],
         };
@@ -1396,6 +1398,13 @@ export default function MatchTracker() {
     isLocal: boolean;
     count: number;
   } | null>(null);
+  /** Falta ya registrada a la espera de ubicación OPCIONAL. */
+  const [pendingFoulLocation, setPendingFoulLocation] = useState<{
+    eventId: string;
+    isOpponent: boolean;
+  } | null>(null);
+  /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
+  const [pendingCorner, setPendingCorner] = useState<{ isOpponent: boolean } | null>(null);
   const [isLocalTeamOpen, setIsLocalTeamOpen] = useState(false);
   const [isOpponentTeamOpen, setIsOpponentTeamOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
@@ -1416,6 +1425,7 @@ export default function MatchTracker() {
   const pdfPage4Ref = useRef<HTMLDivElement>(null);
   const pdfPage5Ref = useRef<HTMLDivElement>(null);
   const pdfPage6Ref = useRef<HTMLDivElement>(null);
+  const pdfPage7Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1879,7 +1889,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -2028,9 +2038,20 @@ export default function MatchTracker() {
     });
   };
 
+  /**
+   * Registro de falta. ORDEN DELIBERADO: primero se contabiliza, después se
+   * ofrece la ubicación.
+   *
+   * El contador de faltas acumuladas dispara la alarma reglamentaria en la 4ª
+   * y la 5ª, así que no puede depender de que el usuario complete ningún paso
+   * adicional. La zona llega después como paso OPCIONAL y descartable: si se
+   * cancela, la falta ya está registrada y simplemente queda sin ubicación,
+   * igual que una falta histórica.
+   */
   const handleFoul = (isTeam: boolean, playerId?: string) => {
     if (isDataLocked) return;
     const newCount = matchData.fouls[isTeam ? "team" : "opponent"] + 1;
+    const foulEventId = `event-foul-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     if (newCount === 4 || newCount === 5) {
       playAlertSound(newCount);
@@ -2062,13 +2083,21 @@ export default function MatchTracker() {
         },
         events: [
           {
-            id: `event-foul-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: foulEventId,
             timestamp: prev.matchClock,
             wallClock: Date.now(),
             period: prev.period,
             playerIds: playerId ? [playerId] : [],
+            // Faltaba: sin esto una falta no puede atribuirse a quién estaba
+            // realmente en pista, a diferencia del resto de eventos.
+            onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
             type: ActionType.FOUL,
             gameState,
+            // La zona se guarda desde la perspectiva del equipo que COMETE la
+            // falta. Una falta recibida se obtiene espejando en presentación,
+            // nunca guardando una segunda zona.
+            attackDirection:
+              attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
             metadata: { isOpponent: !isTeam },
             scoreAtEvent: {
               team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
@@ -2079,6 +2108,44 @@ export default function MatchTracker() {
         ],
         players: nextPlayers,
       };
+    });
+
+    // La falta YA está registrada y contabilizada. Este paso solo añade la
+    // ubicación al evento existente y puede descartarse sin consecuencias.
+    setPendingFoulLocation({ eventId: foulEventId, isOpponent: !isTeam });
+  };
+
+  /**
+   * Añade la ubicación a una falta ya registrada. No crea ningún evento
+   * nuevo ni toca el contador: solo completa `originGrid` del evento.
+   */
+  const assignFoulLocation = (zoneId: string) => {
+    const pending = pendingFoulLocation;
+    setPendingFoulLocation(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: prev.events.map((e) =>
+        e.id === pending.eventId ? { ...e, originGrid: zoneId } : e,
+      ),
+    }));
+  };
+
+  /**
+   * Registro de córner. La esquina real (`cornerSide`) es el dato
+   * autoritativo; `originGrid` es el enlace con las 12 zonas para que el
+   * córner entre en mapas y agregados sin dejar de ser un córner.
+   *
+   * No se registra nada sobre el desenlace: el subtipo tiro/jugada llegará en
+   * una fase posterior y su ausencia aquí es lo que evita tener que migrar
+   * estos eventos.
+   */
+  const handleCorner = (isOpponent: boolean, side: CornerSide) => {
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+    setPendingCorner(null);
+    handleAction(ActionType.CORNER, undefined, {
+      originGrid: cornerOriginGrid(side),
+      metadata: { isOpponent, cornerSide: side },
     });
   };
 
@@ -2106,26 +2173,12 @@ export default function MatchTracker() {
     const isGoal =
       type === ActionType.GOAL || type === GoalieAction.GOAL_CONCEDED;
     
-    const needsOrigin = [
-      ActionType.SHOT, 
-      ActionType.GOAL, 
-      GoalieAction.GOAL_CONCEDED,
-      GoalieAction.SAVE_PARRY,
-      GoalieAction.SAVE_CATCH,
-      ActionType.STEAL, 
-      ActionType.INTERCEPTION, 
-      ActionType.LOSS, 
-      ActionType.UNFORCED_ERROR
-    ].includes(type as any);
+    // Catálogo único en src/utils/fieldZones.ts. Antes esta lista estaba
+    // duplicada aquí, en el paso de origen y en el selector de "acción desde",
+    // y es por donde se colaba FOUL sin llegar nunca a pedir ubicación.
+    const needsOrigin = acceptsOrigin(type) && !originIsOptional(type);
 
     if (needsOrigin && !metadata?.originGrid) {
-      const onlyNeedsOrigin = [
-        ActionType.STEAL, 
-        ActionType.INTERCEPTION, 
-        ActionType.LOSS, 
-        ActionType.UNFORCED_ERROR,
-      ].includes(type as any);
-
       setPendingAction({
         type: type as any,
         playerId,
@@ -2192,6 +2245,14 @@ export default function MatchTracker() {
       onPitchPlayerIds: onPitchIds,
       type,
       gameState,
+      // Desnormalizada en el propio evento para que sea autodescriptivo: si
+      // alguien edita despues la cabecera del partido, el evento sigue
+      // diciendo con que orientacion se registro. undefined en partidos que
+      // no tienen saque inicial registrado — nunca se elige un lado por
+      // defecto.
+      attackDirection:
+        attackDirection(matchData.teamDefendsAtKickoff, matchData.period, isOpponentEvent) ??
+        undefined,
       ...metadata,
       metadata: {
         ...metadata?.metadata,
@@ -2942,7 +3003,7 @@ export default function MatchTracker() {
                 const total = saves + goals;
 
                 return (
-                  <div key={z} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
+                  <div key={z} title={formatGoalZoneLabel(z) ?? undefined} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
                     {total > 0 && (
                       <div className="flex flex-col items-center justify-center leading-none gap-0.5">
                         <span className={`text-[11px] font-black ${textColor} drop-shadow-sm`}>{total}</span>
@@ -2954,7 +3015,8 @@ export default function MatchTracker() {
                         )}
                       </div>
                     )}
-                    <div className="absolute bottom-0.5 left-0.5 opacity-20 text-[5px] font-mono text-white">{z}</div>
+                    {/* Etiqueta accesible; el codigo interno G1-G9 no se imprime. */}
+                    <span className="sr-only">{formatGoalZoneLabel(z)}</span>
                   </div>
                 );
               })}
@@ -3134,7 +3196,7 @@ export default function MatchTracker() {
           </div>
         );
 
-        const totalPages = allTeamsForPDF.length * 3;
+        const totalPages = allTeamsForPDF.length * 3 + 1;
         let pageCounter = 0;
 
         return (
@@ -3146,7 +3208,7 @@ export default function MatchTracker() {
                 if (!team) return null;
                 return (
                   <>
-                    <Header page={1} total={allTeamsForPDF.length * 3} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
+                    <Header page={1} total={allTeamsForPDF.length * 3 + 1} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3166,7 +3228,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={1} total={allTeamsForPDF.length * 3} />
+                    <Footer page={1} total={allTeamsForPDF.length * 3 + 1} />
                   </>
                 );
               })()}
@@ -3177,7 +3239,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -3204,7 +3266,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 const ACT_COLORS: Record<string, string> = {
                   'Goles':   '#16a34a',
                   'Tiros':   '#2563eb',
@@ -3262,50 +3324,9 @@ export default function MatchTracker() {
                     </div>
                   );
                 };
-                const HeatGrid = ({ events, color, title }: { events: GameEvent[], color: string, title: string }) => {
-                  const rows = ['A','B','C'], cols = ['1','2','3'];
-                  const counts: Record<string, number> = {};
-                  events.forEach((e: any) => { if (e.originGrid) counts[e.originGrid] = (counts[e.originGrid] || 0) + 1; });
-                  const maxC = Math.max(...Object.values(counts) as number[], 1);
-                  const W = 90, H = 70, cW = (W-4)/3, cH = (H-4)/3;
-                  const toRgb: Record<string, string> = {
-                    '#16a34a': '22,163,74', '#2563eb': '37,99,235', '#9333ea': '147,51,234',
-                    '#ea580c': '234,88,12', '#dc2626': '220,38,38', '#0ea5e9': '14,165,233',
-                  };
-                  return (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                      <div style={{ fontSize: 7, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>{title}</div>
-                      <div style={{ fontSize: 7, color: '#94a3b8' }}>{events.length} eventos</div>
-                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ border: '1px solid #e2e8f0', borderRadius: 4, background: '#f8fafc' }}>
-                        {rows.map((r, ri) => cols.map((c, ci) => {
-                          const zId = `${r}${c}`;
-                          const cnt = counts[zId] || 0;
-                          const intensity = cnt / maxC;
-                          const x = 2 + ci * cW, y = 2 + ri * cH;
-                          const rgb = toRgb[color] || '14,165,233';
-                          const fill = cnt === 0 ? '#f8fafc' : `rgba(${rgb},${0.15 + intensity * 0.75})`;
-                          return (
-                            <g key={zId}>
-                              <rect x={x} y={y} width={cW-1} height={cH-1} fill={fill} rx={2} />
-                              {cnt > 0 && <text x={x+cW/2-0.5} y={y+cH/2} textAnchor="middle" dominantBaseline="central" fontSize="8" fontWeight="600" fill={intensity > 0.5 ? 'white' : color}>{cnt}</text>}
-                              <text x={x+2} y={y+cH-2} fontSize="5" fill="#cbd5e1">{zId}</text>
-                            </g>
-                          );
-                        }))}
-                      </svg>
-                    </div>
-                  );
-                };
-                const localEvs = matchData.events.filter((e: any) => !e.metadata?.isOpponent);
-                const rivalEvs = matchData.events.filter((e: any) => !!e.metadata?.isOpponent);
-                const heatMaps = [
-                  { title: 'Goles',          color: '#16a34a', evs: localEvs.filter((e: any) => e.type === ActionType.GOAL) },
-                  { title: 'Tiros',          color: '#2563eb', evs: localEvs.filter((e: any) => e.type === ActionType.SHOT) },
-                  { title: 'Recuperaciones', color: '#9333ea', evs: localEvs.filter((e: any) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION) },
-                  { title: 'Perdidas',       color: '#ea580c', evs: localEvs.filter((e: any) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR) },
-                  { title: 'Goles encajados',color: '#dc2626', evs: rivalEvs.filter((e: any) => e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) },
-                  { title: 'Tiros recibidos',color: '#0ea5e9', evs: rivalEvs.filter((e: any) => e.type === ActionType.SHOT || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH) },
-                ];
+                // Los mapas de zona ya no comparten página con los perfiles
+                // circulares: seis pistas reconocibles no caben legibles aquí,
+                // así que tienen página propia (ver ZoneMapBoard).
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -3326,12 +3347,6 @@ export default function MatchTracker() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 20 }}>
                       {team.players.map((p: Player) => <DonutChart key={p.id} p={p} accent={team.accent} />)}
                     </div>
-                    <div style={{ borderTop: '0.5px solid #e2e8f0', paddingTop: 14, marginBottom: 10 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>mapas de zona del partido</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-                        {heatMaps.map((h: any) => <HeatGrid key={h.title} events={h.evs} color={h.color} title={h.title} />)}
-                      </div>
-                    </div>
                     <Footer page={3} total={total} />
                   </>
                 );
@@ -3343,7 +3358,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <Header page={4} total={total} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
@@ -3376,7 +3391,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -3402,7 +3417,7 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3;
+                const total = allTeamsForPDF.length * 3 + 1;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
@@ -3447,6 +3462,30 @@ export default function MatchTracker() {
                   </>
                 );
               })()}
+            </div>
+
+            {/* ── MAPAS DE ZONA: página propia ──────────────────────────
+                Seis pistas reconocibles en 2 columnas × 3 filas. No comparten
+                página con los perfiles circulares porque a ese tamaño dejaban
+                de ser legibles, que es justo lo que esta página viene a
+                resolver. minHeight fija el alto A4: la captura se inserta con
+                addImage(..., pdfW, min(pdfH, pdfW*aspecto)), así que una
+                página más corta quedaría estirada y una más larga comprimida. */}
+            <div
+              ref={pdfPage7Ref}
+              style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
+            >
+              <Header
+                page={totalPages}
+                total={totalPages}
+                mainTeam={matchData.teamName}
+                vsTeam={matchData.opponentName}
+                accent="#3b82f6"
+              />
+              <div style={{ flex: 1 }}>
+                <ZoneMapBoard events={matchData.events} />
+              </div>
+              <Footer page={totalPages} total={totalPages} />
             </div>
           </>
         );
@@ -6403,6 +6442,14 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => setPendingCorner({ isOpponent: pitchView === 'opponent' })}
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-violet-600/30 text-slate-200 hover:text-violet-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                >
+                  <Flag size={16} />
+                  <span className="text-[7px] uppercase">Córner</span>
+                </button>
+
+                <button
                   onClick={() => setPendingAction({ type: ActionType.STEAL, isOpponent: pitchView === 'opponent', step: 'subtype' })}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-cyan-600/30 text-slate-200 hover:text-cyan-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
@@ -6637,6 +6684,65 @@ export default function MatchTracker() {
       {/* MODALS & OVERLAYS */}
       <AnimatePresence>
         {/* Shot Tracking Modal */}
+        {/* ── CÓRNER: solo hay que elegir la esquina ──────────────────── */}
+        {pendingCorner && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">Córner</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {pendingCorner.isOpponent ? matchData.opponentName : matchData.teamName} · ¿desde qué esquina?
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {(["left", "right"] as CornerSide[]).map((side) => (
+                  <button
+                    key={side}
+                    onClick={() => handleCorner(pendingCorner.isOpponent, side)}
+                    className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
+                  >
+                    <Flag size={22} className="text-violet-300" />
+                    <span className="text-[11px] font-black uppercase text-white">
+                      {formatCornerLabel(side)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
+                en cualquiera de las dos partes.
+              </p>
+              <button
+                onClick={() => setPendingCorner(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── FALTA: ubicación OPCIONAL, la falta ya está contabilizada ── */}
+        {pendingFoulLocation && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">Falta registrada</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ¿Dónde se cometió? Es opcional: puedes omitirlo y la falta se mantiene.
+                </p>
+              </div>
+              <PitchZones onSelect={assignFoulLocation} />
+              <button
+                onClick={() => setPendingFoulLocation(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Omitir ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
         {pendingAction && (
           <>
             <motion.div
@@ -6752,7 +6858,7 @@ export default function MatchTracker() {
                 )}
 
                 {/* Set Piece Selector */}
-                {![ActionType.STEAL, ActionType.INTERCEPTION, ActionType.LOSS, ActionType.UNFORCED_ERROR].includes(pendingAction.type as any) && (
+                {acceptsTarget(pendingAction.type) && (
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic block mb-2">
                     ¿Acción desde?
@@ -6792,14 +6898,7 @@ export default function MatchTracker() {
                 {/* Step Indicator */}
                 <div className="flex items-center justify-between px-2">
                   {["Jugador", "Origen", "Portería"].map((label, i) => {
-                    const onlyNeedsOrigin = [
-                      ActionType.STEAL, 
-                      ActionType.INTERCEPTION, 
-                      ActionType.LOSS, 
-                      ActionType.UNFORCED_ERROR
-                    ].includes(pendingAction.type as any);
-
-                    if (label === "Portería" && onlyNeedsOrigin) return null;
+                    if (label === "Portería" && !acceptsTarget(pendingAction.type)) return null;
 
                     const steps: any[] = ["player", "origin", "target"];
                     const currentIdx = steps.indexOf(pendingAction.step);
@@ -6878,14 +6977,7 @@ export default function MatchTracker() {
                       <PitchZones
                         onSelect={(id) => {
                           if (!pendingAction) return;
-                          const onlyNeedsOrigin = [
-                            ActionType.STEAL, 
-                            ActionType.INTERCEPTION, 
-                            ActionType.LOSS, 
-                            ActionType.UNFORCED_ERROR
-                          ].includes(pendingAction.type as any);
-
-                          if (onlyNeedsOrigin) {
+                          if (!acceptsTarget(pendingAction.type)) {
                             const current = pendingAction;
                             setPendingAction(null); // clear immediately
                             handleAction(
@@ -7623,14 +7715,17 @@ const GoalMap = ({
               whileHover={{ scale: 0.98 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => onSelect(id)}
+              aria-label={formatGoalZoneLabel(id) ?? undefined}
+              title={formatGoalZoneLabel(id) ?? undefined}
               className={`relative rounded-md transition-all border flex items-center justify-center
                 ${selected === id 
                   ? "bg-red-500/90 border-white shadow-[0_0_20px_rgba(239,68,68,0.6)] z-10 scale-105" 
                   : "bg-white/[0.03] border-white/10 hover:bg-red-500/20 hover:border-white/30"
                 }`}
             >
-              <span className={`text-[10px] font-black font-mono transition-opacity ${selected === id ? "text-white opacity-100" : "text-slate-500 opacity-40 group-hover:opacity-100"}`}>
-                {id}
+              {/* Etiqueta en lenguaje natural: el usuario no debe leer G1-G9. */}
+              <span className={`text-[8px] font-black uppercase leading-tight text-center px-1 transition-opacity ${selected === id ? "text-white opacity-100" : "text-slate-400 opacity-60 group-hover:opacity-100"}`}>
+                {formatGoalZoneLabel(id)}
               </span>
             </motion.button>
           );
@@ -7658,6 +7753,16 @@ const GoalMap = ({
   </div>
 );
 
+/** Acentos en hexadecimal: FutsalPitch calcula la intensidad, no usa clases. */
+const ACCENT_HEX: Record<string, string> = {
+  blue: "#3b82f6",
+  red: "#ef4444",
+  green: "#22c55e",
+  orange: "#f97316",
+  cyan: "#22d3ee",
+  amber: "#f59e0b",
+};
+
 // component logic for the maps
 const FutsalHeatMap = ({
   events,
@@ -7673,14 +7778,19 @@ const FutsalHeatMap = ({
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const gridCounts: Record<string, number> = {};
   events.forEach((ev) => {
-    if (ev.originGrid) {
-      gridCounts[ev.originGrid] = (gridCounts[ev.originGrid] || 0) + 1;
+    // Normalizado a mayúsculas: los ids de sector se comparan en mayúsculas
+    // en todo el sistema y algún dato antiguo puede venir en minúscula.
+    const zone = typeof ev.originGrid === "string" ? ev.originGrid.toUpperCase() : null;
+    if (zone) {
+      gridCounts[zone] = (gridCounts[zone] || 0) + 1;
     }
   });
 
   const maxCount = Math.max(...Object.values(gridCounts), 1);
-  const rows = ["A", "B", "C"];
-  const cols = ["1", "2", "3"];
+  // ¿Partido histórico? Solo si NO hay ningún sector del sistema nuevo.
+  const isLegacyData =
+    !events.some((e) => isZone12Id(e.originGrid)) &&
+    events.some((e) => isLegacyZoneId(e.originGrid));
 
   const colors = {
     blue: "bg-blue-500",
@@ -7727,55 +7837,19 @@ const FutsalHeatMap = ({
         </span>
       </div>
 
-      <div className="relative aspect-[2/3] w-full max-w-[280px] mx-auto bg-slate-900/50 rounded-[2.5rem] border-4 border-slate-800 overflow-hidden shadow-2xl backdrop-blur-md">
-        {/* Pitch markings */}
-        <div className="absolute inset-0 pointer-events-none opacity-20">
-          <div className="absolute top-1/2 w-full h-[2px] bg-white -translate-y-1/2" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 border-2 border-white rounded-full" />
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-b-2 border-white rounded-b-3xl" />
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-12 border-x-2 border-t-2 border-white rounded-t-3xl" />
-          <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white rounded-full" />
-          <div className="absolute bottom-[15%] left-1/2 -translate-x-1/2 w-1 h-1 bg-white rounded-full" />
-        </div>
-
-        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-3 gap-3">
-          {rows.map((r) =>
-            cols.map((c) => {
-              const id = `${r}${c}`;
-              const count = gridCounts[id] || 0;
-              const intensity = count / maxCount;
-              const isSelected = selectedZone === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => setSelectedZone(isSelected ? null : id)}
-                  className={`rounded-2xl transition-all border flex flex-col items-center justify-center relative overflow-hidden backdrop-blur-sm ${borders[colorScheme]} ${isSelected ? 'border-white ring-4 ring-white/10 scale-[1.05] z-20 shadow-2xl' : 'hover:bg-white/5'}`}
-                >
-                  {count > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className={`absolute inset-0 ${colors[colorScheme]}`}
-                      style={{ opacity: intensity * 0.5 + 0.1 }}
-                    />
-                  )}
-                  <span className={`relative z-10 text-[9px] font-black uppercase mb-1 transition-colors ${isSelected ? 'text-white' : 'text-slate-500'}`}>
-                    {id}
-                  </span>
-                  {count > 0 && (
-                    <span className="relative z-10 text-xl font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
-                      {count}
-                    </span>
-                  )}
-                  {isSelected && (
-                    <div className="absolute inset-0 bg-white/10" />
-                  )}
-                </button>
-              );
-            }),
-          )}
-        </div>
-      </div>
+      {/* Pista real, no una matriz abstracta. El modo se decide por los datos
+          del propio partido: 12 zonas si son nuevos, rejilla de 9 celdas si
+          son históricos — sin convertir nunca de un sistema al otro. */}
+      <FutsalPitch
+        mode={isLegacyData ? "legacy3x3" : "zone12"}
+        theme="dark"
+        counts={gridCounts}
+        onSelect={(id) => setSelectedZone(selectedZone === id ? null : id)}
+        selected={selectedZone ?? undefined}
+        accent={ACCENT_HEX[colorScheme]}
+        maxWidth={320}
+        emptyLabel="Sin acciones ubicadas"
+      />
 
       {/* Selected Zone Details */}
       <AnimatePresence>
@@ -7789,7 +7863,7 @@ const FutsalHeatMap = ({
             <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col gap-4 backdrop-blur-xl">
               <div className="flex items-center justify-between">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Detalle Zona {selectedZone}</span>
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">Detalle · {formatAnyZoneLabel(selectedZone)}</span>
                   <span className="text-[8px] font-bold text-slate-500 uppercase italic">Protagonistas de esta zona</span>
                 </div>
                 <button onClick={() => setSelectedZone(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
@@ -7916,8 +7990,9 @@ const GoalHeatMap = ({
                     style={{ opacity: intensity * 0.5 + 0.1 }}
                   />
                 )}
-                <span className={`relative z-10 text-[8px] font-black uppercase transition-colors ${isSelected ? 'text-white' : 'text-slate-500'}`}>
-                  {id}
+                {/* Etiqueta legible; el usuario no debe leer G1-G9. */}
+                <span className={`relative z-10 text-[7px] font-black uppercase leading-tight text-center px-0.5 transition-colors ${isSelected ? 'text-white' : 'text-slate-500'}`}>
+                  {formatGoalZoneLabel(id)}
                 </span>
                 {count > 0 && (
                   <span className="relative z-10 text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
@@ -7945,7 +8020,7 @@ const GoalHeatMap = ({
             <div className="bg-slate-900/80 border border-slate-700 rounded-[2rem] p-5 shadow-2xl backdrop-blur-2xl">
               <div className="flex items-center justify-between mb-4 px-1">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">A puerta: {selectedZone}</span>
+                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">A puerta: {formatGoalZoneLabel(selectedZone) ?? "—"}</span>
                   <span className="text-[7px] font-bold text-slate-500 uppercase italic mt-0.5">Efectividad por jugador</span>
                 </div>
                 <button onClick={() => setSelectedZone(null)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
@@ -7974,71 +8049,31 @@ const GoalHeatMap = ({
   );
 };
 
+/**
+ * Selector de zona de origen sobre la pista real de 12 zonas.
+ *
+ * La pista se dibuja SIEMPRE con la portería propia a la izquierda y la rival
+ * a la derecha, desde la perspectiva del equipo que ejecuta la acción. Por eso
+ * el toque se traduce directamente al sector (`Z1L`-`Z4R`) sin ninguna
+ * transformación: no hay espejado, no hay rotación, y por tanto no hay forma
+ * de que captura y análisis se desalineen como ocurría con la rejilla A1-C3.
+ */
 const PitchZones = ({
   onSelect,
   selected,
 }: {
   onSelect: (id: string) => void;
   selected?: string;
-}) => {
-  const rows = ["A", "B", "C"];
-  const cols = ["1", "2", "3"];
-  return (
-    <div className="relative aspect-[3/2] w-full max-w-[300px] mx-auto rounded-xl border-4 border-slate-800 overflow-hidden shadow-2xl"
-      style={{ background: 'linear-gradient(90deg, #15803d 0%, #166534 50%, #15803d 100%)' }}>
-      {/* Franjas de césped (verticales) */}
-      <div className="absolute inset-0 pointer-events-none">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="absolute top-0 bottom-0" style={{ left: `${(i / 6) * 100}%`, width: `${100 / 6}%`, background: i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'transparent' }} />
-        ))}
-      </div>
-      {/* Marcas de la pista realistas (horizontal) */}
-      <div className="absolute inset-0 pointer-events-none opacity-60">
-        {/* Línea perimetral */}
-        <div className="absolute inset-2 border-2 border-white/70 rounded-sm" />
-        {/* Línea Medio Campo (vertical) */}
-        <div className="absolute left-1/2 top-2 bottom-2 w-[2px] bg-white/70 -translate-x-1/2" />
-        {/* Círculo Central */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 border-2 border-white/70 rounded-full" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-        {/* Áreas de portería (semicírculos 6m) izquierda/derecha */}
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 h-24 w-12 border-y-2 border-r-2 border-white/70 rounded-r-[3rem]" />
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 h-24 w-12 border-y-2 border-l-2 border-white/70 rounded-l-[3rem]" />
-        {/* Porterías */}
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
-        <div className="absolute right-1 top-1/2 -translate-y-1/2 h-10 w-1.5 border-2 border-white/80 bg-white/20" />
-        {/* Punto de Penalti */}
-        <div className="absolute left-[15%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-        <div className="absolute right-[15%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/70 rounded-full" />
-      </div>
-
-      <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-1 gap-1">
-        {rows.map((r) =>
-          cols.map((c) => {
-            const id = `${r}${c}`;
-            return (
-              <button
-                key={id}
-                onClick={() => onSelect(id)}
-                className={`rounded-lg transition-all border flex items-center justify-center font-mono text-[10px] font-black uppercase
-                ${
-                  selected === id
-                    ? "bg-blue-600/70 border-white text-white scale-[0.98] z-10 shadow-[0_0_15px_rgba(37,99,235,0.6)]"
-                    : "bg-black/10 border-white/20 text-white/80 hover:bg-blue-500/30 hover:border-white/50 hover:text-white"
-                }
-              `}
-              >
-                <span className="bg-black/50 px-2 py-1 rounded backdrop-blur-md">
-                  {id}
-                </span>
-              </button>
-            );
-          }),
-        )}
-      </div>
-    </div>
-  );
-};
+}) => (
+  <FutsalPitch
+    mode="zone12"
+    theme="dark"
+    onSelect={onSelect}
+    selected={selected}
+    accent="#2563eb"
+    maxWidth={340}
+  />
+);
 
 const PlayerSelector = ({
   players,

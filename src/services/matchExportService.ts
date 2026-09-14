@@ -1,4 +1,6 @@
 import { MatchData, Period } from "../types/futsal";
+import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
+import { formatDestinationLabel } from "../utils/goalZones";
 import { generateMatchReport } from "./matchReportService";
 
 const PERIOD_LABEL: Record<number, string> = {
@@ -19,7 +21,9 @@ function timeLabel(ms: number): string {
 }
 
 export function buildActionsCsv(matchData: MatchData): string {
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "resultado", "x", "y", "zona", "destino"];
+  // "zona" y "destino" conservan el identificador interno para poder cruzar
+  // datos; "zona_texto" y "destino_texto" son los legibles.
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -37,7 +41,9 @@ export function buildActionsCsv(matchData: MatchData): string {
         md.x ?? md.originX ?? "",
         md.y ?? md.originY ?? "",
         e.originGrid || md.zone || "",
+        formatAnyZoneLabel(e.originGrid),
         e.destinationGrid || "",
+        formatDestinationLabel(e.destinationGrid ?? md.zone),
       ].map(csvCell).join(",");
     });
   return "\uFEFF" + [header.map(csvCell).join(","), ...rows].join("\n");
@@ -93,7 +99,7 @@ export function buildPrintableReportHtml(matchData: MatchData): string {
   const players = report.playersUsed.map((p) => `
     <tr><td>${p.number}</td><td>${esc(p.name)}</td><td>${p.totLabel}</td><td>${p.rotLabel || "—"}</td><td>${p.rotationsCount}</td><td>${p.goals}</td><td>${p.attempts}</td><td>${p.steals + p.interceptions}</td><td>${p.losses + p.errors}</td></tr>`).join("");
   const zones = report.zoneDistribution.length
-    ? report.zoneDistribution.map((z) => `<span class="pill">${esc(z.zone)}: ${z.count}</span>`).join("")
+    ? report.zoneDistribution.map((z) => `<span class="pill">${esc(z.label)}: ${z.count}</span>`).join("")
     : "<span>Sin acciones con zona registrada.</span>";
   const conversion = report.teamTotals.goalConversionPct === null ? "—" : `${report.teamTotals.goalConversionPct}%`;
   const accuracy = report.teamTotals.shotAccuracyPct === null ? "—" : `${report.teamTotals.shotAccuracyPct}%`;

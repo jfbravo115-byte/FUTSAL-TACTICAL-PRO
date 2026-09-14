@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Period, Role, ActionType, GoalieAction, MatchData, Player, GameEvent } from "../types/futsal";
+import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
+import { ZONE_12_IDS, formatZoneLabel } from "../utils/fieldZones";
 
 const toJpegMock = vi.fn(async (_node?: HTMLElement) => "data:image/jpeg;base64," + "A".repeat(2000));
 vi.mock("html-to-image", () => ({
@@ -85,22 +87,23 @@ function matchData(overrides: Partial<MatchData> = {}): MatchData {
   };
 }
 
-// Helpers para leer el mapa de origen del portero de forma robusta. Cada
-// celda de zona SIEMPRE renderiza un <span> con la etiqueta de la zona
-// (p.ej. "A1"), y opcionalmente un segundo <span> hermano con el conteo
-// (solo si count>0). OJO: no se puede comprobar el conteo buscando el
-// dígito como substring del textContent de la celda, porque etiquetas
-// como "A1"/"C1" ya contienen el dígito "1" — hay que distinguir el span
-// de conteo del span de etiqueta explícitamente.
+// Helpers para leer el mapa de origen del portero.
+//
+// FASE 3: las celdas ya NO muestran el identificador interno (A1, Z2C...).
+// Se localizan por su etiqueta accesible, que es exactamente el texto que ve
+// el usuario, y el contenido de la celda es únicamente el conteo (vacío si
+// es cero). Esto es deliberado: si algún día volviera a colarse un código
+// interno en pantalla, estos tests lo detectarían por el test de más abajo.
 function findZoneCell(pageNode: HTMLElement, zoneId: string): HTMLElement {
-  const labelSpan = Array.from(pageNode.querySelectorAll("span")).find((el) => el.textContent === zoneId);
-  if (!labelSpan) throw new Error(`zona ${zoneId} no encontrada en la página`);
-  return labelSpan.parentElement as HTMLElement;
+  const label = formatAnyZoneLabel(zoneId);
+  const cell = pageNode.querySelector(`[aria-label="${label}"]`);
+  if (!cell) throw new Error(`zona ${zoneId} ("${label}") no encontrada en la página`);
+  return cell as HTMLElement;
 }
-function zoneCellCount(cell: HTMLElement, zoneId: string): number {
-  const spans = Array.from(cell.querySelectorAll("span"));
-  const countSpan = spans.find((s) => s.textContent !== zoneId);
-  return countSpan ? Number(countSpan.textContent) : 0;
+
+function zoneCellCount(cell: HTMLElement): number {
+  const text = (cell.textContent || "").trim();
+  return text ? Number(text) : 0;
 }
 
 let windowOpenSpy: ReturnType<typeof vi.spyOn>;
@@ -140,7 +143,7 @@ describe("exportMatchReportPdf", () => {
   it("genera el PDF con datos completos (equipo con jugadores, zonas, goles)", async () => {
     const md = matchData({
       players: [player(), player({ id: "gk1", number: 1, role: Role.GOALKEEPER })],
-      events: [event({ type: ActionType.GOAL, playerIds: ["p1"], originGrid: "B2" })],
+      events: [event({ type: ActionType.GOAL, playerIds: ["p1"], originGrid: "Z2C" })],
     });
     await exportMatchReportPdf(md);
     expect(pdfSaveMock).toHaveBeenCalledTimes(1);
@@ -280,7 +283,7 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
         // Evento del RIVAL: no lleva "gk1" en playerIds. gk.events (filtrado
         // a playerIds.includes) NO incluiría este evento — el mapa de
         // origen debe recibir matchData.events completo para contabilizarlo.
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B2", metadata: { isOpponent: true } }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z2C", metadata: { isOpponent: true } }),
       ],
     });
     await exportMatchReportPdf(md);
@@ -288,12 +291,8 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
     // eventos relevantes de tipo GOAL/RED_CARD/GOAL_CONCEDED -> sin página
     // de eventos adicional).
     const gkPageNode = toJpegMock.mock.calls[2][0] as HTMLElement;
-    const zoneLabelNode = Array.from(gkPageNode.querySelectorAll("span")).find((el) => el.textContent === "B2");
-    expect(zoneLabelNode).toBeTruthy();
-    // El conteo (span hermano dentro de la misma celda) debe reflejar el
-    // disparo rival contabilizado.
-    const cell = zoneLabelNode!.parentElement!;
-    expect(cell.textContent).toContain("1");
+    // El conteo de la celda debe reflejar el disparo rival contabilizado.
+    expect(zoneCellCount(findZoneCell(gkPageNode, "Z2C"))).toBe(1);
   });
 
   it("sin ningún evento con originGrid relevante, el mapa de origen muestra 'Sin datos registrados'", async () => {
@@ -321,19 +320,19 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
         player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
       ],
       events: [
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "A1", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
-        event({ type: ActionType.SHOT, playerIds: ["rival-2"], originGrid: "C3", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk2"] }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z1L", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-2"], originGrid: "Z3R", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk2"] }),
       ],
     });
     await exportGoalkeeperReportPdf(md); // 1 página por portero, en orden de dorsal: gk1, gk2
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
     const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement;
 
-    expect(zoneCellCount(findZoneCell(gk1Page, "A1"), "A1")).toBe(1);
-    expect(zoneCellCount(findZoneCell(gk1Page, "C3"), "C3")).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z1L"))).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z3R"))).toBe(0);
 
-    expect(zoneCellCount(findZoneCell(gk2Page, "C3"), "C3")).toBe(1);
-    expect(zoneCellCount(findZoneCell(gk2Page, "A1"), "A1")).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk2Page, "Z3R"))).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk2Page, "Z1L"))).toBe(0);
   });
 
   // 2. Portero sustituido (isOnPitch=false ahora), pero el evento
@@ -345,12 +344,12 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
         player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
       ],
       events: [
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B1", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z2L", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
       ],
     });
     await exportGoalkeeperReportPdf(md);
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement; // sustituido, pero el evento es suyo
-    expect(zoneCellCount(findZoneCell(gk1Page, "B1"), "B1")).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z2L"))).toBe(1);
   });
 
   // 3. Portero actualmente en pista (isOnPitch=true), pero un evento
@@ -363,12 +362,12 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
       ],
       events: [
         // Evento de la 1ª parte, cuando jugaba gk1 — gk2 NO estaba en pista.
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "A2", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z1C", metadata: { isOpponent: true }, onPitchPlayerIds: ["gk1"] }),
       ],
     });
     await exportGoalkeeperReportPdf(md);
     const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement; // isOnPitch=true actualmente
-    expect(zoneCellCount(findZoneCell(gk2Page, "A2"), "A2")).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk2Page, "Z1C"))).toBe(0);
   });
 
   // 4. Evento propio del portero (playerIds lo incluye) sigue contando
@@ -380,12 +379,12 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
         player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: false, individualTimeSeconds: 600 }),
       ],
       events: [
-        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], originGrid: "C2" }),
+        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], originGrid: "Z3C" }),
       ],
     });
     await exportGoalkeeperReportPdf(md);
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
-    expect(zoneCellCount(findZoneCell(gk1Page, "C2"), "C2")).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z3C"))).toBe(1);
   });
 
   // 5. Legacy sin onPitchPlayerIds + un ÚNICO portero relevante: sin
@@ -394,12 +393,12 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
     const md = matchData({
       players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: true })],
       events: [
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "B3", metadata: { isOpponent: true } }), // sin onPitchPlayerIds
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z2R", metadata: { isOpponent: true } }), // sin onPitchPlayerIds
       ],
     });
     await exportGoalkeeperReportPdf(md);
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
-    expect(zoneCellCount(findZoneCell(gk1Page, "B3"), "B3")).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z2R"))).toBe(1);
   });
 
   // 6. Legacy sin onPitchPlayerIds + DOS porteros: ambiguo -> NO se
@@ -411,14 +410,14 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
         player({ id: "gk2", role: Role.GOALKEEPER, number: 2, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
       ],
       events: [
-        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "C1", metadata: { isOpponent: true } }), // sin onPitchPlayerIds, ambiguo
+        event({ type: ActionType.SHOT, playerIds: ["rival-1"], originGrid: "Z3L", metadata: { isOpponent: true } }), // sin onPitchPlayerIds, ambiguo
       ],
     });
     await exportGoalkeeperReportPdf(md);
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
     const gk2Page = toJpegMock.mock.calls[1][0] as HTMLElement;
-    expect(zoneCellCount(findZoneCell(gk1Page, "C1"), "C1")).toBe(0);
-    expect(zoneCellCount(findZoneCell(gk2Page, "C1"), "C1")).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z3L"))).toBe(0);
+    expect(zoneCellCount(findZoneCell(gk2Page, "Z3L"))).toBe(0);
   });
 });
 
@@ -587,5 +586,185 @@ describe("cleanup del contenedor fuera de pantalla ante errores", () => {
     });
     await expect(exportGoalkeeperReportPdf(md)).rejects.toThrow(/guardado porteros falló/);
     expect(document.body.childElementCount).toBe(before);
+  });
+});
+
+// ── FASE 3: PISTA DE 12 ZONAS EN LOS INFORMES ─────────────────────────
+describe("Informes sobre la pista de 12 zonas", () => {
+  /** Texto completo de la página de resumen/zonas (índice 0). */
+  async function summaryText(md: MatchData): Promise<string> {
+    await exportMatchReportPdf(md);
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    return page.textContent || "";
+  }
+
+  it("dibuja la pista con los 12 sectores y sus etiquetas de usuario", async () => {
+    const md = matchData({
+      events: [event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2C" })],
+    });
+    await exportMatchReportPdf(md);
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+
+    for (const id of ZONE_12_IDS) {
+      const cell = page.querySelector(`[aria-label="${formatZoneLabel(id)}"]`);
+      expect(cell).toBeTruthy();
+    }
+    expect(zoneCellCount(findZoneCell(page, "Z2C"))).toBe(1);
+  });
+
+  it("NINGÚN código interno de zona llega al informe", async () => {
+    const md = matchData({
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["p1"], originGrid: "Z1L", destinationGrid: "G5" }),
+        event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z3R" }),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C" }),
+      ],
+    });
+    const text = await summaryText(md);
+
+    // Ni la rejilla histórica, ni los sectores nuevos, ni la portería.
+    expect(text).not.toMatch(/\b[ABC][123]\b/);
+    expect(text).not.toMatch(/Z[1-4][LCR]/);
+    expect(text).not.toMatch(/\bG[1-9]\b/);
+    // Y sí las etiquetas legibles.
+    expect(text).toContain("Zona 1 · izquierda");
+  });
+
+  it("incluye la lectura textual agregada de pérdidas por zona", async () => {
+    const md = matchData({
+      events: [
+        event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2R" }),
+        event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2R" }),
+        event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2C" }),
+      ],
+    });
+    expect(await summaryText(md)).toContain("Zona 2: 3 pérdidas — 2 derecha, 1 centro");
+  });
+
+  it("informa de los córners por lado, sin códigos", async () => {
+    const md = matchData({
+      events: [
+        event({ type: ActionType.CORNER, originGrid: "Z4L", metadata: { cornerSide: "left" } }),
+        event({ type: ActionType.CORNER, originGrid: "Z4L", metadata: { cornerSide: "left" } }),
+        event({ type: ActionType.CORNER, originGrid: "Z4R", metadata: { cornerSide: "right" } }),
+      ],
+    });
+    const text = await summaryText(md);
+    expect(text).toContain("Córners: 3 — izquierda 2 · derecha 1");
+    expect(text).not.toMatch(/Z4[LR]/);
+  });
+
+  it("declara las faltas sin ubicación en vez de asignarles una zona", async () => {
+    const md = matchData({
+      events: [
+        event({ type: ActionType.FOUL, playerIds: ["p1"] }), // sin originGrid
+        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z3C" }),
+      ],
+    });
+    const text = await summaryText(md);
+    expect(text).toContain("sin ubicación registrada");
+    expect(text).toContain("Zona 3: 1 falta — 1 centro");
+  });
+
+  it("un partido histórico se dibuja en su rejilla original, nunca en las 12 zonas", async () => {
+    const md = matchData({
+      events: [event({ type: ActionType.SHOT, playerIds: ["p1"], originGrid: "B2" })],
+    });
+    await exportMatchReportPdf(md);
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+
+    // Su celda existe, con etiqueta neutra...
+    expect(page.querySelector('[aria-label="Franja 2 · banda central"]')).toBeTruthy();
+    // ...y NINGUNA celda del sistema nuevo se ha creado.
+    for (const id of ZONE_12_IDS) {
+      expect(page.querySelector(`[aria-label="${formatZoneLabel(id)}"]`)).toBeNull();
+    }
+    // Y se advierte de que la perspectiva no se registró.
+    expect(page.textContent || "").toContain("perspectiva de ataque no registrada");
+  });
+
+  it("el mapa de origen del portero usa la pista completa, no una rejilla abstracta", async () => {
+    const md = matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOnPitch: true })],
+      events: [
+        event({
+          type: ActionType.SHOT,
+          playerIds: ["rival-1"],
+          originGrid: "Z3C",
+          metadata: { isOpponent: true },
+          onPitchPlayerIds: ["gk1"],
+        }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    const gkPage = toJpegMock.mock.calls[2][0] as HTMLElement;
+
+    const text = gkPage.textContent || "";
+    expect(zoneCellCount(findZoneCell(gkPage, "Z3C"))).toBe(1);
+
+    // Las dos porterías se rotulan, para que el mapa responda de un vistazo a
+    // "¿desde dónde me tiran?": por dónde progresa el ataque y hacia dónde
+    // acaba el tiro.
+    //
+    // OJO con la semántica: los sectores están normalizados a la perspectiva
+    // del ATACANTE, así que el extremo derecho (Zona 4) es la portería que
+    // defiende ESTE portero. Rotularla "Portería rival" — como esperaba la
+    // primera versión de este test — le diría al entrenador justo lo
+    // contrario de lo que ocurre.
+    expect(text).toContain("Inicio del ataque");
+    expect(text).toContain("Portería defendida");
+    expect(text).not.toContain("Portería rival");
+
+    // Y sin códigos internos de ningún sistema.
+    expect(text).not.toMatch(/Z[1-4][LCR]/);
+    expect(text).not.toMatch(/\b[ABC][123]\b/);
+    expect(text).not.toMatch(/\bG[1-9]\b/);
+  });
+
+  it("la cabecera del portero y su mapa no se contradicen", async () => {
+    // Un SHOT rival detenido se registra SIN subtipo. Antes pintaba un
+    // círculo verde en el mapa mientras la cabecera decía "Blocajes 0 ·
+    // Despejes 0". Ahora cuenta como parada sin subtipo, y se declara.
+    const md = matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOnPitch: true })],
+      events: [
+        event({
+          type: ActionType.SHOT,
+          playerIds: ["rival-1", "gk1"],
+          originGrid: "Z4C",
+          destinationGrid: "G5",
+          metadata: { isOpponent: true },
+          onPitchPlayerIds: ["gk1"],
+        }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    const gkPage = toJpegMock.mock.calls[2][0] as HTMLElement;
+    const text = gkPage.textContent || "";
+
+    expect(text).toContain("Paradas");
+    expect(text).toContain("sin subtipo registrado");
+    // No se inventa el subtipo.
+    expect(text).toContain("blocajes 0");
+    expect(text).toContain("despejes 0");
+  });
+});
+
+describe("Faltas recibidas", () => {
+  it("espeja la zona del que comete a la del que recibe, sin tocar el evento", async () => {
+    // El rival comete una falta en SU Zona 1 · izquierda. Para mi equipo es
+    // una falta recibida en MI Zona 4 · derecha.
+    const md = matchData({
+      events: [
+        event({ type: ActionType.FOUL, playerIds: ["rival-1"], originGrid: "Z1L", metadata: { isOpponent: true } }),
+      ],
+    });
+    await exportMatchReportPdf(md);
+    const text = (toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "";
+
+    expect(text).toContain("Faltas recibidas");
+    expect(text).toContain("Zona 4: 1 falta — 1 derecha");
+    // El evento original conserva su zona tal cual se registró.
+    expect(md.events[0].originGrid).toBe("Z1L");
   });
 });

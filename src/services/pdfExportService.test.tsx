@@ -699,10 +699,26 @@ describe("Informes sobre la pista de 12 zonas", () => {
     await exportMatchReportPdf(md);
     const gkPage = toJpegMock.mock.calls[2][0] as HTMLElement;
 
+    const text = gkPage.textContent || "";
     expect(zoneCellCount(findZoneCell(gkPage, "Z3C"))).toBe(1);
-    expect(gkPage.textContent || "").not.toMatch(/Z[1-4][LCR]/);
-    // Las porterías se rotulan: el mapa responde a "¿desde dónde me tiran?".
-    expect(gkPage.textContent || "").toContain("Portería rival");
+
+    // Las dos porterías se rotulan, para que el mapa responda de un vistazo a
+    // "¿desde dónde me tiran?": por dónde progresa el ataque y hacia dónde
+    // acaba el tiro.
+    //
+    // OJO con la semántica: los sectores están normalizados a la perspectiva
+    // del ATACANTE, así que el extremo derecho (Zona 4) es la portería que
+    // defiende ESTE portero. Rotularla "Portería rival" — como esperaba la
+    // primera versión de este test — le diría al entrenador justo lo
+    // contrario de lo que ocurre.
+    expect(text).toContain("Inicio del ataque");
+    expect(text).toContain("Portería defendida");
+    expect(text).not.toContain("Portería rival");
+
+    // Y sin códigos internos de ningún sistema.
+    expect(text).not.toMatch(/Z[1-4][LCR]/);
+    expect(text).not.toMatch(/\b[ABC][123]\b/);
+    expect(text).not.toMatch(/\bG[1-9]\b/);
   });
 
   it("la cabecera del portero y su mapa no se contradicen", async () => {

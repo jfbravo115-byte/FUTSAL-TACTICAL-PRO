@@ -216,12 +216,38 @@ function PitchMarkings({ tokens }: { tokens: Tokens }) {
   );
 }
 
+/** Textos de los dos extremos de la pista. */
+export type GoalCaptionTexts = { left: string; right: string };
+
+/**
+ * Rótulo por defecto: vale para los mapas de acciones de UN equipo, donde el
+ * sector está normalizado a la perspectiva de ese mismo equipo.
+ */
+export const DEFAULT_GOAL_CAPTIONS: GoalCaptionTexts = {
+  left: "Portería propia",
+  right: "Portería rival",
+};
+
 /**
  * Rótulos de las dos porterías. Van FUERA del recuadro de la pista (que
  * recorta su contenido) y en horizontal: el texto vertical se rasteriza de
  * forma poco fiable al generar el PDF.
+ *
+ * Los textos son configurables porque "propia/rival" depende de QUIÉN es el
+ * sujeto del mapa. En el mapa de origen de tiro de un portero, por ejemplo,
+ * los sectores están normalizados a la perspectiva del ATACANTE, así que la
+ * portería de la derecha es la que defiende ese portero — llamarla "rival"
+ * ahí sería exactamente al revés de lo que lee el entrenador.
  */
-function GoalCaptions({ tokens, compact }: { tokens: Tokens; compact: boolean }) {
+function GoalCaptions({
+  tokens,
+  compact,
+  captions,
+}: {
+  tokens: Tokens;
+  compact: boolean;
+  captions: GoalCaptionTexts;
+}) {
   const base: React.CSSProperties = {
     fontSize: compact ? 7 : 9,
     fontWeight: 900,
@@ -231,8 +257,8 @@ function GoalCaptions({ tokens, compact }: { tokens: Tokens; compact: boolean })
   };
   return (
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, gap: 8 }}>
-      <span style={base}>◀ Portería propia</span>
-      <span style={base}>Portería rival ▶</span>
+      <span style={base}>◀ {captions.left}</span>
+      <span style={base}>{captions.right} ▶</span>
     </div>
   );
 }
@@ -308,8 +334,15 @@ export type FutsalPitchProps = {
   corners?: Partial<Record<CornerSide, number>>;
   accent?: string;
   compact?: boolean;
-  /** Muestra los rótulos "Portería propia / rival". Sin sentido en legacy. */
+  /** Muestra los rótulos de las porterías. Sin sentido en legacy. */
   showGoalCaptions?: boolean;
+  /**
+   * Textos de los dos extremos. Por defecto "Portería propia / rival", que es
+   * lo correcto cuando el mapa representa las acciones del mismo equipo desde
+   * cuya perspectiva están normalizados los sectores. Los mapas cuyo sujeto es
+   * otro (el de origen de tiro de un portero) deben pasar los suyos.
+   */
+  goalCaptions?: GoalCaptionTexts;
   /** Texto cuando no hay ningún dato que representar. */
   emptyLabel?: string;
   className?: string;
@@ -326,6 +359,7 @@ export function FutsalPitch({
   accent = "#22d3ee",
   compact = false,
   showGoalCaptions,
+  goalCaptions = DEFAULT_GOAL_CAPTIONS,
   emptyLabel = "Sin datos registrados",
   className,
   maxWidth,
@@ -336,7 +370,12 @@ export function FutsalPitch({
 
   // En legacy no se rotulan las porterías: la perspectiva no se registró y
   // afirmar cuál era la propia sería inventarla.
-  const withCaptions = showGoalCaptions ?? (!isLegacy && !compact);
+  //
+  // `compact` NO las suprime. Antes sí lo hacía, y el efecto era que el mapa
+  // que más necesita identificar las porterías — el de origen de tiro del
+  // portero, que se dibuja compacto — era justamente el único que se quedaba
+  // sin ellas. Compacto solo reduce el tamaño del texto.
+  const withCaptions = showGoalCaptions ?? !isLegacy;
 
   const cells: { id: string; label: string }[] = isLegacy
     ? LEGACY_ROWS.flatMap((row) =>
@@ -448,7 +487,7 @@ export function FutsalPitch({
         )}
       </div>
 
-      {withCaptions && <GoalCaptions tokens={tokens} compact={compact} />}
+      {withCaptions && <GoalCaptions tokens={tokens} compact={compact} captions={goalCaptions} />}
 
       {isLegacy && (
         <div style={{ fontSize: compact ? 7 : 9, color: tokens.notice, marginTop: 4, textAlign: "center" }}>

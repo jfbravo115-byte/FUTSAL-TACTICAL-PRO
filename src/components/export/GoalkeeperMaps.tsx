@@ -115,6 +115,10 @@ export function GoalkeeperOriginMap({
     }
   }
 
+  // Rótulos propios de ESTE mapa. Los sectores están normalizados a la
+  // perspectiva del ATACANTE, así que el extremo derecho (Zona 4) es la
+  // portería que defiende este portero, no la del rival. Con los rótulos por
+  // defecto el entrenador leería justo lo contrario de lo que ocurre.
   return (
     <FutsalPitch
       mode={isLegacy ? "legacy3x3" : "zone12"}
@@ -123,6 +127,7 @@ export function GoalkeeperOriginMap({
       accent={isOpponent ? "#ef4444" : "#3b82f6"}
       compact={compact}
       maxWidth={compact ? 200 : 300}
+      goalCaptions={{ left: "Inicio del ataque", right: "Portería defendida" }}
       emptyLabel="Sin datos registrados"
     />
   );

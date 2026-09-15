@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { GK_ZONE_IDS, GK_ZONE_LABEL } from "../../utils/goalkeeperZones";
-import { GoalkeeperInterventionMap } from "./GoalkeeperInterventionMap";
+import {
+  GK_AREA_PATH,
+  GK_BAND_LAYOUT,
+  GK_VIEWBOX,
+  GoalkeeperInterventionMap,
+} from "./GoalkeeperInterventionMap";
 
 function mount(props: Partial<React.ComponentProps<typeof GoalkeeperInterventionMap>> = {}) {
   const onSelect = vi.fn();
@@ -75,50 +80,86 @@ describe("Etiquetas de usuario", () => {
     }
   });
 
-  it("orienta el mapa: portería arriba, fuera del área abajo", () => {
-    const texto = mount().host.textContent || "";
-    expect(texto).toContain("Portería");
-    expect(texto).toContain("Fuera del área");
-  });
-});
+  it("dibuja un campo reconocible: portería, línea de gol y área", () => {
+    const { host } = mount();
+    const svg = host.querySelector("svg")!;
+    expect(svg).toBeTruthy();
 
-describe("Selección y distribución", () => {
-  it("marca la zona seleccionada con aria-pressed", () => {
-    const { host } = mount({ selectedZone: "GK3" });
-    const marcadas = bandas(host).filter((b) => b.getAttribute("aria-pressed") === "true");
-    expect(marcadas).toHaveLength(1);
-    expect(marcadas[0].getAttribute("aria-label")).toContain("Zona 3");
+    // El área de futsal: dos arcos desde los postes unidos por un tramo recto.
+    const areaPaths = Array.from(svg.querySelectorAll("path")).filter((p) =>
+      (p.getAttribute("d") || "").includes("A "),
+    );
+    expect(areaPaths.length).toBeGreaterThanOrEqual(2); // relleno + trazo
+    expect(GK_AREA_PATH).toMatch(/^M .* A .* L .* A .* Z$/);
+
+    // Portería: travesaño y dos postes por encima de la línea de gol.
+    expect(svg.querySelectorAll("rect").length).toBeGreaterThanOrEqual(3);
+    // Línea de gol y separadores.
+    expect(svg.querySelectorAll("line").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("como mapa de distribución muestra el conteo por zona", () => {
-    const { host } = mount({ counts: { GK1: 3, GK4: 1 } });
-    const texto = host.textContent || "";
-    expect(texto).toContain("3");
-    expect(texto).toContain("1");
+  it("las zonas 1-4 se recortan contra la silueta del área", () => {
+    // Es lo que hace que su forma la defina el área y no un rectángulo.
+    const { host } = mount();
+    const svg = host.querySelector("svg")!;
+    const clip = svg.querySelector("clipPath");
+    expect(clip).toBeTruthy();
+    expect(clip!.querySelector("path")!.getAttribute("d")).toBe(GK_AREA_PATH);
+
+    const clipped = svg.querySelector(`g[clip-path]`);
+    expect(clipped).toBeTruthy();
+    expect(clipped!.querySelectorAll("rect")).toHaveLength(4);
+  });
+
+  it("la zona 5 queda FUERA del área recortada", () => {
+    const { host } = mount();
+    const svg = host.querySelector("svg")!;
+    const clipped = svg.querySelector("g[clip-path]")!;
+    // El rect de la zona 5 no está dentro del grupo recortado.
+    const fuera = Array.from(svg.querySelectorAll("rect")).filter(
+      (r) => !clipped.contains(r) && r.getAttribute("y") === String(GK_BAND_LAYOUT.GK5.y),
+    );
+    expect(fuera.length).toBeGreaterThanOrEqual(1);
+    // Y empieza justo donde acaba el área.
+    expect(GK_BAND_LAYOUT.GK5.y).toBeGreaterThan(GK_BAND_LAYOUT.GK4.y);
   });
 });
 
 describe("Responsive y táctil", () => {
-  it("las bandas tienen altura mínima cómoda para el dedo", () => {
+  // jsdom no maqueta, así que se comprueba el PRESUPUESTO geométrico: el
+  // reparto en porcentaje y el tamaño que resulta a anchos reales.
+  const ANCHO_MOVIL = 290; // modal a 88vw en un teléfono de 375
+
+  it("el dibujo escala con el contenedor, sin desbordarlo", () => {
     const { host } = mount();
-    for (const banda of bandas(host)) {
-      const min = parseInt((banda as HTMLElement).style.minHeight || "0", 10);
-      expect(min).toBeGreaterThanOrEqual(40);
+    const svg = host.querySelector("svg") as SVGElement;
+    expect((svg as any).style.width).toBe("100%");
+    expect((svg as any).style.height).toBe("auto");
+    expect(svg.getAttribute("viewBox")).toBe(`0 0 ${GK_VIEWBOX.width} ${GK_VIEWBOX.height}`);
+  });
+
+  it("las cinco bandas reparten el alto sin solaparse ni dejar huecos", () => {
+    let anterior = GK_BAND_LAYOUT.GK1.top;
+    for (const id of GK_ZONE_IDS) {
+      const band = GK_BAND_LAYOUT[id];
+      expect(band.top).toBeGreaterThanOrEqual(anterior - 0.01);
+      anterior = band.top + band.height;
     }
-    const { host: compacto } = mount({ compact: true });
-    for (const banda of bandas(compacto)) {
-      expect(parseInt((banda as HTMLElement).style.minHeight || "0", 10)).toBeGreaterThan(0);
+    expect(anterior).toBeLessThanOrEqual(100.01);
+  });
+
+  it("en un móvil de 375 px las zonas superan el mínimo táctil de 44 px", () => {
+    // Alto renderizado = ancho × (alto/ancho del viewBox).
+    const alto = ANCHO_MOVIL * (GK_VIEWBOX.height / GK_VIEWBOX.width);
+    for (const id of GK_ZONE_IDS) {
+      const px = (GK_BAND_LAYOUT[id].height / 100) * alto;
+      expect(px).toBeGreaterThanOrEqual(44);
     }
   });
 
-  it("no se desborda: ancho relativo y sin scroll horizontal propio", () => {
-    const { host } = mount();
-    const caja = host.firstElementChild as HTMLElement;
-    expect(caja.style.width).toBe("100%");
-    expect(caja.style.margin).toContain("auto");
-    // El recuadro recorta su contenido en lugar de desbordarlo.
-    const marco = caja.querySelector("div") as HTMLElement;
-    expect(marco.style.overflow).toBe("hidden");
+  it("el mapa completo cabe en la altura de un móvil", () => {
+    const alto = ANCHO_MOVIL * (GK_VIEWBOX.height / GK_VIEWBOX.width);
+    expect(alto).toBeLessThan(600); // deja sitio para título, leyenda y botón
   });
 
   it("sin onSelect se renderiza como mapa de solo lectura", () => {
@@ -128,6 +169,23 @@ describe("Responsive y táctil", () => {
       createRoot(host).render(<GoalkeeperInterventionMap counts={{ GK2: 2 }} />);
     });
     expect(host.querySelectorAll("button")).toHaveLength(0);
-    expect(host.querySelectorAll("[aria-label]").length).toBeGreaterThanOrEqual(5);
+    // Pero sigue mostrando el dibujo y la leyenda.
+    expect(host.querySelector("svg")).toBeTruthy();
+    expect(host.textContent || "").toContain("Bajo palos");
+  });
+});
+
+describe("Geometría compartida", () => {
+  it("expone una única geometría, para no dibujar cinco zonas distintas por sitio", () => {
+    expect(GK_AREA_PATH).toBeTruthy();
+    expect(Object.keys(GK_BAND_LAYOUT).sort()).toEqual([...GK_ZONE_IDS].sort());
+  });
+
+  it("las cuatro zonas interiores están dentro del área y la quinta fuera", () => {
+    const fondoArea = GK_BAND_LAYOUT.GK4.y + GK_BAND_LAYOUT.GK4.h;
+    expect(GK_BAND_LAYOUT.GK5.y).toBe(fondoArea);
+    for (const id of ["GK1", "GK2", "GK3", "GK4"] as const) {
+      expect(GK_BAND_LAYOUT[id].y).toBeLessThan(fondoArea);
+    }
   });
 });

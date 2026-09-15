@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { SavedMatch, ActionType, GoalieAction } from '../types/futsal';
 import { FutsalPitch } from './field/FutsalPitch';
 import { ZONE_12_IDS, isZone12Id } from '../utils/fieldZones';
+import { GOALIE_SAVE_TYPES } from '../utils/goalkeeperActions';
 import { LEGACY_ZONE_IDS, formatAnyZoneLabel, isLegacyZoneId } from '../utils/legacyZoneMap';
 
 // ─── ZONAS ──────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ const LAYER_CONFIG: Record<Layer, {
       ActionType.GOAL, ActionType.SHOT, ActionType.ASSIST,
       ActionType.STEAL, ActionType.INTERCEPTION,
       ActionType.LOSS, ActionType.UNFORCED_ERROR,
-      GoalieAction.SAVE_PARRY, GoalieAction.GOAL_CONCEDED,
+      ...GOALIE_SAVE_TYPES, GoalieAction.GOAL_CONCEDED,
     ],
     description: 'Todas las acciones registradas',
   },
@@ -45,7 +46,7 @@ const LAYER_CONFIG: Record<Layer, {
   defense: {
     label: 'Defensa',
     color: '#60a5fa',
-    actions: [ActionType.STEAL, ActionType.INTERCEPTION, GoalieAction.SAVE_PARRY],
+    actions: [ActionType.STEAL, ActionType.INTERCEPTION, ...GOALIE_SAVE_TYPES],
     description: 'Recuperaciones, interceptaciones y paradas',
   },
   loss: {

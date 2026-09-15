@@ -57,6 +57,7 @@ import {
   ActionType,
   GoalieAction,
   Role,
+  GoalkeeperInterventionZone,
 } from "../types/futsal";
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
@@ -92,7 +93,26 @@ import {
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
+import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
+import {
+  acceptsGoalkeeperZone,
+  eventAcceptsGoalkeeperZone,
+  ExitOutcome,
+  GOALIE_RESPONSE_UNSPECIFIED,
+  GoalieResponseDeclared,
+  goalieRespondingToShot,
+  EXIT_OUTCOME_LABEL,
+  eventTargetsOpposingGoalie,
+  formatExit,
+  formatGoalieAction,
+  isAnySave,
+  isConcededGoal,
+  goalieStatsDelta,
+  isExit,
+  isGoalieIntervention,
+} from "../utils/goalkeeperActions";
 import { formatGoalZoneLabel } from "../utils/goalZones";
+import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { effectiveSlotIndex, isRoleAllowedInSlot, findAvailableSlotForRole, normalizeMatchPlayers } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
@@ -628,8 +648,8 @@ const StatsExportTemplate = React.forwardRef<
           // mitad si se especifica (evita acumular 1ª+2ª en la misma tarjeta/mapa)
           const allGoalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
           const goalieEvents = periodFilter ? allGoalieEvents.filter(periodFilter) : allGoalieEvents;
-          const saves = goalieEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = goalieEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+          const saves = goalieEvents.filter(isAnySave).length;
+          const conceded = goalieEvents.filter(isConcededGoal).length;
           const shotsFaced = saves + conceded;
           const effectiveness = shotsFaced > 0 ? ((saves / shotsFaced) * 100).toFixed(1) : "0.0";
 
@@ -788,14 +808,14 @@ const StatsExportTemplate = React.forwardRef<
                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2 mb-1">Últimas Intervenciones</h4>
                  <div className="grid grid-cols-3 gap-3">
                     {goalieEvents
-                      .filter(e => e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.GOAL_CONCEDED)
+                      .filter(isGoalieIntervention)
                       .slice(-6)
                       .reverse()
                       .map((e, idx) => (
                         <div key={idx} className="bg-white/5 p-3 rounded-xl border border-white/5 flex items-center gap-3">
                            <span className="font-mono text-[9px] text-blue-400 font-bold">{formatTime(e.timestamp)}</span>
                            <span className={`text-[8px] font-black uppercase ${e.type === GoalieAction.GOAL_CONCEDED ? 'text-red-400' : 'text-amber-400'}`}>
-                             {e.type === GoalieAction.GOAL_CONCEDED ? 'GOL ENCAJADO' : 'PARADA'}
+                             {isExit(e) ? formatExit(e) : formatGoalieAction(e.type)}
                            </span>
                         </div>
                     ))}
@@ -1405,6 +1425,12 @@ export default function MatchTracker() {
   } | null>(null);
   /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
   const [pendingCorner, setPendingCorner] = useState<{ isOpponent: boolean } | null>(null);
+  /** Portero que va a registrar una salida, a la espera del resultado. */
+  const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
+  /** Salida ya registrada a la espera de ubicación OPCIONAL. */
+  const [pendingInterventionLocation, setPendingInterventionLocation] = useState<{
+    eventId: string;
+  } | null>(null);
   const [isLocalTeamOpen, setIsLocalTeamOpen] = useState(false);
   const [isOpponentTeamOpen, setIsOpponentTeamOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
@@ -1415,7 +1441,10 @@ export default function MatchTracker() {
     destinationGrid?: string;
     setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
     subType?: string;
-    step: "origin" | "target" | "player" | "subtype" | null;
+    /** Modelo C: respuesta del portero declarada dentro del mismo tiro. */
+    goalieResponse?: GoalieResponseDeclared;
+    exitOutcome?: ExitOutcome;
+    step: "origin" | "target" | "player" | "subtype" | "response" | "exitOutcome" | null;
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -2089,6 +2118,46 @@ export default function MatchTracker() {
    * una fase posterior y su ausencia aquí es lo que evita tener que migrar
    * estos eventos.
    */
+  /**
+   * Salida / intervención del portero.
+   *
+   * ORDEN DELIBERADO, igual que en las faltas: la acción se registra con su
+   * resultado y DESPUÉS se ofrece la ubicación. Si se omite, la salida sigue
+   * siendo válida y contabilizable — la ubicación nunca bloquea el registro.
+   */
+  const handleGoalieExit = (goalieId: string, outcome: ExitOutcome) => {
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+    const goalie = matchData.players.find((p) => p.id === goalieId);
+    if (!goalie) return;
+
+    setPendingExit(null);
+    handleAction(GoalieAction.EXIT, goalieId, {
+      metadata: { isOpponent: goalie.isOpponent, exitOutcome: outcome },
+    });
+    // handleAction abre por su cuenta el paso de ubicación opcional.
+  };
+
+  /**
+   * Añade la zona de intervención a una acción de portero ya registrada.
+   * Escribe `goalkeeperZone`, que es un campo PROPIO con su propio dominio
+   * (GK1-GK5): no toca `originGrid` ni `destinationGrid`, y no se cuenta como
+   * origen de tiro en ningún agregado.
+   *
+   * Un toque directo sobre la zona selecciona Y continúa: sin diálogo de
+   * confirmación, que en directo cuesta tiempo.
+   */
+  const assignGoalkeeperZone = (zone: GoalkeeperInterventionZone) => {
+    const pending = pendingInterventionLocation;
+    setPendingInterventionLocation(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: prev.events.map((e) =>
+        e.id === pending.eventId ? { ...e, goalkeeperZone: zone } : e,
+      ),
+    }));
+  };
+
   const handleCorner = (isOpponent: boolean, side: CornerSide) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
     setPendingCorner(null);
@@ -2170,7 +2239,10 @@ export default function MatchTracker() {
     const eventPlayerIds = [];
     if (playerId) eventPlayerIds.push(playerId);
     if (targetGoalieId && !eventPlayerIds.includes(targetGoalieId)) {
-      if (type === ActionType.SHOT || isGoal || type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) {
+      // Solo un disparo o un gol tienen "portero objetivo". Antes tambien se
+      // anadia en las paradas, y eso acreditaba la parada del portero local
+      // TAMBIEN al portero rival.
+      if (eventTargetsOpposingGoalie(type)) {
         eventPlayerIds.push(targetGoalieId);
       }
     }
@@ -2206,6 +2278,10 @@ export default function MatchTracker() {
       metadata: {
         ...metadata?.metadata,
         isOpponent: isOpponentEvent,
+        // Identidad explícita del portero que encara la acción. Antes solo se
+        // podía deducir por bando desde playerIds; guardarla hace que la
+        // atribución y el borrado no dependan de esa inferencia.
+        ...(targetGoalieId ? { targetGoalkeeperId: targetGoalieId } : {}),
       },
       scoreAtEvent: {
         team: currentGoals + (isGoal && !isOpponentEvent ? 1 : 0),
@@ -2255,21 +2331,16 @@ export default function MatchTracker() {
           }
         }
 
-        // 2. Stats for the target Goalkeeper (Saves/Conceded)
-        if (p.id === targetGoalieId && p.role === Role.GOALKEEPER) {
-          if (isGoal) {
-            stats.conceded += 1;
-          } else if (type === ActionType.SHOT || type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) {
-            if (metadata?.destinationGrid !== "OUT") {
-              stats.saves += 1;
-            }
-          }
-        }
-
-        // 3. Fallback for specific Goalie Buttons if they were assigned as effectivePlayerId
-        if (p.id === effectivePlayerId && p.role === Role.GOALKEEPER && p.id !== targetGoalieId) {
-           if (type === GoalieAction.GOAL_CONCEDED) stats.conceded += 1;
-           if (type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) stats.saves += 1;
+        // 2. Estadisticas de portero. Fuente unica (utils/goalkeeperActions):
+        // decide por la identidad del jugador y el bando registrado EN EL
+        // EVENTO, y es exactamente la misma que usa el borrado, de modo que
+        // registrar y deshacer no pueden desalinearse.
+        const gkDelta = goalieStatsDelta(newEvent, p);
+        stats.saves += gkDelta.saves;
+        stats.conceded += gkDelta.conceded;
+        if (gkDelta.exits) stats.exits = (stats.exits ?? 0) + gkDelta.exits;
+        if (gkDelta.exitsSuccess) {
+          stats.exitsSuccess = (stats.exitsSuccess ?? 0) + gkDelta.exitsSuccess;
         }
 
         // Global Plus/Minus logic (only for Local Team)
@@ -2309,6 +2380,13 @@ export default function MatchTracker() {
         timeoutsUsed: nextTimeouts,
       };
     });
+
+    // La acción YA está registrada. La zona de intervención se ofrece después
+    // y es omitible; se hace aquí para que cualquier superficie de captura
+    // (panel de portero o menú radial) se comporte igual.
+    if (eventAcceptsGoalkeeperZone(newEvent) && !metadata?.goalkeeperZone) {
+      setPendingInterventionLocation({ eventId: newEvent.id });
+    }
   };
 
   const handleDeleteEvent = (event: GameEvent) => {
@@ -2326,14 +2404,22 @@ export default function MatchTracker() {
             (isOpponentEvent ? !p.isOpponent : p.isOpponent)
           );
 
+          // Estadisticas de portero: se deshace con la MISMA funcion con la
+          // que se registraron, sobre el portero al que el evento fue
+          // atribuido. Antes se decidia por el rol y el bando ACTUALES.
+          const gkDelta = goalieStatsDelta(event, p);
+          stats.saves = Math.max(0, stats.saves - gkDelta.saves);
+          stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
+          if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
+          if (gkDelta.exitsSuccess) {
+            stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
+          }
+
           if (event.type === ActionType.GOAL) {
-            if (isOpposingKeeper) stats.conceded = Math.max(0, stats.conceded - 1);
-            else stats.goals = Math.max(0, stats.goals - 1);
+            if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
           }
           if (event.type === ActionType.SHOT) {
-            if (isOpposingKeeper) {
-              if (event.destinationGrid !== "OUT") stats.saves = Math.max(0, stats.saves - 1);
-            } else {
+            if (!isOpposingKeeper) {
               if (event.destinationGrid === "OUT") {
                 stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
               } else {
@@ -2367,14 +2453,8 @@ export default function MatchTracker() {
           if (event.type === ActionType.RED_CARD)
             stats.redCards = Math.max(0, stats.redCards - 1);
           
-          // Specific goalie actions
-          if (event.type === GoalieAction.GOAL_CONCEDED)
-            stats.conceded = Math.max(0, stats.conceded - 1);
-          if (
-            event.type === GoalieAction.SAVE_CATCH ||
-            event.type === GoalieAction.SAVE_PARRY
-          )
-            stats.saves = Math.max(0, stats.saves - 1);
+          // Las acciones de portero ya se han deshecho arriba con
+          // goalieStatsDelta; no se duplican aqui.
         }
 
         // Revert plusMinus if we have the on-pitch list
@@ -2931,11 +3011,11 @@ export default function MatchTracker() {
                 const z = `G${i + 1}`;
                 const saves = matchData.events.filter((e) => {
                   const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || (e.type === ActionType.SHOT && e.destinationGrid !== "OUT")) && (e.destinationGrid === z || e.metadata?.zone === z);
+                  return isGoalieInvolved && isAnySave(e) && (e.destinationGrid === z || e.metadata?.zone === z);
                 }).length;
                 const goals = matchData.events.filter((e) => {
                   const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL) && (e.destinationGrid === z || e.metadata?.zone === z);
+                  return isGoalieInvolved && isConcededGoal(e) && (e.destinationGrid === z || e.metadata?.zone === z);
                 }).length;
 
                 // Color logic: green=saves only, red=goals only, orange=both, empty=none
@@ -2988,10 +3068,16 @@ export default function MatchTracker() {
               Nueva Acción
             </button>
             <button
-              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id)}
+              onClick={() => handleAction(GoalieAction.SAVE, goalie.id)}
               className={`py-2.5 ${isOpponent ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} ${isOpponent ? 'text-red-300' : 'text-amber-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
             >
               Parada
+            </button>
+            <button
+              onClick={() => setPendingExit({ goalieId: goalie.id })}
+              className={`py-2.5 ${isOpponent ? 'bg-red-500/10 border-red-500/20' : 'bg-cyan-500/15 border-cyan-500/30'} ${isOpponent ? 'text-red-300' : 'text-cyan-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
+            >
+              Salida
             </button>
             <button
               onClick={() => executeSwap(goalie.id, true)}
@@ -3552,8 +3638,8 @@ export default function MatchTracker() {
         };
 
         const gkRow = (p: Player, accent: string, halfEvents: any[]) => {
-          const saves = halfEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = halfEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+          const saves = halfEvents.filter(isAnySave).length;
+          const conceded = halfEvents.filter(isConcededGoal).length;
           const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0;
           const recoveries = halfEvents.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
           const losses = halfEvents.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
@@ -3581,13 +3667,8 @@ export default function MatchTracker() {
                 const isGkInvolved = (e: any) =>
                   e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
                 const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
-                const saves = halfEvts.filter(e =>
-                  (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                  e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                ).length;
-                const conceded = halfEvts.filter(e =>
-                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                ).length;
+                const saves = halfEvts.filter(isAnySave).length;
+                const conceded = halfEvts.filter(isConcededGoal).length;
                 const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
                 const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
                 const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
@@ -3617,7 +3698,7 @@ export default function MatchTracker() {
         const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
           <div>
             {players.map(p => {
-              // Use SHOT/GOAL events from rival (same as PORTERO tab) - NOT SAVE_PARRY events
+              // Use SHOT/GOAL events from rival (same as PORTERO tab)
               const isGoalieInvolved = (e: any) =>
                 e.playerIds.includes(p.id) ||
                 // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
@@ -3626,12 +3707,7 @@ export default function MatchTracker() {
               const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
 
               // Saves = rival shots that were NOT goals and NOT out (same logic as PORTERO tab)
-              const saveEvts = halfEvts.filter(e =>
-                (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                e.type === GoalieAction.SAVE_PARRY ||
-                e.type === GoalieAction.SAVE_CATCH ||
-                e.type === GoalieAction.SAVE
-              );
+              const saveEvts = halfEvts.filter(isAnySave);
               // Goals conceded = rival goals
               const goalEvts = halfEvts.filter(e =>
                 e.type === GoalieAction.GOAL_CONCEDED ||
@@ -3792,13 +3868,8 @@ export default function MatchTracker() {
                     const evAll = matchData.events.filter(e => isGkInvolved(e));
 
                     const calcStats = (evts: any[]) => {
-                      const saves = evts.filter(e =>
-                        (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                        e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                      ).length;
-                      const conceded = evts.filter(e =>
-                        e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                      ).length;
+                      const saves = evts.filter(isAnySave).length;
+                      const conceded = evts.filter(isConcededGoal).length;
                       return {
                         saves,
                         conceded,
@@ -4662,8 +4733,8 @@ export default function MatchTracker() {
                                           : e.type === ActionType.ASSIST ? "👟 Asistencia"
                                           : e.type === ActionType.FOUL ? "⚠️ Falta"
                                           : e.type === GoalieAction.GOAL_CONCEDED ? "🔴 Gol encajado"
-                                          : e.type === GoalieAction.SAVE_PARRY ? "🧤 Parada"
-                                          : e.type === GoalieAction.SAVE_CATCH ? "🧤 Parada"
+                                          : e.type === GoalieAction.EXIT ? `🧤 ${formatExit(e)}`
+                                          : (e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE_DEFLECT) ? `🧤 ${formatGoalieAction(e.type)}`
                                           : e.type.replace(/_/g, " ")}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
@@ -5204,7 +5275,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5215,7 +5286,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5229,7 +5300,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5240,7 +5311,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5704,14 +5775,7 @@ export default function MatchTracker() {
                                               matchData.events.filter(
                                                 (e) =>
                                                   e.playerIds.includes(p.id) &&
-                                                  (e.type ===
-                                                    GoalieAction.SAVE_PARRY ||
-                                                    e.type ===
-                                                      GoalieAction.SAVE_CATCH ||
-                                                    (e.type ===
-                                                      ActionType.SHOT &&
-                                                      e.metadata
-                                                        ?.isOpponent)) &&
+                                                  isAnySave(e) &&
                                                   (e.destinationGrid === z ||
                                                     e.metadata?.zone === z),
                                               ).length;
@@ -6633,6 +6697,63 @@ export default function MatchTracker() {
       {/* MODALS & OVERLAYS */}
       <AnimatePresence>
         {/* Shot Tracking Modal */}
+        {/* ── SALIDA: resultado primero, ubicación después ────────────── */}
+        {pendingExit && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">Salida del portero</h3>
+                <p className="text-[10px] text-slate-400 mt-1">¿Cómo se resolvió?</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {(["success", "fail"] as ExitOutcome[]).map((outcome) => (
+                  <button
+                    key={outcome}
+                    onClick={() => handleGoalieExit(pendingExit.goalieId, outcome)}
+                    className={`py-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      outcome === "success"
+                        ? "border-white/15 bg-white/5 hover:bg-green-500/25 hover:border-green-400"
+                        : "border-white/15 bg-white/5 hover:bg-red-500/25 hover:border-red-400"
+                    }`}
+                  >
+                    <span className="text-xl">{outcome === "success" ? "✔" : "✘"}</span>
+                    <span className="text-[11px] font-black uppercase text-white">
+                      {EXIT_OUTCOME_LABEL[outcome]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setPendingExit(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── SALIDA: ubicación OPCIONAL, la salida ya está registrada ─── */}
+        {pendingInterventionLocation && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">¿Dónde intervino el portero?</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Opcional: la acción ya está registrada y se mantiene aunque lo omitas.
+                </p>
+              </div>
+              <GoalkeeperInterventionMap onSelect={assignGoalkeeperZone} />
+              <button
+                onClick={() => setPendingInterventionLocation(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Sin ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── CÓRNER: solo hay que elegir la esquina ──────────────────── */}
         {pendingCorner && (
           <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
@@ -6942,15 +7063,112 @@ export default function MatchTracker() {
                               },
                             );
                           } else {
+                            // MODELO C: solo en tiros DEL RIVAL contra nuestra
+                            // portería se ofrece la respuesta antes del
+                            // destino. Nuestros propios tiros conservan su
+                            // flujo de siempre, sin paso extra.
+                            const ofreceRespuesta = !!goalieRespondingToShot(
+                              pendingAction.type,
+                              pendingAction.isOpponent,
+                              matchData.players,
+                            );
                             setPendingAction((prev) => ({
                               ...prev!,
                               originGrid: id,
-                              step: "target",
+                              step: ofreceRespuesta ? "response" : "target",
                             }));
                           }
                         }}
                         selected={pendingAction.originGrid}
                       />
+                    </div>
+                  )}
+
+                  {/* MODELO C — ¿interviene el portero? Una sola secuencia
+                      para la ocasión completa: el tiro y la respuesta quedan
+                      en un único evento, nunca como dos ocasiones. */}
+                  {pendingAction.step === "response" && (
+                    <div className="w-full space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
+                        ¿Interviene el portero?
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { type: GoalieAction.SAVE, label: "PARADA" },
+                          { type: GoalieAction.SAVE_CATCH, label: "BLOCAJE" },
+                          { type: GoalieAction.SAVE_DEFLECT, label: "DESPEJE" },
+                          { type: GoalieAction.EXIT, label: "SALIDA" },
+                        ] as const).map((opt) => (
+                          <button
+                            key={opt.type}
+                            onClick={() =>
+                              setPendingAction((prev) => ({
+                                ...prev!,
+                                goalieResponse: opt.type,
+                                step: opt.type === GoalieAction.EXIT ? "exitOutcome" : "target",
+                              }))
+                            }
+                            className="py-4 rounded-2xl border-2 border-white/10 bg-white/5 hover:bg-blue-500/25 hover:border-blue-400 text-[11px] font-black uppercase text-white transition-all active:scale-95"
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Deja constancia EXPLÍCITA de que no se registra la
+                          intervención. No dice que el portero no tocara el
+                          balón: dice que no lo sabemos, y por eso el sistema
+                          no inventará una parada. */}
+                      <button
+                        onClick={() =>
+                          setPendingAction((prev) => ({
+                            ...prev!,
+                            goalieResponse: GOALIE_RESPONSE_UNSPECIFIED,
+                            step: "target",
+                          }))
+                        }
+                        className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+                      >
+                        No registrar intervención
+                      </button>
+                    </div>
+                  )}
+
+                  {/* SALIDA dentro del tiro: resultado y listo. No se pide
+                      destino en portería — el balón no llegó a ella. */}
+                  {pendingAction.step === "exitOutcome" && (
+                    <div className="w-full space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
+                        Salida del portero · ¿cómo se resolvió?
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {(["success", "fail"] as ExitOutcome[]).map((outcome) => (
+                          <button
+                            key={outcome}
+                            onClick={() => {
+                              if (!pendingAction) return;
+                              const current = pendingAction;
+                              setPendingAction(null);
+                              handleAction(current.type, current.playerId, {
+                                originGrid: current.originGrid,
+                                metadata: {
+                                  isOpponent: current.isOpponent,
+                                  setPiece: current.setPiece || "normal",
+                                  goalieResponse: GoalieAction.EXIT,
+                                  exitOutcome: outcome,
+                                },
+                              });
+                            }}
+                            className={`py-6 rounded-2xl border-2 border-white/15 bg-white/5 flex flex-col items-center gap-2 transition-all active:scale-95 ${
+                              outcome === "success" ? "hover:bg-green-500/25" : "hover:bg-red-500/25"
+                            }`}
+                          >
+                            <span className="text-xl">{outcome === "success" ? "✔" : "✘"}</span>
+                            <span className="text-[11px] font-black uppercase text-white">
+                              {EXIT_OUTCOME_LABEL[outcome]}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -6973,6 +7191,9 @@ export default function MatchTracker() {
                               metadata: {
                                 isOpponent: current.isOpponent,
                                 setPiece: current.setPiece || "normal",
+                                ...(current.goalieResponse
+                                  ? { goalieResponse: current.goalieResponse }
+                                  : {}),
                               },
                             },
                           );

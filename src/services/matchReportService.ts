@@ -134,6 +134,13 @@ const ACTION_LABEL: Record<string, string> = {
   [ActionType.YELLOW_CARD]: "Tarjeta amarilla",
   [ActionType.CORNER]: "Córner",
   [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
+  [GoalieAction.SAVE]: "Parada",
+  [GoalieAction.SAVE_CATCH]: "Blocaje",
+  [GoalieAction.SAVE_DEFLECT]: "Despeje",
+  [GoalieAction.EXIT]: "Salida",
+  // Histórico: se registró bajo un botón que decía "PARADA", así que su
+  // subtipo real es desconocido y no se infiere.
+  [GoalieAction.SAVE_PARRY]: "Parada (subtipo no registrado)",
 };
 
 const isGoalEvent = (e: GameEvent) =>

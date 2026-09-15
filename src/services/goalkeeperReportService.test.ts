@@ -71,7 +71,10 @@ describe("buildGoalkeeperReports", () => {
       ],
     });
     const [gk] = buildGoalkeeperReports(md);
-    expect(gk.saveParry).toBe(1);
+    // FASE 4: SAVE_PARRY queda congelado. Su evento sigue contando como
+    // parada, pero con subtipo desconocido — nunca como despeje.
+    expect(gk.saveParry).toBe(0);
+    expect(gk.saveUnspecified).toBe(1);
     expect(gk.saveCatch).toBe(1);
     expect(gk.conceded).toBe(1);
     expect(gk.totalSaves).toBe(2);
@@ -143,16 +146,23 @@ describe("buildGoalkeeperReports", () => {
     expect(gk.timeline[0].type).toBe("Blocaje");
   });
 
-  // B. SAVE_PARRY se reporta como Despeje/Rechace.
-  it("B: un evento SAVE_PARRY incrementa gk.saveParry y aparece en la cronología como 'Despeje'", () => {
+  // B. FASE 4: SAVE_PARRY es histórico y su subtipo es DESCONOCIDO.
+  //
+  // Hasta Fase 4 lo emitía un botón rotulado "PARADA", así que presentarlo
+  // como despeje sería atribuirle una información que nadie registró.
+  it("B: un SAVE_PARRY histórico cuenta como parada de subtipo no registrado, nunca como despeje", () => {
     const md = matchData({
       players: [player({ individualTimeSeconds: 500 })],
       events: [event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], timestamp: 1000 })],
     });
     const [gk] = buildGoalkeeperReports(md);
-    expect(gk.saveParry).toBe(1);
+    expect(gk.saveUnspecified).toBe(1);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.saveParry).toBe(0);
+    expect(gk.saveDeflect).toBe(0);
     expect(gk.saveCatch).toBe(0);
-    expect(gk.timeline[0].type).toBe("Despeje");
+    expect(gk.timeline[0].type).toBe("Parada (subtipo no registrado)");
+    expect(gk.timeline[0].type).not.toContain("Despeje");
   });
 });
 
@@ -258,5 +268,89 @@ describe("Paradas sin subtipo registrado", () => {
     const [gk] = buildGoalkeeperReports(md);
     expect(gk.timeline).toHaveLength(1);
     expect(gk.timeline[0].type).toBe("Parada (sin subtipo registrado)");
+  });
+});
+
+// ── FASE 4: SALIDAS / INTERVENCIONES ──────────────────────────────────
+describe("Salidas del portero", () => {
+  it("cuenta las salidas y separa éxito, fallo y sin resultado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], metadata: { isOpponent: false, exitOutcome: "success" } }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], metadata: { isOpponent: false, exitOutcome: "success" } }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], metadata: { isOpponent: false, exitOutcome: "fail" } }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], metadata: { isOpponent: false } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.exits).toBe(4);
+    expect(gk.exitsSuccess).toBe(2);
+    expect(gk.exitsFail).toBe(1);
+    // Sin resultado registrado: se declara, no se infiere.
+    expect(gk.exitsUnknown).toBe(1);
+  });
+
+  it("una salida NO cuenta como parada ni altera la efectividad", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"] }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], metadata: { isOpponent: false, exitOutcome: "success" } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.shotsFaced).toBe(1);
+    expect(gk.exits).toBe(1);
+  });
+
+  it("la salida aparece en la cronología con su resultado y sin códigos", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], timestamp: 1000, metadata: { isOpponent: false, exitOutcome: "fail" } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.timeline[0].type).toBe("Salida · Fallo");
+    expect(gk.timeline[0].type).not.toContain("EXIT");
+  });
+});
+
+describe("Nueva taxonomía en el informe", () => {
+  it("PARADA, BLOCAJE y DESPEJE se desglosan por separado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"] }),
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"] }),
+        event({ type: GoalieAction.SAVE_DEFLECT, playerIds: ["gk1"] }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveGeneric).toBe(1);
+    expect(gk.saveCatch).toBe(1);
+    expect(gk.saveDeflect).toBe(1);
+    expect(gk.totalSaves).toBe(3);
+    expect(gk.saveParry).toBe(0);
+  });
+
+  it("ninguna etiqueta de la cronología contiene un código técnico", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"], timestamp: 1 }),
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], timestamp: 2 }),
+        event({ type: GoalieAction.SAVE_DEFLECT, playerIds: ["gk1"], timestamp: 3 }),
+        event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], timestamp: 4 }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], timestamp: 5, metadata: { isOpponent: false, exitOutcome: "success" } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.timeline).toHaveLength(5);
+    for (const entry of gk.timeline) {
+      expect(entry.type).not.toMatch(/SAVE|EXIT|GOAL_CONCEDED|_/);
+    }
   });
 });

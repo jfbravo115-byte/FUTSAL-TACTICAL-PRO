@@ -11,7 +11,17 @@
  * renderGoalieSection en MatchTracker.tsx (playerIds.includes(p.id)) —
  * no se inventa ningún criterio nuevo.
  */
-import { ActionType, GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
+import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
+import {
+  exitOutcomeOf,
+  formatExit,
+  formatGoalieAction,
+  hasGoalZone,
+  isAnySave,
+  isConcededGoal,
+  isExit,
+  isUnspecifiedSave,
+} from "../utils/goalkeeperActions";
 
 export type GoalkeeperTimelineEntry = {
   timeLabel: string;
@@ -32,6 +42,8 @@ export type GoalkeeperReportEntry = {
   /** Nº de eventos GoalieAction.SAVE_PARRY — se presenta como "Despeje/Rechace". */
   saveParry: number;
   saveGeneric: number;
+  /** Despejes/rechaces con subtipo explícito (SAVE_DEFLECT). */
+  saveDeflect: number;
   /**
    * Paradas registradas como disparo rival a puerta (ActionType.SHOT) sin
    * subtipo de intervención. El dato existe y es real, pero NO permite saber
@@ -48,6 +60,12 @@ export type GoalkeeperReportEntry = {
    * en vez de parecer contradictorios.
    */
   mappedInterventions: number;
+  /** Salidas/intervenciones registradas. */
+  exits: number;
+  exitsSuccess: number;
+  exitsFail: number;
+  /** Salidas sin resultado registrado. Nunca se infiere. */
+  exitsUnknown: number;
   effectivenessPct: number | null;
   events: GameEvent[]; // eventos propios (para los mapas, ya filtrados)
   timeline: GoalkeeperTimelineEntry[];
@@ -61,53 +79,6 @@ const fmtSeconds = (totalSeconds: number): string => {
 };
 
 const fmtMilliseconds = (ms: number): string => fmtSeconds(Math.max(0, ms) / 1000);
-
-const GOALIE_ACTION_LABEL: Record<string, string> = {
-  [GoalieAction.SAVE]: "Parada",
-  [GoalieAction.SAVE_CATCH]: "Blocaje",
-  [GoalieAction.SAVE_PARRY]: "Despeje",
-  [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
-  // Un disparo rival detenido que se registró sin subtipo. Se nombra por lo
-  // que realmente se sabe; no se decide por él si fue blocaje o despeje.
-  [ActionType.SHOT]: "Parada (sin subtipo registrado)",
-  [ActionType.GOAL]: "Gol encajado",
-};
-
-// ── PREDICADOS COMPARTIDOS ──────────────────────────────────────────────
-// Cabecera y mapa de impacto DEBEN clasificar cada evento igual. La
-// contradicción anterior ("Blocajes 0 · Despejes 0" bajo un mapa lleno de
-// círculos verdes) venía justamente de que cada uno usaba su propio criterio:
-// el mapa contaba como parada todo lo que no fuese gol, mientras la cabecera
-// solo miraba los tipos GoalieAction.SAVE*.
-
-/** Gol encajado. Incluye ActionType.GOAL: al marcar el rival, el portero del
- *  equipo contrario queda añadido al evento como participante. */
-export function isConcededGoal(e: GameEvent): boolean {
-  return e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL;
-}
-
-/** Parada con subtipo explícito registrado. */
-export function isTypedSave(e: GameEvent): boolean {
-  return (
-    e.type === GoalieAction.SAVE ||
-    e.type === GoalieAction.SAVE_PARRY ||
-    e.type === GoalieAction.SAVE_CATCH
-  );
-}
-
-/** Disparo rival a puerta detenido, registrado sin subtipo de intervención. */
-export function isUnspecifiedSave(e: GameEvent): boolean {
-  return e.type === ActionType.SHOT && e.destinationGrid?.toUpperCase() !== "OUT";
-}
-
-export function isAnySave(e: GameEvent): boolean {
-  return isTypedSave(e) || isUnspecifiedSave(e);
-}
-
-/** ¿El evento lleva zona de portería, y por tanto el mapa puede dibujarlo? */
-export function hasGoalZone(e: GameEvent): boolean {
-  return !!(e.destinationGrid || e.metadata?.zone);
-}
 
 /**
  * ¿Este portero es "relevante" para el informe? Ha jugado algo de tiempo
@@ -129,11 +100,20 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
     .map((p) => {
       const ownEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
 
-      const saveParry = ownEvents.filter((e) => e.type === GoalieAction.SAVE_PARRY).length;
       const saveCatch = ownEvents.filter((e) => e.type === GoalieAction.SAVE_CATCH).length;
+      const saveDeflect = ownEvents.filter((e) => e.type === GoalieAction.SAVE_DEFLECT).length;
       const saveGeneric = ownEvents.filter((e) => e.type === GoalieAction.SAVE).length;
+      // SAVE_PARRY histórico entra aquí, no en "despejes": se registró bajo un
+      // botón que decía PARADA, así que su subtipo real es desconocido.
       const saveUnspecified = ownEvents.filter(isUnspecifiedSave).length;
-      const totalSaves = saveParry + saveCatch + saveGeneric + saveUnspecified;
+      const saveParry = 0;
+      const totalSaves = saveCatch + saveDeflect + saveGeneric + saveUnspecified;
+
+      const exitEvents = ownEvents.filter(isExit);
+      const exits = exitEvents.length;
+      const exitsSuccess = exitEvents.filter((e) => exitOutcomeOf(e) === "success").length;
+      const exitsFail = exitEvents.filter((e) => exitOutcomeOf(e) === "fail").length;
+      const exitsUnknown = exits - exitsSuccess - exitsFail;
       const conceded = ownEvents.filter(isConcededGoal).length;
       const shotsFaced = totalSaves + conceded;
       const mappedInterventions = ownEvents.filter(
@@ -144,13 +124,13 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       // Mismos predicados que las estadísticas: si una intervención cuenta
       // arriba, aparece también aquí.
       const timeline: GoalkeeperTimelineEntry[] = ownEvents
-        .filter((e) => isAnySave(e) || isConcededGoal(e))
+        .filter((e) => isAnySave(e) || isConcededGoal(e) || isExit(e))
         .slice()
         .sort((a, b) => a.timestamp - b.timestamp)
         .map((e) => ({
           timeLabel: fmtMilliseconds(e.timestamp),
           period: e.period,
-          type: GOALIE_ACTION_LABEL[e.type] || String(e.type),
+          type: isExit(e) ? formatExit(e) : formatGoalieAction(e.type),
         }));
 
       return {
@@ -164,7 +144,12 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         saveParry,
         saveCatch,
         saveGeneric,
+        saveDeflect,
         saveUnspecified,
+        exits,
+        exitsSuccess,
+        exitsFail,
+        exitsUnknown,
         mappedInterventions,
         totalSaves,
         conceded,

@@ -138,7 +138,18 @@ export const ORIGIN_AND_TARGET_ACTIONS: readonly (ActionType | GoalieAction)[] =
   GoalieAction.SAVE,
   GoalieAction.SAVE_PARRY,
   GoalieAction.SAVE_CATCH,
+  GoalieAction.SAVE_DEFLECT,
 ];
+
+/**
+ * GoalieAction.EXIT queda DELIBERADAMENTE fuera del catálogo de origen.
+ *
+ * Una salida no tiene "origen de tiro": tiene un lugar de intervención, que
+ * se guarda en su propio campo `interventionGrid`. Meterla aquí haría que su
+ * ubicación se contabilizara como origen en los agregados y volveríamos a
+ * mezclar dos conceptos espaciales distintos, que es justo lo que Fase 4
+ * viene a separar.
+ */
 
 /** Todas las acciones que admiten ubicación espacial. */
 export const SPATIAL_ACTIONS: readonly (ActionType | GoalieAction)[] = [

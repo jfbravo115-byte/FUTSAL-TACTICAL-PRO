@@ -372,7 +372,7 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
 
   // 4. Evento propio del portero (playerIds lo incluye) sigue contando
   // siempre, sin depender de onPitchPlayerIds.
-  it("4: un evento propio del portero (playerIds lo incluye) sigue contándose siempre", async () => {
+  it("4: un evento propio del portero se cuenta, ESPEJADO a la perspectiva del atacante", async () => {
     const md = matchData({
       players: [
         player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOpponent: false, isOnPitch: true, individualTimeSeconds: 600 }),
@@ -384,7 +384,11 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
     });
     await exportGoalkeeperReportPdf(md);
     const gk1Page = toJpegMock.mock.calls[0][0] as HTMLElement;
-    expect(zoneCellCount(findZoneCell(gk1Page, "Z3C"))).toBe(1);
+    // FASE 4 — corrección de perspectivas. La parada se guardó en la
+    // perspectiva del PORTERO (Z3C); el mapa responde a "¿desde dónde me
+    // tiran?", así que se muestra en la del ATACANTE: Z2C.
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z2C"))).toBe(1);
+    expect(zoneCellCount(findZoneCell(gk1Page, "Z3C"))).toBe(0);
   });
 
   // 5. Legacy sin onPitchPlayerIds + un ÚNICO portero relevante: sin

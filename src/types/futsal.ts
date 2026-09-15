@@ -43,9 +43,32 @@ export enum ActionType {
 }
 
 export enum GoalieAction {
+  /** Parada genérica. Botón rápido por defecto del portero. */
   SAVE = 'SAVE',
+  /**
+   * CONGELADO — solo compatibilidad histórica. NO volver a producirlo.
+   *
+   * Hasta Fase 4 era el único tipo que la captura emitía, y lo hacía bajo un
+   * botón rotulado "PARADA". Los eventos antiguos que lo llevan NO son
+   * despejes: son paradas de subtipo desconocido, y así se presentan. Por eso
+   * el despeje estrena valor propio (SAVE_DEFLECT) en vez de reutilizar este.
+   */
   SAVE_PARRY = 'SAVE_PARRY',
+  /** Blocaje / atrapada: el portero controla el balón. */
   SAVE_CATCH = 'SAVE_CATCH',
+  /** Despeje / rechace: evita el gol pero el balón sigue en juego. */
+  SAVE_DEFLECT = 'SAVE_DEFLECT',
+  /**
+   * Salida / intervención: el portero abandona o extiende su zona habitual
+   * para interceptar una acción rival. El resultado va en
+   * metadata.exitOutcome y la ubicación, si se registra, en interventionGrid.
+   */
+  EXIT = 'EXIT',
+  /**
+   * Solo compatibilidad histórica: la captura actual no lo emite. Un gol
+   * encajado se deriva del ActionType.GOAL del equipo rival, que añade al
+   * portero afectado a playerIds.
+   */
   GOAL_CONCEDED = 'GOAL_CONCEDED',
 }
 
@@ -63,6 +86,12 @@ export type PlayerStats = {
   shotsOffTarget: number;
   saves: number;
   conceded: number;
+  /** Salidas/intervenciones registradas. Opcional: los partidos guardados
+   *  anteriores a Fase 4 no lo traen y se tratan como 0. */
+  exits?: number;
+  /** Salidas resueltas con éxito. Nunca se infiere: si el evento no declara
+   *  resultado, no suma aquí. */
+  exitsSuccess?: number;
   stealsWithPossession?: number;
   stealsClearance?: number;
   lossesBadPass?: number;
@@ -112,6 +141,19 @@ export type GameEvent = {
    * real es desconocida y así debe presentarse.
    */
   attackDirection?: 'ltr' | 'rtl';
+  /**
+   * Lugar físico donde INTERVIENE el portero. Concepto distinto y separado de
+   * los otros dos campos espaciales, a propósito:
+   *
+   *   originGrid       → desde dónde se origina el tiro/acción
+   *   destinationGrid  → dónde termina el tiro dentro de la portería
+   *   interventionGrid → dónde interviene el portero
+   *
+   * Se guarda en la perspectiva del portero que interviene (su portería a la
+   * izquierda). Nunca debe leerse como origen de tiro ni sumarse a los
+   * agregados de origen.
+   */
+  interventionGrid?: string;
   metadata?: Record<string, any>;
   scoreAtEvent?: { team: number; opponent: number };
 };

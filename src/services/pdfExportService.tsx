@@ -325,17 +325,24 @@ function GoalkeeperCard({
             se convierte en blocaje ni en despeje. */}
         <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
           <span>Paradas <b>{gk.totalSaves}</b></span>
+          <span>Salidas <b>{gk.exits}</b></span>
           <span>Encajados <b>{gk.conceded}</b></span>
           <span>Efectividad <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b></span>
         </div>
       </div>
       <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>
-        Desglose de paradas: blocajes {gk.saveCatch} · despejes {gk.saveParry}
+        Desglose de paradas: blocajes {gk.saveCatch} · despejes {gk.saveDeflect}
         {gk.saveGeneric > 0 ? ` · genéricas ${gk.saveGeneric}` : ""}
         {gk.saveUnspecified > 0 ? ` · sin subtipo registrado ${gk.saveUnspecified}` : ""}
         {gk.shotsFaced > 0 && gk.mappedInterventions < gk.shotsFaced
           ? ` — el mapa de portería muestra ${gk.mappedInterventions} de ${gk.shotsFaced} (el resto no tiene zona registrada)`
           : ""}
+        {gk.exits > 0 ? (
+          <span>
+            {" · "}Salidas: {gk.exitsSuccess} con éxito · {gk.exitsFail} falladas
+            {gk.exitsUnknown > 0 ? ` · ${gk.exitsUnknown} sin resultado registrado` : ""}
+          </span>
+        ) : null}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <div>

@@ -21,7 +21,14 @@ import { FutsalPitch, PitchTheme } from "../field/FutsalPitch";
 import { isZone12Id } from "../../utils/fieldZones";
 import { isLegacyZoneId } from "../../utils/legacyZoneMap";
 import { formatGoalZoneLabel } from "../../utils/goalZones";
-import { hasGoalZone, isAnySave, isConcededGoal } from "../../services/goalkeeperReportService";
+import {
+  hasGoalZone,
+  isAnySave,
+  isConcededGoal,
+  isEventAttributableToGoalie,
+  rawOriginZone,
+  shotOriginFromAttackerView,
+} from "../../utils/goalkeeperActions";
 
 /**
  * Mapa de ORIGEN EN PISTA de los disparos/intervenciones que
@@ -77,28 +84,11 @@ export function GoalkeeperOriginMap({
     ActionType.SHOT,
     ActionType.GOAL,
   ]);
-  const goalieEvents = events.filter((e) => {
-    if (!RELEVANT_TYPES.has(e.type)) return false;
-
-    // 1. Evento propio del portero: siempre se cuenta, sin ambigüedad.
-    if (e.playerIds.includes(goalie.id)) return true;
-
-    // Evento del rival (equipo contrario al del portero) — candidato a
-    // "disparo que este portero pudo encarar".
-    const isRivalEvent = (e.metadata?.isOpponent ?? false) !== goalie.isOpponent;
-    if (!isRivalEvent) return false;
-
-    // 2. Con onPitchPlayerIds disponible: dato real del momento del
-    //    evento — es la fuente de verdad, no goalie.isOnPitch (estado
-    //    final del partido).
-    if (e.onPitchPlayerIds) {
-      return e.onPitchPlayerIds.includes(goalie.id);
-    }
-
-    // 3. LEGACY sin onPitchPlayerIds: solo se atribuye si este portero es
-    //    el único relevante de su equipo (sin ambigüedad posible).
-    return isOnlyRelevantGoalkeeper;
-  });
+  const goalieEvents = events.filter(
+    (e) =>
+      RELEVANT_TYPES.has(e.type) &&
+      isEventAttributableToGoalie(e, goalie, isOnlyRelevantGoalkeeper),
+  );
 
   // Un partido nuevo usa las 12 zonas; uno histórico, la rejilla de 9 celdas.
   // No se convierte entre ambos: se dibuja cada uno en su propia pista.
@@ -106,9 +96,22 @@ export function GoalkeeperOriginMap({
     !goalieEvents.some((e) => isZone12Id(e.originGrid)) &&
     goalieEvents.some((e) => isLegacyZoneId(e.originGrid));
 
+  // PERSPECTIVA ÚNICA (corrección del problema A de la auditoría de Fase 4).
+  //
+  // Este mapa responde a "¿desde dónde me tiran?", así que todo se expresa en
+  // la perspectiva del ATACANTE. Los eventos propios del portero (sus paradas)
+  // se guardan en la perspectiva contraria, y antes se sumaban sin espejar: un
+  // mismo lugar físico caía en Z4 si venía de un tiro rival y en Z1 si venía de
+  // la parada. Aquí se unifican al interpretar; no se toca ningún evento
+  // guardado.
+  //
+  // Los datos históricos A1-C3 NO se espejan: su perspectiva nunca se
+  // registró, y el mapa lo advierte con su aviso propio.
   const counts: Record<string, number> = {};
   for (const e of goalieEvents) {
-    const zone = typeof e.originGrid === "string" ? e.originGrid.toUpperCase() : null;
+    const zone = isLegacy
+      ? rawOriginZone(e)
+      : shotOriginFromAttackerView(e, goalie.isOpponent);
     if (!zone) continue;
     if (isLegacy ? isLegacyZoneId(zone) : isZone12Id(zone)) {
       counts[zone] = (counts[zone] || 0) + 1;

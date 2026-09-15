@@ -4,6 +4,7 @@ import {
   Trophy, Target, AlertTriangle, Zap, RefreshCw, Handshake, RotateCcw, X
 } from 'lucide-react';
 import { ActionType, GoalieAction, Player, Role } from '../types/futsal';
+import { ExitOutcome, EXIT_OUTCOME_LABEL } from '../utils/goalkeeperActions';
 import { FutsalPitch } from './field/FutsalPitch';
 import { formatGoalZoneLabel } from '../utils/goalZones';
 
@@ -21,6 +22,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const [pendingShotZone, setPendingShotZone] = React.useState<string | null>(null);
   const [pendingActionType, setPendingActionType] = React.useState<GoalieAction | null>(null);
   const [selectingSubtype, setSelectingSubtype] = React.useState<'steal' | 'loss' | null>(null);
+  const [selectingExitOutcome, setSelectingExitOutcome] = React.useState(false);
 
   // Etiqueta en lenguaje natural: el usuario no debe leer G1-G9.
   const goalZones = Array.from({ length: 9 }).map((_, i) => {
@@ -39,7 +41,13 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   ];
 
   const goalkeeperActions = [
-    { type: GoalieAction.SAVE_PARRY,    label: 'PARADA',   icon: <Handshake size={14} />,     color: 'bg-blue-500',   count: player.stats.saves },
+    // Taxonomía de Fase 4. SAVE_PARRY queda congelado y NO se emite nunca:
+    // sus eventos históricos se capturaron bajo este mismo rótulo "PARADA",
+    // así que su subtipo real es desconocido.
+    { type: GoalieAction.SAVE,          label: 'PARADA',   icon: <Handshake size={14} />,     color: 'bg-blue-500',   count: player.stats.saves },
+    { type: GoalieAction.SAVE_CATCH,    label: 'BLOCAJE',  icon: <Handshake size={14} />,     color: 'bg-sky-600',    count: undefined },
+    { type: GoalieAction.SAVE_DEFLECT,  label: 'DESPEJE',  icon: <Zap size={14} />,           color: 'bg-indigo-500', count: undefined },
+    { type: GoalieAction.EXIT,          label: 'SALIDA',   icon: <Target size={14} />,        color: 'bg-cyan-600',   count: player.stats.exits },
     { type: ActionType.GOAL,            label: 'GOL',      icon: '⚽',                        color: 'bg-green-500',  count: player.stats.goals },
     { type: ActionType.SHOT,            label: 'TIRO',     icon: <Target size={14} />,        color: 'bg-rose-500',   count: player.stats.shots },
     { type: ActionType.ASSIST,          label: 'ASIST',    icon: <Handshake size={14} />,     color: 'bg-yellow-500', count: player.stats.assists },
@@ -73,7 +81,15 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const handleActionClick = (actionType: any) => {
     if (actionType === 'SWAP') {
       onSwap(player.id);
-    } else if (actionType === GoalieAction.SAVE_PARRY || actionType === GoalieAction.GOAL_CONCEDED) {
+    } else if (actionType === GoalieAction.EXIT) {
+      // La salida se resuelve por resultado; su ubicación se pide después y es
+      // omitible, así que aquí no se abre ningún selector de zona.
+      setSelectingExitOutcome(true);
+    } else if (
+      actionType === GoalieAction.SAVE ||
+      actionType === GoalieAction.SAVE_CATCH ||
+      actionType === GoalieAction.SAVE_DEFLECT
+    ) {
       setPendingActionType(actionType);
       setSelectionStep('shot');
       setSelectingZone(true);
@@ -117,6 +133,46 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       />
 
       {/* Subtype selector modal */}
+      {/* SALIDA: solo el resultado. La ubicación la ofrece MatchTracker
+          después, y es omitible — nunca bloquea el registro. */}
+      {selectingExitOutcome && (
+        <div className="absolute inset-0 z-[60] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-3xl">
+          <div className="w-full max-w-[260px] space-y-3">
+            <h3 className="text-[12px] font-black uppercase tracking-widest text-cyan-400 text-center">
+              🧤 Salida del portero
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {(['success', 'fail'] as ExitOutcome[]).map(outcome => (
+                <button
+                  key={outcome}
+                  onClick={() => {
+                    setSelectingExitOutcome(false);
+                    onAction(GoalieAction.EXIT, player.id, {
+                      metadata: { isOpponent: player.isOpponent, exitOutcome: outcome },
+                    });
+                    onClose();
+                  }}
+                  className={`py-4 rounded-2xl border-2 border-white/10 bg-white/5 flex flex-col items-center gap-1 transition-all active:scale-95 ${
+                    outcome === 'success' ? 'hover:bg-green-500/25' : 'hover:bg-red-500/25'
+                  }`}
+                >
+                  <span className="text-lg">{outcome === 'success' ? '✔' : '✘'}</span>
+                  <span className="text-[10px] font-black uppercase text-white">
+                    {EXIT_OUTCOME_LABEL[outcome]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSelectingExitOutcome(false)}
+              className="w-full py-2 text-[10px] font-black text-slate-500 uppercase"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {selectingSubtype && (
         <motion.div
           key="subtype"
@@ -220,7 +276,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Main radial menu */}
-      {!selectingZone && !selectingSubtype && (
+      {!selectingZone && !selectingSubtype && !selectingExitOutcome && (
         <motion.div
           key="radial"
           initial={{ scale: 0.8, opacity: 0 }}
@@ -275,7 +331,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Card buttons — separate bar below the radial, not part of it */}
-      {!selectingZone && !selectingSubtype && (
+      {!selectingZone && !selectingSubtype && !selectingExitOutcome && (
         <motion.div
           key="card-buttons"
           initial={{ opacity: 0, y: 10 }}
@@ -311,7 +367,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Goalkeeper stats bar */}
-      {isGoalkeeper && !selectingZone && !selectingSubtype && (
+      {isGoalkeeper && !selectingZone && !selectingSubtype && !selectingExitOutcome && (
         <motion.div
           key="gk-stats"
           initial={{ opacity: 0, y: 20 }}

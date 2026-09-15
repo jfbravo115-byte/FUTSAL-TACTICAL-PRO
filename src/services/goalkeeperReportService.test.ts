@@ -354,3 +354,86 @@ describe("Nueva taxonomía en el informe", () => {
     }
   });
 });
+
+// ── FASE 4: PARTIDO HISTÓRICO CON DOBLE CONTEO PERSISTIDO ─────────────
+describe("Histórico con el doble conteo de paradas", () => {
+  /**
+   * Partido anterior a Fase 4. El portero LOCAL hizo una parada real, pero la
+   * captura de entonces metía TAMBIÉN al portero rival en `playerIds` y le
+   * acreditaba la parada: `stats.saves` quedó a 1 en los dos.
+   *
+   * El evento se deja EXACTAMENTE como se guardó.
+   */
+  function historico(): MatchData {
+    const gkLocal = player({ id: "gkA", number: 1, isOpponent: false });
+    const gkRival = player({ id: "gkB", number: 12, isOpponent: true });
+    gkLocal.individualTimeSeconds = 600;
+    gkRival.individualTimeSeconds = 600;
+    gkLocal.stats.saves = 1;
+    gkRival.stats.saves = 1; // <- el error antiguo, persistido
+    return matchData({
+      players: [gkLocal, gkRival],
+      events: [
+        event({
+          type: GoalieAction.SAVE_PARRY,
+          playerIds: ["gkA", "gkB"],
+          metadata: { isOpponent: false },
+        }),
+      ],
+    });
+  }
+
+  it("solo el portero que realmente paró recibe la parada reconstruida", () => {
+    const reports = buildGoalkeeperReports(historico());
+    const a = reports.find((g) => g.id === "gkA")!;
+    const b = reports.find((g) => g.id === "gkB")!;
+
+    expect(a.totalSaves).toBe(1);
+    expect(b.totalSaves).toBe(0);
+  });
+
+  it("la parada histórica sigue sin subtipo: no se convierte en despeje", () => {
+    const a = buildGoalkeeperReports(historico()).find((g) => g.id === "gkA")!;
+    expect(a.saveUnspecified).toBe(1);
+    expect(a.saveDeflect).toBe(0);
+    expect(a.saveParry).toBe(0);
+    expect(a.timeline[0].type).toBe("Parada (subtipo no registrado)");
+  });
+
+  it("el JSON original NO se modifica: ni eventos ni stats persistidos", () => {
+    const md = historico();
+    const antes = JSON.stringify(md);
+    buildGoalkeeperReports(md);
+    expect(JSON.stringify(md)).toBe(antes);
+
+    // El stats persistido conserva el valor antiguo: la corrección es de
+    // lectura, no una migración.
+    expect(md.players[1].stats.saves).toBe(1);
+    expect(md.events[0].playerIds).toEqual(["gkA", "gkB"]);
+    expect(md.events[0].type).toBe(GoalieAction.SAVE_PARRY);
+  });
+});
+
+// ── FASE 4: REGRESIÓN EXTREMO A EXTREMO DEL DEFECTO 1 ─────────────────
+describe("SAVE_DEFLECT recorre todo el camino", () => {
+  it("registrar un despeje llega a estadísticas y a informe", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE_DEFLECT, playerIds: ["gk1"], timestamp: 1000 }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+
+    // Estadística: cuenta como parada y como despeje explícito.
+    expect(gk.saveDeflect).toBe(1);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.shotsFaced).toBe(1);
+    expect(gk.effectivenessPct).toBe(100);
+
+    // Informe: aparece con su etiqueta, sin código técnico.
+    expect(gk.timeline).toHaveLength(1);
+    expect(gk.timeline[0].type).toBe("Despeje");
+    expect(gk.timeline[0].type).not.toContain("SAVE");
+  });
+});

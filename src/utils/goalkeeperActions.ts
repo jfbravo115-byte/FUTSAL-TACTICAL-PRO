@@ -39,6 +39,18 @@ export const PRODUCIBLE_SAVE_TYPES: readonly GoalieAction[] = [
   GoalieAction.SAVE_DEFLECT,
 ];
 
+/**
+ * TODOS los tipos de parada, vivos e históricos. Para consumidores que
+ * enumeran tipos en vez de usar un predicado (p. ej. capas de filtro): así
+ * añadir un tipo nuevo no se olvida en ninguno.
+ */
+export const GOALIE_SAVE_TYPES: readonly GoalieAction[] = [
+  GoalieAction.SAVE,
+  GoalieAction.SAVE_CATCH,
+  GoalieAction.SAVE_DEFLECT,
+  GoalieAction.SAVE_PARRY,
+];
+
 /** Todo lo que la captura puede emitir hoy como acción de portero. */
 export const PRODUCIBLE_GOALIE_ACTIONS: readonly GoalieAction[] = [
   ...PRODUCIBLE_SAVE_TYPES,
@@ -322,6 +334,40 @@ export function goalieStatsDelta(
   }
 
   return NO_DELTA;
+}
+
+/**
+ * ¿Este evento pertenece al informe de ESTE portero?
+ *
+ * No basta con que `playerIds` lo incluya. La captura anterior a Fase 4 metía
+ * también al portero RIVAL en la parada del portero local, de modo que un
+ * partido histórico acredita la misma parada a los dos. Aquí se resuelve por
+ * el bando registrado EN EL EVENTO, igual que goalieStatsDelta:
+ *
+ *   - parada o salida  → la firma el portero de SU MISMO bando
+ *   - disparo o gol    → la encara el portero del bando CONTRARIO
+ *
+ * Es corrección de LECTURA: ningún evento almacenado se modifica.
+ */
+export function isGoalieEventOwnedBy(
+  event: GameEvent,
+  player: Pick<Player, "id" | "role" | "isOpponent">,
+): boolean {
+  if (player.role !== Role.GOALKEEPER) return false;
+  if (!event.playerIds.includes(player.id)) return false;
+
+  // El filtro se ciñe EXACTAMENTE al caso que tuvo el bug: las paradas y las
+  // salidas, que son acciones firmadas por el portero y donde la captura
+  // anterior colaba también al portero rival. Se exige que el evento sea de
+  // su mismo bando.
+  if (isTypedSave(event) || event.type === GoalieAction.SAVE_PARRY || isExit(event)) {
+    return player.isOpponent === !!event.metadata?.isOpponent;
+  }
+
+  // El resto (disparo encarado, gol encajado, acciones propias como jugador)
+  // nunca sumó a dos porteros: solo se añadía uno a playerIds. Se respeta la
+  // atribución registrada, que es la única fuente fiable para datos antiguos.
+  return true;
 }
 
 /** ¿Este evento debe añadir al portero rival a playerIds como objetivo? */

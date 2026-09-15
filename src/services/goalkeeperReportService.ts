@@ -14,6 +14,7 @@
 import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
 import {
   exitOutcomeOf,
+  isGoalieEventOwnedBy,
   formatExit,
   formatGoalieAction,
   hasGoalZone,
@@ -39,7 +40,12 @@ export type GoalkeeperReportEntry = {
   totLabel: string;
   /** Nº de eventos GoalieAction.SAVE_CATCH — se presenta como "Blocaje/Atrapada". */
   saveCatch: number;
-  /** Nº de eventos GoalieAction.SAVE_PARRY — se presenta como "Despeje/Rechace". */
+  /**
+   * SIEMPRE 0. SAVE_PARRY quedó congelado en Fase 4 y sus eventos históricos
+   * cuentan en `saveUnspecified`: se capturaron bajo un botón que decía
+   * "PARADA", así que su subtipo real es desconocido y NO son despejes. El
+   * campo se conserva para no romper consumidores existentes.
+   */
   saveParry: number;
   saveGeneric: number;
   /** Despejes/rechaces con subtipo explícito (SAVE_DEFLECT). */
@@ -98,7 +104,15 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
     .slice()
     .sort((a, b) => a.number - b.number)
     .map((p) => {
-      const ownEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
+      // ATRIBUCIÓN COMPARTIDA (corrección de Fase 4).
+      //
+      // Antes bastaba con que playerIds incluyera al portero. La captura
+      // anterior a Fase 4 metía TAMBIÉN al portero rival en la parada del
+      // portero local, así que un partido histórico acreditaba la misma
+      // parada a los dos. Ahora una acción de portero solo cuenta para el
+      // portero de su mismo bando, decidido por el bando registrado en el
+      // propio evento. Es corrección de LECTURA: el JSON no se toca.
+      const ownEvents = matchData.events.filter((e) => isGoalieEventOwnedBy(e, p));
 
       const saveCatch = ownEvents.filter((e) => e.type === GoalieAction.SAVE_CATCH).length;
       const saveDeflect = ownEvents.filter((e) => e.type === GoalieAction.SAVE_DEFLECT).length;

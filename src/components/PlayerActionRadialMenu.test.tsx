@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { ActionType, GoalieAction, Player, Role } from "../types/futsal";
-import { PlayerActionRadialMenu } from "./PlayerActionRadialMenu";
+import { PlayerActionRadialMenu, RADIAL_BUTTON_PX, radialGeometry } from "./PlayerActionRadialMenu";
 
 function player(overrides: Partial<Player> = {}): Player {
   return {
@@ -79,32 +79,108 @@ describe("Botones de portero → tipo interno", () => {
     expect(onAction.mock.calls[0][0]).toBe(GoalieAction.SAVE);
   });
 
-  it("BLOCAJE produce SAVE_CATCH", () => {
+  it("BLOCAJE produce SAVE_CATCH, tras el selector de tipo", () => {
     const { host, onAction } = mount();
+    click(host, "TIPO PARADA");
     click(host, "BLOCAJE");
     click(host, "Zona 1 · izquierda");
     click(host, "Alto · izquierda");
     expect(onAction.mock.calls[0][0]).toBe(GoalieAction.SAVE_CATCH);
   });
 
-  it("DESPEJE produce SAVE_DEFLECT", () => {
+  it("DESPEJE produce SAVE_DEFLECT, tras el selector de tipo", () => {
     const { host, onAction } = mount();
+    click(host, "TIPO PARADA");
     click(host, "DESPEJE");
     click(host, "Zona 1 · izquierda");
     click(host, "Alto · izquierda");
     expect(onAction.mock.calls[0][0]).toBe(GoalieAction.SAVE_DEFLECT);
   });
 
-  it("NINGÚN flujo nuevo produce SAVE_PARRY", () => {
-    for (const boton of ["PARADA", "BLOCAJE", "DESPEJE"]) {
+  it("SALIDA produce EXIT", () => {
+    const { host, onAction } = mount();
+    click(host, "SALIDA");
+    click(host, "Éxito");
+    expect(onAction.mock.calls[0][0]).toBe(GoalieAction.EXIT);
+  });
+
+  it("cancelar el selector de tipo NO registra ningún evento", () => {
+    const { host, onAction } = mount();
+    click(host, "TIPO PARADA");
+    click(host, "Cancelar");
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("NINGÚN camino produce SAVE_PARRY", () => {
+    const rapido = mount();
+    click(rapido.host, "PARADA");
+    click(rapido.host, "Zona 1 · izquierda");
+    click(rapido.host, "Alto · izquierda");
+    expect(rapido.onAction.mock.calls[0][0]).not.toBe(GoalieAction.SAVE_PARRY);
+
+    for (const subtipo of ["BLOCAJE", "DESPEJE"]) {
       const { host, onAction } = mount();
-      click(host, boton);
+      click(host, "TIPO PARADA");
+      click(host, subtipo);
       click(host, "Zona 1 · izquierda");
       click(host, "Alto · izquierda");
       expect(onAction.mock.calls[0][0]).not.toBe(GoalieAction.SAVE_PARRY);
     }
+
+    const salida = mount();
+    click(salida.host, "SALIDA");
+    click(salida.host, "Éxito");
+    expect(salida.onAction.mock.calls[0][0]).not.toBe(GoalieAction.SAVE_PARRY);
+
+    expect(mount().host.textContent || "").not.toContain("SAVE_PARRY");
+  });
+
+  it("PARADA sigue siendo una acción completa: NO pide subtipo", () => {
+    const { host, onAction } = mount();
+    click(host, "PARADA");
+    // Directamente al flujo espacial; ningún paso intermedio de subtipo.
+    expect(host.textContent || "").not.toContain("Tipo de parada");
+    click(host, "Zona 1 · izquierda");
+    click(host, "Alto · izquierda");
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onAction.mock.calls[0][0]).toBe(GoalieAction.SAVE);
+  });
+});
+
+describe("Geometría del anillo", () => {
+  // El anillo de 11 botones de 64 px solapaba 12 px en escritorio y 20 en
+  // móvil, y el hermano superior se quedaba el toque.
+  const MOVIL = 360 * 0.88 - 40;   // 88vw menos el padding p-5
+  const ESCRITORIO = 384 - 40;     // max-w-sm menos el padding
+
+  it("el botón supera el mínimo táctil de 44 px", () => {
+    expect(RADIAL_BUTTON_PX).toBeGreaterThanOrEqual(44);
+  });
+
+  it("10 botones (portero) no solapan ni en móvil ni en escritorio", () => {
+    for (const ancho of [MOVIL, ESCRITORIO]) {
+      const g = radialGeometry(10, RADIAL_BUTTON_PX, ancho);
+      expect(g.fits).toBe(true);
+      expect(g.separation).toBeGreaterThanOrEqual(RADIAL_BUTTON_PX);
+    }
+  });
+
+  it("8 botones (jugador de campo) tampoco solapan", () => {
+    for (const ancho of [MOVIL, ESCRITORIO]) {
+      expect(radialGeometry(8, RADIAL_BUTTON_PX, ancho).fits).toBe(true);
+    }
+  });
+
+  it("el anillo del portero tiene exactamente 10 botones", () => {
     const { host } = mount();
-    expect(host.textContent || "").not.toContain("SAVE_PARRY");
+    const anillo = Array.from(host.querySelectorAll("button")).filter(
+      (b) => b.style.width === `${RADIAL_BUTTON_PX}px`,
+    );
+    expect(anillo).toHaveLength(10);
+  });
+
+  it("detecta el solapamiento que tenía la versión de 11 botones de 64 px", () => {
+    expect(radialGeometry(11, 64, MOVIL).fits).toBe(false);
   });
 });
 
@@ -153,7 +229,7 @@ describe("Jugador de campo", () => {
   it("no ofrece acciones de portero", () => {
     const { host } = mount({ role: Role.PLAYER });
     const texto = (host.textContent || "").toUpperCase();
-    expect(texto).not.toContain("BLOCAJE");
+    expect(texto).not.toContain("TIPO PARADA");
     expect(texto).not.toContain("SALIDA");
   });
 

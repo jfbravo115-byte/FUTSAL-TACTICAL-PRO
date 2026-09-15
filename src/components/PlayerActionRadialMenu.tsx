@@ -5,8 +5,31 @@ import {
 } from 'lucide-react';
 import { ActionType, GoalieAction, Player, Role } from '../types/futsal';
 import { ExitOutcome, EXIT_OUTCOME_LABEL } from '../utils/goalkeeperActions';
+
+/** Botón que abre el selector de subtipo de parada. No es un tipo de evento. */
+const SAVE_TYPE_PICKER = 'SAVE_TYPE_PICKER' as const;
 import { FutsalPitch } from './field/FutsalPitch';
 import { formatGoalZoneLabel } from '../utils/goalZones';
+
+/**
+ * Geometría del anillo. Pura y exportada para poder comprobarla por test: con
+ * 11 botones de 64 px el anillo solapaba 12 px en escritorio y 20 px en móvil,
+ * y el hermano superior se quedaba el toque.
+ *
+ * `button` es el diámetro del botón; la separación centro-centro debe ser
+ * mayor o igual que él para que no haya solape.
+ */
+export function radialGeometry(count: number, button: number, maxDiameter: number) {
+  if (count < 2) return { radius: 0, separation: Infinity, fits: true };
+  const minRadius = button / (2 * Math.sin(Math.PI / count));
+  const maxRadius = (maxDiameter - button) / 2;
+  const radius = Math.min(maxRadius, Math.max(92, minRadius + 8));
+  const separation = 2 * radius * Math.sin(Math.PI / count);
+  return { radius, separation, fits: separation >= button };
+}
+
+/** Diámetro del botón del anillo. 56 px, por encima del mínimo táctil de 44. */
+export const RADIAL_BUTTON_PX = 56;
 
 interface PlayerActionRadialMenuProps {
   player: Player;
@@ -23,6 +46,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const [pendingActionType, setPendingActionType] = React.useState<GoalieAction | null>(null);
   const [selectingSubtype, setSelectingSubtype] = React.useState<'steal' | 'loss' | null>(null);
   const [selectingExitOutcome, setSelectingExitOutcome] = React.useState(false);
+  const [selectingSaveType, setSelectingSaveType] = React.useState(false);
 
   // Etiqueta en lenguaje natural: el usuario no debe leer G1-G9.
   const goalZones = Array.from({ length: 9 }).map((_, i) => {
@@ -45,9 +69,10 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     // sus eventos históricos se capturaron bajo este mismo rótulo "PARADA",
     // así que su subtipo real es desconocido.
     { type: GoalieAction.SAVE,          label: 'PARADA',   icon: <Handshake size={14} />,     color: 'bg-blue-500',   count: player.stats.saves },
-    { type: GoalieAction.SAVE_CATCH,    label: 'BLOCAJE',  icon: <Handshake size={14} />,     color: 'bg-sky-600',    count: undefined },
-    { type: GoalieAction.SAVE_DEFLECT,  label: 'DESPEJE',  icon: <Zap size={14} />,           color: 'bg-indigo-500', count: undefined },
     { type: GoalieAction.EXIT,          label: 'SALIDA',   icon: <Target size={14} />,        color: 'bg-cyan-600',   count: player.stats.exits },
+    // Un solo botón para los dos subtipos: mantiene PARADA y SALIDA a un
+    // toque y evita un anillo de 11 botones, que solapaba.
+    { type: SAVE_TYPE_PICKER,           label: 'TIPO PARADA', icon: <Zap size={14} />,        color: 'bg-indigo-500', count: undefined },
     { type: ActionType.GOAL,            label: 'GOL',      icon: '⚽',                        color: 'bg-green-500',  count: player.stats.goals },
     { type: ActionType.SHOT,            label: 'TIRO',     icon: <Target size={14} />,        color: 'bg-rose-500',   count: player.stats.shots },
     { type: ActionType.ASSIST,          label: 'ASIST',    icon: <Handshake size={14} />,     color: 'bg-yellow-500', count: player.stats.assists },
@@ -58,7 +83,10 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   ];
 
   const actions = isGoalkeeper ? goalkeeperActions : playerActions;
-  const radius = typeof window !== "undefined" && window.innerWidth < 400 ? 78 : 92;
+  // Ancho útil del panel: 88vw (máx. 384 por max-w-sm) menos el padding p-5.
+  const panelWidth =
+    typeof window !== "undefined" ? Math.min(window.innerWidth * 0.88, 384) : 384;
+  const { radius } = radialGeometry(actions.length, RADIAL_BUTTON_PX, panelWidth - 40);
   const interventions = player.stats.saves + player.stats.conceded;
   const savePercentage = interventions > 0 ? Math.round((player.stats.saves / interventions) * 100) : 0;
 
@@ -81,6 +109,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
   const handleActionClick = (actionType: any) => {
     if (actionType === 'SWAP') {
       onSwap(player.id);
+    } else if (actionType === SAVE_TYPE_PICKER) {
+      setSelectingSaveType(true);
     } else if (actionType === GoalieAction.EXIT) {
       // La salida se resuelve por resultado; su ubicación se pide después y es
       // omitible, así que aquí no se abre ningún selector de zona.
@@ -133,6 +163,45 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       />
 
       {/* Subtype selector modal */}
+      {/* TIPO DE PARADA: los dos subtipos explícitos. PARADA genérica sigue
+          siendo un botón directo del anillo, así que esto NO añade pasos al
+          camino rápido. */}
+      {selectingSaveType && (
+        <div className="absolute inset-0 z-[60] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-3xl">
+          <div className="w-full max-w-[260px] space-y-3">
+            <h3 className="text-[12px] font-black uppercase tracking-widest text-indigo-400 text-center">
+              🧤 Tipo de parada
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { type: GoalieAction.SAVE_CATCH, label: 'BLOCAJE', desc: 'Controla el balón' },
+                { type: GoalieAction.SAVE_DEFLECT, label: 'DESPEJE', desc: 'Sigue en juego' },
+              ] as const).map(opt => (
+                <button
+                  key={opt.type}
+                  onClick={() => {
+                    setSelectingSaveType(false);
+                    setPendingActionType(opt.type);
+                    setSelectionStep('shot');
+                    setSelectingZone(true);
+                  }}
+                  className="py-4 px-2 rounded-2xl border-2 border-white/10 bg-white/5 hover:bg-indigo-500/25 flex flex-col items-center gap-1 transition-all active:scale-95"
+                >
+                  <span className="text-[11px] font-black uppercase text-white">{opt.label}</span>
+                  <span className="text-[8px] text-slate-400 text-center leading-tight">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSelectingSaveType(false)}
+              className="w-full py-2 text-[10px] font-black text-slate-500 uppercase"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* SALIDA: solo el resultado. La ubicación la ofrece MatchTracker
           después, y es omitible — nunca bloquea el registro. */}
       {selectingExitOutcome && (
@@ -276,7 +345,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Main radial menu */}
-      {!selectingZone && !selectingSubtype && !selectingExitOutcome && (
+      {!selectingZone && !selectingSubtype && !selectingExitOutcome && !selectingSaveType && (
         <motion.div
           key="radial"
           initial={{ scale: 0.8, opacity: 0 }}
@@ -315,7 +384,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
                   e.stopPropagation();
                   handleActionClick(action.type);
                 }}
-                className={`absolute flex flex-col items-center justify-center w-16 h-16 rounded-full ${action.color} border-4 border-white shadow-[0_10px_25px_rgba(0,0,0,0.3)] text-white transition-all -translate-x-1/2 -translate-y-1/2`}
+                style={{ width: RADIAL_BUTTON_PX, height: RADIAL_BUTTON_PX }}
+                className={`absolute flex flex-col items-center justify-center rounded-full ${action.color} border-4 border-white shadow-[0_10px_25px_rgba(0,0,0,0.3)] text-white transition-all -translate-x-1/2 -translate-y-1/2`}
               >
                 <div className="text-lg shadow-sm">{action.icon}</div>
                 <span className="text-[8px] font-black mt-0.5 tracking-tighter uppercase">{action.label}</span>
@@ -331,7 +401,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Card buttons — separate bar below the radial, not part of it */}
-      {!selectingZone && !selectingSubtype && !selectingExitOutcome && (
+      {!selectingZone && !selectingSubtype && !selectingExitOutcome && !selectingSaveType && (
         <motion.div
           key="card-buttons"
           initial={{ opacity: 0, y: 10 }}
@@ -367,7 +437,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       )}
 
       {/* Goalkeeper stats bar */}
-      {isGoalkeeper && !selectingZone && !selectingSubtype && !selectingExitOutcome && (
+      {isGoalkeeper && !selectingZone && !selectingSubtype && !selectingExitOutcome && !selectingSaveType && (
         <motion.div
           key="gk-stats"
           initial={{ opacity: 0, y: 20 }}

@@ -4,6 +4,7 @@ import { ZONE_12_IDS, mirrorZone12 } from "./fieldZones";
 import {
   EXIT_OUTCOME_LABEL,
   FROZEN_GOALIE_ACTIONS,
+  GOALIE_SAVE_TYPES,
   GOALIE_ACTION_LABEL,
   PRODUCIBLE_GOALIE_ACTIONS,
   PRODUCIBLE_SAVE_TYPES,
@@ -15,7 +16,10 @@ import {
   goalieStatsDelta,
   interventionZoneOf,
   isEventAttributableToGoalie,
+  isAnySave,
   isExit,
+  isGoalieEventOwnedBy,
+  isGoalieIntervention,
   isFrozenGoalieAction,
   isProducibleGoalieAction,
   isUnspecifiedSave,
@@ -322,5 +326,58 @@ describe("Estadísticas: registrar y deshacer usan la misma fuente", () => {
     const campo = gk({ id: "p1", role: Role.PLAYER });
     const e = ev({ type: GoalieAction.SAVE, playerIds: ["p1"] });
     expect(goalieStatsDelta(e, campo)).toEqual({ saves: 0, conceded: 0, exits: 0, exitsSuccess: 0 });
+  });
+});
+
+describe("Ningún consumidor puede olvidar un tipo nuevo", () => {
+  it("GOALIE_SAVE_TYPES enumera TODOS los tipos de parada, vivos e históricos", () => {
+    expect([...GOALIE_SAVE_TYPES].sort()).toEqual(
+      [
+        GoalieAction.SAVE,
+        GoalieAction.SAVE_CATCH,
+        GoalieAction.SAVE_DEFLECT,
+        GoalieAction.SAVE_PARRY,
+      ].sort(),
+    );
+  });
+
+  it("isAnySave reconoce los cuatro tipos de parada", () => {
+    for (const type of GOALIE_SAVE_TYPES) {
+      expect(isAnySave(ev({ type }))).toBe(true);
+    }
+  });
+
+  it("isAnySave NO confunde una salida con una parada", () => {
+    // EXIT es intervención, no parada: no debe colarse en tiros ni paradas.
+    expect(isAnySave(ev({ type: GoalieAction.EXIT }))).toBe(false);
+    expect(isGoalieIntervention(ev({ type: GoalieAction.EXIT }))).toBe(true);
+  });
+
+  it("todo tipo producible está cubierto por algún predicado", () => {
+    for (const type of PRODUCIBLE_GOALIE_ACTIONS) {
+      expect(isGoalieIntervention(ev({ type }))).toBe(true);
+    }
+  });
+
+  it("la propiedad del evento resuelve el doble conteo histórico", () => {
+    const local = { id: "gkA", role: Role.GOALKEEPER, isOpponent: false };
+    const rival = { id: "gkB", role: Role.GOALKEEPER, isOpponent: true };
+    const historico = ev({
+      type: GoalieAction.SAVE_PARRY,
+      playerIds: ["gkA", "gkB"],
+      metadata: { isOpponent: false },
+    });
+    expect(isGoalieEventOwnedBy(historico, local)).toBe(true);
+    expect(isGoalieEventOwnedBy(historico, rival)).toBe(false);
+  });
+
+  it("un gol encajado conserva su atribución registrada", () => {
+    // Nunca tuvo doble conteo: solo se anadía un portero a playerIds.
+    const gol = ev({
+      type: GoalieAction.GOAL_CONCEDED,
+      playerIds: ["gkA"],
+      metadata: { isOpponent: true },
+    });
+    expect(isGoalieEventOwnedBy(gol, { id: "gkA", role: Role.GOALKEEPER, isOpponent: false })).toBe(true);
   });
 });

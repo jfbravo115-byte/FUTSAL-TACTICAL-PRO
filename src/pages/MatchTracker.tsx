@@ -98,6 +98,8 @@ import {
   eventTargetsOpposingGoalie,
   formatExit,
   formatGoalieAction,
+  isAnySave,
+  isConcededGoal,
   goalieStatsDelta,
   isExit,
   isGoalieIntervention,
@@ -638,8 +640,8 @@ const StatsExportTemplate = React.forwardRef<
           // mitad si se especifica (evita acumular 1ª+2ª en la misma tarjeta/mapa)
           const allGoalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
           const goalieEvents = periodFilter ? allGoalieEvents.filter(periodFilter) : allGoalieEvents;
-          const saves = goalieEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = goalieEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+          const saves = goalieEvents.filter(isAnySave).length;
+          const conceded = goalieEvents.filter(isConcededGoal).length;
           const shotsFaced = saves + conceded;
           const effectiveness = shotsFaced > 0 ? ((saves / shotsFaced) * 100).toFixed(1) : "0.0";
 
@@ -2990,11 +2992,11 @@ export default function MatchTracker() {
                 const z = `G${i + 1}`;
                 const saves = matchData.events.filter((e) => {
                   const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || (e.type === ActionType.SHOT && e.destinationGrid !== "OUT")) && (e.destinationGrid === z || e.metadata?.zone === z);
+                  return isGoalieInvolved && isAnySave(e) && (e.destinationGrid === z || e.metadata?.zone === z);
                 }).length;
                 const goals = matchData.events.filter((e) => {
                   const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL) && (e.destinationGrid === z || e.metadata?.zone === z);
+                  return isGoalieInvolved && isConcededGoal(e) && (e.destinationGrid === z || e.metadata?.zone === z);
                 }).length;
 
                 // Color logic: green=saves only, red=goals only, orange=both, empty=none
@@ -3617,8 +3619,8 @@ export default function MatchTracker() {
         };
 
         const gkRow = (p: Player, accent: string, halfEvents: any[]) => {
-          const saves = halfEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = halfEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
+          const saves = halfEvents.filter(isAnySave).length;
+          const conceded = halfEvents.filter(isConcededGoal).length;
           const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0;
           const recoveries = halfEvents.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
           const losses = halfEvents.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
@@ -3646,13 +3648,8 @@ export default function MatchTracker() {
                 const isGkInvolved = (e: any) =>
                   e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
                 const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
-                const saves = halfEvts.filter(e =>
-                  (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                  e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                ).length;
-                const conceded = halfEvts.filter(e =>
-                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                ).length;
+                const saves = halfEvts.filter(isAnySave).length;
+                const conceded = halfEvts.filter(isConcededGoal).length;
                 const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
                 const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
                 const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
@@ -3682,7 +3679,7 @@ export default function MatchTracker() {
         const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
           <div>
             {players.map(p => {
-              // Use SHOT/GOAL events from rival (same as PORTERO tab) - NOT SAVE_PARRY events
+              // Use SHOT/GOAL events from rival (same as PORTERO tab)
               const isGoalieInvolved = (e: any) =>
                 e.playerIds.includes(p.id) ||
                 // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
@@ -3691,12 +3688,7 @@ export default function MatchTracker() {
               const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
 
               // Saves = rival shots that were NOT goals and NOT out (same logic as PORTERO tab)
-              const saveEvts = halfEvts.filter(e =>
-                (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                e.type === GoalieAction.SAVE_PARRY ||
-                e.type === GoalieAction.SAVE_CATCH ||
-                e.type === GoalieAction.SAVE
-              );
+              const saveEvts = halfEvts.filter(isAnySave);
               // Goals conceded = rival goals
               const goalEvts = halfEvts.filter(e =>
                 e.type === GoalieAction.GOAL_CONCEDED ||
@@ -3857,13 +3849,8 @@ export default function MatchTracker() {
                     const evAll = matchData.events.filter(e => isGkInvolved(e));
 
                     const calcStats = (evts: any[]) => {
-                      const saves = evts.filter(e =>
-                        (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                        e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                      ).length;
-                      const conceded = evts.filter(e =>
-                        e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                      ).length;
+                      const saves = evts.filter(isAnySave).length;
+                      const conceded = evts.filter(isConcededGoal).length;
                       return {
                         saves,
                         conceded,
@@ -5269,7 +5256,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5280,7 +5267,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5294,7 +5281,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5305,7 +5292,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5769,14 +5756,7 @@ export default function MatchTracker() {
                                               matchData.events.filter(
                                                 (e) =>
                                                   e.playerIds.includes(p.id) &&
-                                                  (e.type ===
-                                                    GoalieAction.SAVE_PARRY ||
-                                                    e.type ===
-                                                      GoalieAction.SAVE_CATCH ||
-                                                    (e.type ===
-                                                      ActionType.SHOT &&
-                                                      e.metadata
-                                                        ?.isOpponent)) &&
+                                                  isAnySave(e) &&
                                                   (e.destinationGrid === z ||
                                                     e.metadata?.zone === z),
                                               ).length;

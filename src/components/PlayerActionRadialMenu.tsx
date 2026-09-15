@@ -167,8 +167,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
           siendo un botón directo del anillo, así que esto NO añade pasos al
           camino rápido. */}
       {selectingSaveType && (
-        <div className="absolute inset-0 z-[60] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-3xl">
-          <div className="w-full max-w-[260px] space-y-3">
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[88vw] max-w-sm z-[300] bg-[#0E1015] border border-white/10 rounded-3xl p-5 flex flex-col gap-4">
+          <div className="w-full space-y-3">
             <h3 className="text-[12px] font-black uppercase tracking-widest text-indigo-400 text-center">
               🧤 Tipo de parada
             </h3>
@@ -205,8 +205,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       {/* SALIDA: solo el resultado. La ubicación la ofrece MatchTracker
           después, y es omitible — nunca bloquea el registro. */}
       {selectingExitOutcome && (
-        <div className="absolute inset-0 z-[60] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4 rounded-3xl">
-          <div className="w-full max-w-[260px] space-y-3">
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[88vw] max-w-sm z-[300] bg-[#0E1015] border border-white/10 rounded-3xl p-5 flex flex-col gap-4">
+          <div className="w-full space-y-3">
             <h3 className="text-[12px] font-black uppercase tracking-widest text-cyan-400 text-center">
               🧤 Salida del portero
             </h3>

@@ -239,3 +239,84 @@ describe("Jugador de campo", () => {
     expect(onAction.mock.calls[0][0]).toBe(ActionType.ASSIST);
   });
 });
+
+describe("Contexto de apilamiento de los paneles secundarios", () => {
+  /**
+   * Regresión del bug del Deploy Preview de la PR #13.
+   *
+   * Los dos paneles nuevos usaban `absolute inset-0 z-[60]`. `absolute` los
+   * posicionaba respecto al body (y los habría roto dentro de cualquier
+   * ancestro con transform), y z-60 los dejaba POR DEBAJO del backdrop, que
+   * es `fixed z-[200]`. El botón respondía pero la pantalla se veía
+   * oscurecida y vacía.
+   *
+   * Todos los paneles hermanos de este componente usan `fixed … z-[300]`.
+   */
+  const BACKDROP_Z = 200;
+
+  function panelDe(host: HTMLElement, titulo: string): HTMLElement {
+    const panel = Array.from(host.querySelectorAll("div")).find((d) =>
+      (d.textContent || "").trim().startsWith(titulo),
+    );
+    if (!panel) throw new Error(`panel "${titulo}" no encontrado`);
+    return panel;
+  }
+
+  function comprobarPanel(panel: HTMLElement) {
+    // fixed: no depende de ancestros posicionados ni transformados.
+    expect(panel.className).toContain("fixed");
+    expect(panel.className).not.toContain("absolute");
+
+    // Y por encima del backdrop.
+    const z = Number(/z-\[(\d+)\]/.exec(panel.className)?.[1] ?? 0);
+    expect(z).toBeGreaterThan(BACKDROP_Z);
+  }
+
+  it("el panel de TIPO PARADA se monta por encima del backdrop", () => {
+    const { host } = mount();
+    click(host, "TIPO PARADA");
+    comprobarPanel(panelDe(host, "🧤 Tipo de parada"));
+  });
+
+  it("el panel de SALIDA se monta por encima del backdrop", () => {
+    const { host } = mount();
+    click(host, "SALIDA");
+    comprobarPanel(panelDe(host, "🧤 Salida del portero"));
+  });
+
+  it("ambos paneles usan la MISMA convención que los paneles ya existentes", () => {
+    // El selector de subtipo de recuperación/pérdida es el patrón de
+    // referencia del componente: si algún panel nuevo se desvía, este test
+    // lo detecta.
+    const referencia = mount();
+    click(referencia.host, "RECUP.");
+    const patron = panelDe(referencia.host, "✅ Tipo de recuperación").className;
+
+    for (const [boton, titulo] of [
+      ["TIPO PARADA", "🧤 Tipo de parada"],
+      ["SALIDA", "🧤 Salida del portero"],
+    ] as const) {
+      const { host } = mount();
+      click(host, boton);
+      const clases = panelDe(host, titulo).className;
+      for (const critica of ["fixed", "z-[300]", "top-1/2", "left-1/2", "max-w-sm"]) {
+        expect(patron).toContain(critica);
+        expect(clases).toContain(critica);
+      }
+    }
+  });
+
+  it("ningún panel secundario queda dentro de un elemento del anillo", () => {
+    // Si un panel se renderizara dentro de un botón del anillo heredaría su
+    // transform y su escala, y quedaría deformado.
+    for (const [boton, titulo] of [
+      ["TIPO PARADA", "🧤 Tipo de parada"],
+      ["SALIDA", "🧤 Salida del portero"],
+    ] as const) {
+      const { host } = mount();
+      click(host, boton);
+      const panel = panelDe(host, titulo);
+      expect(panel.closest("button")).toBeNull();
+    }
+  });
+});

@@ -1598,57 +1598,6 @@ export default function MatchTracker() {
     setMatchData((prev) => ({ ...prev, isClockRunning: !prev.isClockRunning }));
   };
 
-  const handlePeriodTransition = () => {
-    setMatchData((prev) => {
-      const currentGoals = prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length;
-      const currentOpponentGoals = prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length;
-      const score = { team: currentGoals, opponent: currentOpponentGoals };
-
-      if (prev.period === Period.FIRST) {
-        return {
-          ...prev,
-          period: Period.SECOND,
-          matchClock: 0,
-          isClockRunning: false,
-          fouls: { team: 0, opponent: 0 },
-          events: [
-            {
-              id: `event-p1-end-${Date.now()}`,
-              timestamp: prev.matchClock,
-              wallClock: Date.now(),
-              period: Period.FIRST,
-              playerIds: [],
-              type: ActionType.FORMATION_CHANGE,
-              gameState: GameState.FOUR_VS_FOUR,
-              metadata: { system: true, label: "FIN 1ª PARTE" },
-              scoreAtEvent: score
-            },
-            ...prev.events
-          ]
-        };
-      }
-      return {
-        ...prev,
-        period: Period.FINISHED,
-        isClockRunning: false,
-        events: [
-          {
-            id: `event-match-end-${Date.now()}`,
-            timestamp: prev.matchClock,
-            wallClock: Date.now(),
-            period: prev.period,
-            playerIds: [],
-            type: ActionType.FORMATION_CHANGE,
-            gameState: GameState.FOUR_VS_FOUR,
-            metadata: { system: true, label: "FIN PARTIDO" },
-            scoreAtEvent: score
-          },
-          ...prev.events
-        ]
-      };
-    });
-  };
-
   const resetTimer = () => {
     setIsResetConfirmOpen(true);
   };

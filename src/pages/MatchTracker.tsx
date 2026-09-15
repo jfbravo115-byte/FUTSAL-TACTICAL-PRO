@@ -98,7 +98,8 @@ import {
   acceptsGoalkeeperZone,
   eventAcceptsGoalkeeperZone,
   ExitOutcome,
-  GoalieResponse,
+  GOALIE_RESPONSE_UNSPECIFIED,
+  GoalieResponseDeclared,
   goalieRespondingToShot,
   EXIT_OUTCOME_LABEL,
   eventTargetsOpposingGoalie,
@@ -1441,7 +1442,7 @@ export default function MatchTracker() {
     setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
     subType?: string;
     /** Modelo C: respuesta del portero declarada dentro del mismo tiro. */
-    goalieResponse?: GoalieResponse;
+    goalieResponse?: GoalieResponseDeclared;
     exitOutcome?: ExitOutcome;
     step: "origin" | "target" | "player" | "subtype" | "response" | "exitOutcome" | null;
   } | null>(null);
@@ -7113,13 +7114,21 @@ export default function MatchTracker() {
                           </button>
                         ))}
                       </div>
+                      {/* Deja constancia EXPLÍCITA de que no se registra la
+                          intervención. No dice que el portero no tocara el
+                          balón: dice que no lo sabemos, y por eso el sistema
+                          no inventará una parada. */}
                       <button
                         onClick={() =>
-                          setPendingAction((prev) => ({ ...prev!, step: "target" }))
+                          setPendingAction((prev) => ({
+                            ...prev!,
+                            goalieResponse: GOALIE_RESPONSE_UNSPECIFIED,
+                            step: "target",
+                          }))
                         }
                         className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
                       >
-                        No / continuar
+                        No registrar intervención
                       </button>
                     </div>
                   )}

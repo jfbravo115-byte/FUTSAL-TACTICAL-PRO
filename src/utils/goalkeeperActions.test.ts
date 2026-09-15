@@ -16,9 +16,13 @@ import {
   eventAcceptsGoalkeeperZone,
   exitOutcomeOf,
   GoalieResponse,
+  declaredGoalieResponseOf,
+  formatDeclaredResponse,
+  GOALIE_RESPONSE_UNSPECIFIED,
   goalieRespondingToShot,
   goalieResponseOf,
   isGoalieResponse,
+  isTypedSave,
   targetGoalkeeperIdOf,
   formatExit,
   formatGoalieAction,
@@ -661,5 +665,94 @@ describe("Semántica de OUT frente a la respuesta del portero", () => {
   it("SIN respuesta declarada, el destino decide (comportamiento histórico)", () => {
     expect(goalieStatsDelta(tiro(null, "G5"), nuestroGk).saves).toBe(1);
     expect(goalieStatsDelta(tiro(null, "OUT"), nuestroGk).saves).toBe(0);
+  });
+});
+
+// ── UNSPECIFIED: EL OPERADOR DECIDIÓ NO REGISTRAR LA INTERVENCIÓN ─────
+describe("undefined (histórico) frente a UNSPECIFIED (nuevo)", () => {
+  const nuestroGk = gk({ id: "gk1", isOpponent: false });
+
+  const tiro = (declarado: string | undefined, destino = "G5") =>
+    ev({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      destinationGrid: destino,
+      metadata: {
+        isOpponent: true,
+        targetGoalkeeperId: "gk1",
+        ...(declarado ? { goalieResponse: declarado } : {}),
+      },
+    });
+
+  it("NO son equivalentes: undefined conserva el fallback, UNSPECIFIED lo corta", () => {
+    const historico = tiro(undefined);
+    const nuevo = tiro(GOALIE_RESPONSE_UNSPECIFIED);
+
+    expect(declaredGoalieResponseOf(historico)).toBeNull();
+    expect(declaredGoalieResponseOf(nuevo)).toBe(GOALIE_RESPONSE_UNSPECIFIED);
+
+    expect(isUnspecifiedSave(historico)).toBe(true);
+    expect(isUnspecifiedSave(nuevo)).toBe(false);
+  });
+
+  it("histórico a puerta sigue siendo parada de subtipo no registrado", () => {
+    expect(goalieStatsDelta(tiro(undefined, "G5"), nuestroGk).saves).toBe(1);
+  });
+
+  it("UNSPECIFIED no es una parada", () => {
+    const e = tiro(GOALIE_RESPONSE_UNSPECIFIED);
+    expect(isAnySave(e)).toBe(false);
+    expect(isTypedSave(e)).toBe(false);
+    expect(isExit(e)).toBe(false);
+    expect(effectiveGoalieAction(e)).toBeNull();
+  });
+
+  it("UNSPECIFIED + G5 → 0 paradas", () => {
+    expect(goalieStatsDelta(tiro(GOALIE_RESPONSE_UNSPECIFIED, "G5"), nuestroGk)).toEqual({
+      saves: 0, conceded: 0, exits: 0, exitsSuccess: 0,
+    });
+  });
+
+  it("UNSPECIFIED + OUT → 0 paradas", () => {
+    expect(goalieStatsDelta(tiro(GOALIE_RESPONSE_UNSPECIFIED, "OUT"), nuestroGk).saves).toBe(0);
+  });
+
+  it("deshacer un UNSPECIFIED no resta una parada inexistente", () => {
+    // Registrar y borrar usan el mismo delta: si suma 0, resta 0.
+    const e = tiro(GOALIE_RESPONSE_UNSPECIFIED);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(0);
+  });
+
+  it("UNSPECIFIED no abre zona de intervención: no se inventa ubicación", () => {
+    expect(eventAcceptsGoalkeeperZone(tiro(GOALIE_RESPONSE_UNSPECIFIED))).toBe(false);
+  });
+
+  it("las respuestas con intervención siguen contando exactamente una vez", () => {
+    for (const r of PRODUCIBLE_SAVE_TYPES) {
+      expect(goalieStatsDelta(tiro(r), nuestroGk).saves).toBe(1);
+    }
+    const salida = ev({
+      ...tiro(GoalieAction.EXIT, undefined),
+      metadata: { isOpponent: true, goalieResponse: GoalieAction.EXIT, exitOutcome: "success", targetGoalkeeperId: "gk1" },
+    });
+    expect(goalieStatsDelta(salida, nuestroGk)).toEqual({ saves: 0, conceded: 0, exits: 1, exitsSuccess: 1 });
+  });
+
+  it("un GOL rival sigue contando como encajado", () => {
+    const gol = ev({
+      type: ActionType.GOAL,
+      playerIds: ["rival-10", "gk1"],
+      metadata: { isOpponent: true, targetGoalkeeperId: "gk1" },
+    });
+    expect(goalieStatsDelta(gol, nuestroGk)).toEqual({ saves: 0, conceded: 1, exits: 0, exitsSuccess: 0 });
+  });
+
+  it("la etiqueta de exportación es humana y nunca el código", () => {
+    expect(formatDeclaredResponse(tiro(GOALIE_RESPONSE_UNSPECIFIED))).toBe("Sin intervención registrada");
+    expect(formatDeclaredResponse(tiro(GoalieAction.SAVE_DEFLECT))).toBe("Despeje");
+    expect(formatDeclaredResponse(tiro(undefined))).toBe("");
+    for (const declarado of [GOALIE_RESPONSE_UNSPECIFIED, ...PRODUCIBLE_SAVE_TYPES]) {
+      expect(formatDeclaredResponse(tiro(declarado))).not.toMatch(/UNSPECIFIED|SAVE|EXIT/);
+    }
   });
 });

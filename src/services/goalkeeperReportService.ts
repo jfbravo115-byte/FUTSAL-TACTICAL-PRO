@@ -15,6 +15,7 @@ import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../typ
 import { GkZoneTally, tallyGoalkeeperZones } from "../utils/goalkeeperZones";
 import {
   effectiveGoalieAction,
+  hasUndeclaredIntervention,
   eventAcceptsGoalkeeperZone,
   exitOutcomeOf,
   isGoalieEventOwnedBy,
@@ -62,7 +63,20 @@ export type GoalkeeperReportEntry = {
   saveUnspecified: number;
   totalSaves: number;
   conceded: number;
+  /**
+   * Denominador de la efectividad: intervenciones RESUELTAS, es decir
+   * paradas más goles encajados. NO incluye los tiros cuya respuesta el
+   * operador decidió no registrar — inflar el denominador con ocasiones que
+   * no sabemos cómo acabaron haría bajar el porcentaje sin motivo.
+   */
   shotsFaced: number;
+  /**
+   * Tiros recibidos cuya respuesta NO se declaró (goalieResponse
+   * 'UNSPECIFIED'). Se cuentan aparte: son tiros recibidos, pero no paradas.
+   */
+  shotsUndeclared: number;
+  /** Total de tiros recibidos: resueltos más no declarados. */
+  shotsAgainst: number;
   /**
    * Intervenciones con zona de portería registrada, es decir las que el mapa
    * de impacto puede dibujar. Permite que cabecera y mapa cuadren a la vista
@@ -149,7 +163,13 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       const exitsFail = exitEvents.filter((e) => exitOutcomeOf(e) === "fail").length;
       const exitsUnknown = exits - exitsSuccess - exitsFail;
       const conceded = ownEvents.filter(isConcededGoal).length;
+      // Efectividad = paradas / (paradas + encajados). Semántica intacta
+      // respecto a los partidos anteriores, para que sigan siendo comparables.
       const shotsFaced = totalSaves + conceded;
+      // Tiros recibidos cuya respuesta el operador no registró. Se declaran
+      // aparte en lugar de convertirse en paradas.
+      const shotsUndeclared = ownEvents.filter(hasUndeclaredIntervention).length;
+      const shotsAgainst = shotsFaced + shotsUndeclared;
       const mappedInterventions = ownEvents.filter(
         (e) => (isAnySave(e) || isConcededGoal(e)) && hasGoalZone(e),
       ).length;
@@ -209,6 +229,8 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         totalSaves,
         conceded,
         shotsFaced,
+        shotsUndeclared,
+        shotsAgainst,
         effectivenessPct,
         events: ownEvents,
         timeline,

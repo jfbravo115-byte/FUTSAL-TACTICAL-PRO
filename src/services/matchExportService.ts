@@ -1,7 +1,7 @@
 import { MatchData, Period } from "../types/futsal";
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { formatDestinationLabel } from "../utils/goalZones";
-import { EXIT_OUTCOME_LABEL, isExitOutcome } from "../utils/goalkeeperActions";
+import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../utils/goalkeeperActions";
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { generateMatchReport } from "./matchReportService";
 
@@ -25,7 +25,7 @@ function timeLabel(ms: number): string {
 export function buildActionsCsv(matchData: MatchData): string {
   // "zona" y "destino" conservan el identificador interno para poder cruzar
   // datos; "zona_texto" y "destino_texto" son los legibles.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "resultado_salida"];
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -49,6 +49,8 @@ export function buildActionsCsv(matchData: MatchData): string {
         // goalkeeperZone es un campo PROPIO (GK1-GK5): nunca se mezcla con la
         // zona de origen ni se cuenta como tal. Se exporta ya traducido.
         formatGoalkeeperZone(e.goalkeeperZone) ?? "",
+        // Ya traducida: el CSV nunca contiene UNSPECIFIED ni SAVE_DEFLECT.
+        formatDeclaredResponse(e),
         isExitOutcome(md.exitOutcome) ? EXIT_OUTCOME_LABEL[md.exitOutcome] : "",
       ].map(csvCell).join(",");
     });

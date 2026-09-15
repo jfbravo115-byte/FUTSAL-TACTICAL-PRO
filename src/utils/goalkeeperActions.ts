@@ -90,6 +90,17 @@ export const GOALIE_ACTION_LABEL: Record<string, string> = {
   [ActionType.GOAL]: "Gol encajado",
 };
 
+/**
+ * Etiqueta de usuario para lo declarado sobre un tiro. Nunca devuelve el
+ * código interno.
+ */
+export function formatDeclaredResponse(event: GameEvent): string {
+  const declared = declaredGoalieResponseOf(event);
+  if (declared === null) return "";
+  if (declared === GOALIE_RESPONSE_UNSPECIFIED) return "Sin intervención registrada";
+  return declared === GoalieAction.EXIT ? formatExit(event) : formatGoalieAction(declared);
+}
+
 export function formatGoalieAction(type: unknown): string {
   return GOALIE_ACTION_LABEL[String(type)] ?? String(type);
 }
@@ -114,6 +125,25 @@ export type GoalieResponse =
   | GoalieAction.SAVE_DEFLECT
   | GoalieAction.EXIT;
 
+/**
+ * El operador tuvo la ocasión de registrar la respuesta del portero y decidió
+ * continuar sin registrarla.
+ *
+ * NO significa que podamos demostrar que el portero no tocó el balón: pudo
+ * haber poste, bloqueo de un defensa o, sencillamente, dato incompleto. Por
+ * eso no se llama 'none'.
+ *
+ * Es distinto de `undefined`, que marca un evento del modelo ANTERIOR, donde
+ * no existía forma de declarar la respuesta y por tanto sigue aplicando el
+ * fallback histórico.
+ */
+export const GOALIE_RESPONSE_UNSPECIFIED = "UNSPECIFIED" as const;
+
+/** Lo que puede declararse como respuesta, incluida la no-declaración. */
+export type GoalieResponseDeclared =
+  | GoalieResponse
+  | typeof GOALIE_RESPONSE_UNSPECIFIED;
+
 export const GOALIE_RESPONSES: readonly GoalieResponse[] = [
   GoalieAction.SAVE,
   GoalieAction.SAVE_CATCH,
@@ -125,11 +155,32 @@ export function isGoalieResponse(raw: unknown): raw is GoalieResponse {
   return GOALIE_RESPONSES.includes(raw as GoalieResponse);
 }
 
-/** Respuesta del portero declarada sobre un tiro, o null si no se registró. */
-export function goalieResponseOf(event: GameEvent): GoalieResponse | null {
+/**
+ * Valor DECLARADO en el evento: una intervención, la no-declaración explícita
+ * (`UNSPECIFIED`), o null si el evento es del modelo anterior.
+ *
+ * Distinguir null de UNSPECIFIED es el punto central: null habilita el
+ * fallback histórico, UNSPECIFIED lo prohíbe.
+ */
+export function declaredGoalieResponseOf(event: GameEvent): GoalieResponseDeclared | null {
   if (event.type !== ActionType.SHOT) return null;
   const raw = event.metadata?.goalieResponse;
+  if (raw === GOALIE_RESPONSE_UNSPECIFIED) return GOALIE_RESPONSE_UNSPECIFIED;
   return isGoalieResponse(raw) ? raw : null;
+}
+
+/** ¿El operador declaró explícitamente que no registra intervención? */
+export function hasUndeclaredIntervention(event: GameEvent): boolean {
+  return declaredGoalieResponseOf(event) === GOALIE_RESPONSE_UNSPECIFIED;
+}
+
+/**
+ * Respuesta del portero CON intervención, o null. `UNSPECIFIED` devuelve null
+ * a propósito: no es una intervención y no debe clasificarse como tal.
+ */
+export function goalieResponseOf(event: GameEvent): GoalieResponse | null {
+  const declared = declaredGoalieResponseOf(event);
+  return declared !== null && declared !== GOALIE_RESPONSE_UNSPECIFIED ? declared : null;
 }
 
 /**
@@ -250,9 +301,10 @@ export function isTypedSave(e: GameEvent): boolean {
 export function isUnspecifiedSave(e: GameEvent): boolean {
   if (e.type === GoalieAction.SAVE_PARRY) return true;
   if (e.type !== ActionType.SHOT) return false;
-  // Un tiro que YA declara su respuesta no es una parada sin subtipo: lo
-  // clasifica su respuesta. Sin ella se mantiene el criterio de siempre.
-  if (goalieResponseOf(e) !== null) return false;
+  // Un tiro que YA declara algo -una intervención o su ausencia explícita- no
+  // es una parada sin subtipo. El fallback histórico solo aplica cuando el
+  // evento no declara nada, es decir cuando viene del modelo anterior.
+  if (declaredGoalieResponseOf(e) !== null) return false;
   return e.destinationGrid?.toUpperCase() !== "OUT";
 }
 
@@ -457,6 +509,9 @@ export function goalieStatsDelta(
   // para el portero contrario, y solo si fue entre los tres palos. Es el
   // comportamiento histórico, que se conserva intacto.
   if (event.type === ActionType.SHOT) {
+    // Si el operador declaró que no registra intervención, no se le inventa
+    // una parada: solo fue un tiro recibido.
+    if (hasUndeclaredIntervention(event)) return NO_DELTA;
     const onTarget = event.destinationGrid?.toUpperCase() !== "OUT";
     return !sameTeam && onTarget ? { ...NO_DELTA, saves: 1 } : NO_DELTA;
   }

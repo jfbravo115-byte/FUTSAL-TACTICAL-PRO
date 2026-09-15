@@ -610,3 +610,83 @@ describe("Tiro rival con respuesta del portero", () => {
     expect(gk.saveCatch).toBe(1);
   });
 });
+
+// ── UNSPECIFIED EN EL INFORME: TIRO RECIBIDO, CERO PARADAS ────────────
+describe("Tiros cuya respuesta no se registró", () => {
+  const tiro = (declarado: string | undefined, destino = "G5") =>
+    event({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      destinationGrid: destino,
+      metadata: {
+        isOpponent: true,
+        targetGoalkeeperId: "gk1",
+        ...(declarado ? { goalieResponse: declarado } : {}),
+      },
+    });
+
+  it("UNSPECIFIED cuenta como tiro recibido pero NO como parada", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("UNSPECIFIED"), tiro("UNSPECIFIED", "OUT")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(0);
+    expect(gk.saveUnspecified).toBe(0);
+    expect(gk.shotsUndeclared).toBe(2);
+    expect(gk.shotsAgainst).toBe(2);
+    // El denominador de efectividad NO se infla con lo que no sabemos.
+    expect(gk.shotsFaced).toBe(0);
+    expect(gk.effectivenessPct).toBeNull();
+  });
+
+  it("el histórico sin declarar conserva su parada de subtipo no registrado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro(undefined)],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveUnspecified).toBe(1);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.shotsUndeclared).toBe(0);
+    expect(gk.timeline[0].type).toBe("Parada (sin subtipo registrado)");
+  });
+
+  it("el informe NO muestra 'Parada' para un UNSPECIFIED", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("UNSPECIFIED")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    // No aparece en la cronología de intervenciones.
+    expect(gk.timeline).toHaveLength(0);
+  });
+
+  it("los mapas GK no inventan intervención para un UNSPECIFIED", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("UNSPECIFIED")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones).toEqual({ GK1: 0, GK2: 0, GK3: 0, GK4: 0, GK5: 0 });
+    expect(gk.interventionsUnlocated).toBe(0);
+  });
+
+  it("efectividad y denominador con mezcla de declarado y no declarado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        tiro("SAVE"),                       // resuelto: parada
+        tiro("UNSPECIFIED"),                // recibido, sin declarar
+        event({ type: ActionType.GOAL, playerIds: ["rival-10", "gk1"], metadata: { isOpponent: true, targetGoalkeeperId: "gk1" } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.conceded).toBe(1);
+    expect(gk.shotsFaced).toBe(2);          // 1 parada + 1 encajado
+    expect(gk.shotsUndeclared).toBe(1);
+    expect(gk.shotsAgainst).toBe(3);        // tiros recibidos totales
+    expect(gk.effectivenessPct).toBe(50);   // 1 / (1+1)
+  });
+});

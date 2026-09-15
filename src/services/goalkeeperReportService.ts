@@ -12,7 +12,9 @@
  * no se inventa ningún criterio nuevo.
  */
 import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
+import { GkZoneTally, tallyGoalkeeperZones } from "../utils/goalkeeperZones";
 import {
+  acceptsGoalkeeperZone,
   exitOutcomeOf,
   isGoalieEventOwnedBy,
   formatExit,
@@ -72,6 +74,18 @@ export type GoalkeeperReportEntry = {
   exitsFail: number;
   /** Salidas sin resultado registrado. Nunca se infiere. */
   exitsUnknown: number;
+  /**
+   * Distribución de intervenciones por zona del portero (GK1-GK5). Dominio
+   * SEPARADO del origen del tiro y del destino en portería: nunca se mezclan
+   * en una misma métrica.
+   */
+  interventionZones: GkZoneTally;
+  /** Intervenciones sin zona registrada. Se declara, no se reparte. */
+  interventionsUnlocated: number;
+  /** Salidas por zona, y su desglose de resultado. */
+  exitZones: GkZoneTally;
+  exitZonesSuccess: GkZoneTally;
+  exitZonesFail: GkZoneTally;
   effectivenessPct: number | null;
   events: GameEvent[]; // eventos propios (para los mapas, ya filtrados)
   timeline: GoalkeeperTimelineEntry[];
@@ -135,6 +149,22 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       ).length;
       const effectivenessPct = shotsFaced > 0 ? Math.round((totalSaves / shotsFaced) * 100) : null;
 
+      // ZONA DE INTERVENCIÓN (GK1-GK5). Se cuentan las acciones que admiten
+      // zona: paradas con tipo propio y salidas. Las que no la registraron se
+      // declaran aparte en vez de repartirse.
+      const zonedEvents = ownEvents.filter((e) => acceptsGoalkeeperZone(e.type));
+      const zoneTally = tallyGoalkeeperZones(zonedEvents);
+      const interventionZones = zoneTally.byZone;
+      const interventionsUnlocated = zoneTally.unlocated;
+
+      const exitZones = tallyGoalkeeperZones(exitEvents).byZone;
+      const exitZonesSuccess = tallyGoalkeeperZones(
+        exitEvents.filter((e) => exitOutcomeOf(e) === "success"),
+      ).byZone;
+      const exitZonesFail = tallyGoalkeeperZones(
+        exitEvents.filter((e) => exitOutcomeOf(e) === "fail"),
+      ).byZone;
+
       // Mismos predicados que las estadísticas: si una intervención cuenta
       // arriba, aparece también aquí.
       const timeline: GoalkeeperTimelineEntry[] = ownEvents
@@ -164,6 +194,11 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         exitsSuccess,
         exitsFail,
         exitsUnknown,
+        interventionZones,
+        interventionsUnlocated,
+        exitZones,
+        exitZonesSuccess,
+        exitZonesFail,
         mappedInterventions,
         totalSaves,
         conceded,

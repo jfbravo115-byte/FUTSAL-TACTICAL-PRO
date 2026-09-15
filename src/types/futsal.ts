@@ -61,7 +61,7 @@ export enum GoalieAction {
   /**
    * Salida / intervención: el portero abandona o extiende su zona habitual
    * para interceptar una acción rival. El resultado va en
-   * metadata.exitOutcome y la ubicación, si se registra, en interventionGrid.
+   * metadata.exitOutcome y la ubicación, si se registra, en goalkeeperZone.
    */
   EXIT = 'EXIT',
   /**
@@ -120,6 +120,21 @@ export type Player = {
   stats: PlayerStats;
 };
 
+/**
+ * Zona de INTERVENCIÓN del portero: su propia área vista desde arriba, con la
+ * portería arriba y dividida por profundidad. Dominio independiente del de las
+ * 12 zonas de pista — una intervención no es un origen de tiro.
+ *
+ *   GK1  bajo palos
+ *   GK2  dentro del área, profundidad corta
+ *   GK3  dentro del área, profundidad media
+ *   GK4  zona avanzada, hasta el límite del área
+ *   GK5  fuera del área
+ *
+ * La referencia es visual y táctica: no codifica metros.
+ */
+export type GoalkeeperInterventionZone = 'GK1' | 'GK2' | 'GK3' | 'GK4' | 'GK5';
+
 export type GameEvent = {
   id: string;
   timestamp: number;
@@ -142,18 +157,18 @@ export type GameEvent = {
    */
   attackDirection?: 'ltr' | 'rtl';
   /**
-   * Lugar físico donde INTERVIENE el portero. Concepto distinto y separado de
-   * los otros dos campos espaciales, a propósito:
+   * Lugar físico donde INTERVIENE el portero. Dominio PROPIO, deliberadamente
+   * distinto del de las 12 zonas de pista:
    *
-   *   originGrid       → desde dónde se origina el tiro/acción
-   *   destinationGrid  → dónde termina el tiro dentro de la portería
-   *   interventionGrid → dónde interviene el portero
+   *   originGrid      → desde dónde se origina el tiro/acción   (Z1L-Z4R)
+   *   destinationGrid → dónde termina el tiro en la portería     (G1-G9/OUT)
+   *   goalkeeperZone  → dónde interviene el portero              (GK1-GK5)
    *
-   * Se guarda en la perspectiva del portero que interviene (su portería a la
-   * izquierda). Nunca debe leerse como origen de tiro ni sumarse a los
-   * agregados de origen.
+   * Son tres preguntas distintas y no deben mezclarse en una misma métrica.
+   * Nunca debe leerse como origen de tiro ni sumarse a los agregados de
+   * origen.
    */
-  interventionGrid?: string;
+  goalkeeperZone?: GoalkeeperInterventionZone;
   metadata?: Record<string, any>;
   scoreAtEvent?: { team: number; opponent: number };
 };

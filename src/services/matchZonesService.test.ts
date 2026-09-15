@@ -245,11 +245,11 @@ describe("filtros de la matriz", () => {
 });
 
 // ── FASE 4 ────────────────────────────────────────────────────────────
-describe("interventionGrid no contamina los agregados de origen", () => {
+describe("goalkeeperZone no contamina los agregados de origen", () => {
   it("la zona donde interviene el portero NUNCA se cuenta como origen de tiro", () => {
     const salida = {
       ...ev("s1", GoalieAction.EXIT, undefined),
-      interventionGrid: "Z1C",
+      goalkeeperZone: "GK2",
       metadata: { isOpponent: false, exitOutcome: "success" },
     };
     const md = { ...base, events: [salida as any] };
@@ -263,14 +263,14 @@ describe("interventionGrid no contamina los agregados de origen", () => {
   it("si la salida además trae originGrid, cada campo va a lo suyo", () => {
     const salida = {
       ...ev("s1", GoalieAction.EXIT, "Z4R"),
-      interventionGrid: "Z1C",
+      goalkeeperZone: "GK2",
       metadata: { isOpponent: false },
     };
     const md = { ...base, events: [salida as any, ev("t1", ActionType.SHOT, "Z4R")] };
     const bucket = buildZoneDashboard(md).zone12!;
 
-    // Z1C (intervención) no aparece; Z4R sí, y solo por el origen.
-    expect(bucket.zones.find((z) => z.zone === "Z1C")!.total).toBe(0);
+    // La zona del portero (otro dominio) no aparece; Z4R sí, y solo por el origen.
+    expect(bucket.zones.every((z) => !z.zone.startsWith("GK"))).toBe(true);
     expect(bucket.zones.find((z) => z.zone === "Z4R")!.total).toBeGreaterThan(0);
   });
 });

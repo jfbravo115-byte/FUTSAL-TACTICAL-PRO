@@ -211,13 +211,13 @@ export function rawOriginZone(event: GameEvent): string | null {
 }
 
 /**
- * Sector donde intervino el portero. Campo propio y separado: NUNCA se lee
- * desde originGrid ni se mezcla con él.
+ * ¿Esta acción admite zona de intervención del portero?
+ *
+ * Las paradas con tipo propio y las salidas. Siempre OPCIONAL: omitirla no
+ * impide registrar la acción.
  */
-export function interventionZoneOf(event: GameEvent): Zone12Id | null {
-  const zone =
-    typeof event.interventionGrid === "string" ? event.interventionGrid.toUpperCase() : null;
-  return isZone12Id(zone) ? zone : null;
+export function acceptsGoalkeeperZone(type: unknown): boolean {
+  return isProducibleGoalieAction(type);
 }
 
 // ── ATRIBUCIÓN A UN PORTERO CONCRETO ────────────────────────────────────

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ActionType, GameEvent, GameState, GoalieAction, Period, Player, Role } from "../types/futsal";
 import { ZONE_12_IDS, mirrorZone12 } from "./fieldZones";
+import { goalkeeperZoneOf } from "./goalkeeperZones";
 import {
   EXIT_OUTCOME_LABEL,
   FROZEN_GOALIE_ACTIONS,
@@ -10,11 +11,11 @@ import {
   PRODUCIBLE_SAVE_TYPES,
   attributedGoalieId,
   eventTargetsOpposingGoalie,
+  acceptsGoalkeeperZone,
   exitOutcomeOf,
   formatExit,
   formatGoalieAction,
   goalieStatsDelta,
-  interventionZoneOf,
   isEventAttributableToGoalie,
   isAnySave,
   isExit,
@@ -123,43 +124,58 @@ describe("Salida / intervención", () => {
     expect(formatExit(e)).toBe("Salida (resultado no registrado)");
   });
 
-  it("una salida CON ubicación la guarda en su campo propio", () => {
-    const e = ev({ type: GoalieAction.EXIT, interventionGrid: "Z1C" });
-    expect(interventionZoneOf(e)).toBe("Z1C");
+  it("una salida CON zona la guarda en su campo propio", () => {
+    const e = ev({ type: GoalieAction.EXIT, goalkeeperZone: "GK4" });
+    expect(goalkeeperZoneOf(e)).toBe("GK4");
   });
 
-  it("una salida SIN ubicación sigue siendo válida", () => {
-    const e = ev({ type: GoalieAction.EXIT, metadata: { isOpponent: false, exitOutcome: "success" } });
-    expect(interventionZoneOf(e)).toBeNull();
+  it("una salida SIN zona sigue siendo válida y contabilizable", () => {
+    const e = ev({
+      type: GoalieAction.EXIT,
+      playerIds: ["gk1"],
+      metadata: { isOpponent: false, exitOutcome: "success" },
+    });
+    expect(goalkeeperZoneOf(e)).toBeNull();
     expect(exitOutcomeOf(e)).toBe("success");
-    expect(goalieStatsDelta(e, gk({ id: "gk1" })).exits).toBe(0); // sin playerIds no es suya
-    const suya = ev({ ...e, playerIds: ["gk1"] });
-    expect(goalieStatsDelta(suya, gk({ id: "gk1" })).exits).toBe(1);
+    expect(goalieStatsDelta(e, gk({ id: "gk1" })).exits).toBe(1);
   });
 });
 
-describe("interventionGrid NUNCA se confunde con originGrid", () => {
-  it("son campos independientes y no se leen el uno por el otro", () => {
+describe("goalkeeperZone es un dominio aparte", () => {
+  it("NO modifica originGrid ni destinationGrid", () => {
     const e = ev({
-      type: GoalieAction.EXIT,
-      interventionGrid: "Z1C",
+      type: GoalieAction.SAVE,
+      goalkeeperZone: "GK2",
       originGrid: "Z4R",
+      destinationGrid: "G5",
       metadata: { isOpponent: false },
     });
-    expect(interventionZoneOf(e)).toBe("Z1C");
-    // La lectura de origen NO devuelve la zona de intervención.
-    expect(shotOriginFromAttackerView(e, false)).not.toBe("Z1C");
+    expect(goalkeeperZoneOf(e)).toBe("GK2");
+    // Cada campo conserva lo suyo.
+    expect(e.originGrid).toBe("Z4R");
+    expect(e.destinationGrid).toBe("G5");
+    // Y la lectura de origen no devuelve la zona del portero.
+    expect(shotOriginFromAttackerView(e, false)).not.toBe("GK2" as any);
   });
 
-  it("una salida con ubicación pero SIN originGrid no aporta origen de tiro", () => {
-    const e = ev({ type: GoalieAction.EXIT, interventionGrid: "Z1L" });
+  it("una zona de portero NO se lee como sector de pista", () => {
+    const e = ev({ type: GoalieAction.EXIT, goalkeeperZone: "GK1" });
     expect(shotOriginFromAttackerView(e, false)).toBeNull();
   });
 
-  it("interventionGrid ignora cualquier valor que no sea del sistema de 12 zonas", () => {
-    expect(interventionZoneOf(ev({ interventionGrid: "A1" }))).toBeNull();
-    expect(interventionZoneOf(ev({ interventionGrid: "G5" }))).toBeNull();
-    expect(interventionZoneOf(ev({}))).toBeNull();
+  it("rechaza valores de otros dominios espaciales", () => {
+    expect(goalkeeperZoneOf(ev({ goalkeeperZone: "Z1C" as any }))).toBeNull();
+    expect(goalkeeperZoneOf(ev({ goalkeeperZone: "A1" as any }))).toBeNull();
+    expect(goalkeeperZoneOf(ev({ goalkeeperZone: "G5" as any }))).toBeNull();
+    expect(goalkeeperZoneOf(ev({}))).toBeNull();
+  });
+
+  it("las acciones que admiten zona son las producibles, y solo esas", () => {
+    for (const type of PRODUCIBLE_GOALIE_ACTIONS) {
+      expect(acceptsGoalkeeperZone(type)).toBe(true);
+    }
+    expect(acceptsGoalkeeperZone(GoalieAction.SAVE_PARRY)).toBe(false);
+    expect(acceptsGoalkeeperZone(ActionType.SHOT)).toBe(false);
   });
 });
 

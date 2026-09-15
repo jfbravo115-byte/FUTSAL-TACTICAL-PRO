@@ -437,3 +437,84 @@ describe("SAVE_DEFLECT recorre todo el camino", () => {
     expect(gk.timeline[0].type).not.toContain("SAVE");
   });
 });
+
+// ── FASE 4: ZONA DE INTERVENCIÓN DEL PORTERO (GK1-GK5) ────────────────
+describe("Distribución por zona de intervención", () => {
+  it("agrega las intervenciones por GK1-GK5", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"], goalkeeperZone: "GK1" }),
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], goalkeeperZone: "GK1" }),
+        event({ type: GoalieAction.SAVE_DEFLECT, playerIds: ["gk1"], goalkeeperZone: "GK3" }),
+        event({
+          type: GoalieAction.EXIT, playerIds: ["gk1"], goalkeeperZone: "GK5",
+          metadata: { isOpponent: false, exitOutcome: "success" },
+        }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones).toEqual({ GK1: 2, GK2: 0, GK3: 1, GK4: 0, GK5: 1 });
+    expect(gk.interventionsUnlocated).toBe(0);
+  });
+
+  it("declara las intervenciones sin zona en vez de repartirlas", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"], goalkeeperZone: "GK2" }),
+        event({ type: GoalieAction.SAVE, playerIds: ["gk1"] }), // sin zona
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK2).toBe(1);
+    expect(gk.interventionsUnlocated).toBe(1);
+    // La parada sin zona sigue contando como parada.
+    expect(gk.totalSaves).toBe(2);
+  });
+
+  it("desglosa las salidas por zona y por resultado", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], goalkeeperZone: "GK4", metadata: { isOpponent: false, exitOutcome: "success" } }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], goalkeeperZone: "GK4", metadata: { isOpponent: false, exitOutcome: "fail" } }),
+        event({ type: GoalieAction.EXIT, playerIds: ["gk1"], goalkeeperZone: "GK5", metadata: { isOpponent: false, exitOutcome: "success" } }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.exitZones).toMatchObject({ GK4: 2, GK5: 1 });
+    expect(gk.exitZonesSuccess).toMatchObject({ GK4: 1, GK5: 1 });
+    expect(gk.exitZonesFail).toMatchObject({ GK4: 1, GK5: 0 });
+  });
+
+  it("NO mezcla zona de intervención con origen ni con destino", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({
+          type: GoalieAction.SAVE, playerIds: ["gk1"],
+          originGrid: "Z4C", destinationGrid: "G5", goalkeeperZone: "GK2",
+        }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK2).toBe(1);
+    // Cada campo conserva lo suyo en el evento original.
+    expect(md.events[0].originGrid).toBe("Z4C");
+    expect(md.events[0].destinationGrid).toBe("G5");
+  });
+
+  it("un partido histórico SIN goalkeeperZone sigue siendo válido", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [event({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"] })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(1);
+    // No se inventa zona para datos que nunca la registraron.
+    expect(gk.interventionZones).toEqual({ GK1: 0, GK2: 0, GK3: 0, GK4: 0, GK5: 0 });
+    // SAVE_PARRY está congelado: no admite zona y no cuenta como no-ubicada.
+    expect(gk.interventionsUnlocated).toBe(0);
+  });
+});

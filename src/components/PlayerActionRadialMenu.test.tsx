@@ -196,7 +196,7 @@ describe("Salida / intervención", () => {
     expect(playerId).toBe("gk1");
     expect(meta.metadata.exitOutcome).toBe("success");
     // La ubicación NO se pide aquí: llega después y es omitible.
-    expect(meta.interventionGrid).toBeUndefined();
+    expect(meta.goalkeeperZone).toBeUndefined();
     expect(meta.originGrid).toBeUndefined();
   });
 

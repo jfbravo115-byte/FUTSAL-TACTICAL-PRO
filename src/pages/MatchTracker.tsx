@@ -57,6 +57,7 @@ import {
   ActionType,
   GoalieAction,
   Role,
+  GoalkeeperInterventionZone,
 } from "../types/futsal";
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
@@ -92,7 +93,9 @@ import {
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
+import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import {
+  acceptsGoalkeeperZone,
   ExitOutcome,
   EXIT_OUTCOME_LABEL,
   eventTargetsOpposingGoalie,
@@ -105,6 +108,7 @@ import {
   isGoalieIntervention,
 } from "../utils/goalkeeperActions";
 import { formatGoalZoneLabel } from "../utils/goalZones";
+import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { effectiveSlotIndex, isRoleAllowedInSlot, findAvailableSlotForRole, normalizeMatchPlayers } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
@@ -2127,18 +2131,22 @@ export default function MatchTracker() {
   };
 
   /**
-   * Añade la ubicación a una salida ya registrada. Escribe `interventionGrid`,
-   * que es un campo PROPIO: no toca `originGrid` ni se cuenta como origen de
-   * tiro en ningún agregado.
+   * Añade la zona de intervención a una acción de portero ya registrada.
+   * Escribe `goalkeeperZone`, que es un campo PROPIO con su propio dominio
+   * (GK1-GK5): no toca `originGrid` ni `destinationGrid`, y no se cuenta como
+   * origen de tiro en ningún agregado.
+   *
+   * Un toque directo sobre la zona selecciona Y continúa: sin diálogo de
+   * confirmación, que en directo cuesta tiempo.
    */
-  const assignInterventionLocation = (zoneId: string) => {
+  const assignGoalkeeperZone = (zone: GoalkeeperInterventionZone) => {
     const pending = pendingInterventionLocation;
     setPendingInterventionLocation(null);
     if (!pending) return;
     setMatchData((prev) => ({
       ...prev,
       events: prev.events.map((e) =>
-        e.id === pending.eventId ? { ...e, interventionGrid: zoneId } : e,
+        e.id === pending.eventId ? { ...e, goalkeeperZone: zone } : e,
       ),
     }));
   };
@@ -2362,10 +2370,10 @@ export default function MatchTracker() {
       };
     });
 
-    // La salida YA está registrada con su resultado. La ubicación se ofrece
-    // después y es omitible; se hace aquí para que cualquier superficie de
-    // captura (panel de portero o menú radial) se comporte igual.
-    if (type === GoalieAction.EXIT && !metadata?.interventionGrid) {
+    // La acción YA está registrada. La zona de intervención se ofrece después
+    // y es omitible; se hace aquí para que cualquier superficie de captura
+    // (panel de portero o menú radial) se comporte igual.
+    if (acceptsGoalkeeperZone(type) && !metadata?.goalkeeperZone) {
       setPendingInterventionLocation({ eventId: newEvent.id });
     }
   };
@@ -6719,12 +6727,12 @@ export default function MatchTracker() {
           <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
               <div className="text-center">
-                <h3 className="text-white font-black uppercase text-sm">Salida registrada</h3>
+                <h3 className="text-white font-black uppercase text-sm">¿Dónde intervino el portero?</h3>
                 <p className="text-[10px] text-slate-400 mt-1">
-                  ¿Dónde intervino el portero? Es opcional: puedes omitirlo y la salida se mantiene.
+                  Opcional: la acción ya está registrada y se mantiene aunque lo omitas.
                 </p>
               </div>
-              <PitchZones onSelect={assignInterventionLocation} />
+              <GoalkeeperInterventionMap onSelect={assignGoalkeeperZone} />
               <button
                 onClick={() => setPendingInterventionLocation(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"

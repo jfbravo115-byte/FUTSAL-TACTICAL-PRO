@@ -41,6 +41,7 @@ import {
   ZoneDashboard,
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
@@ -344,7 +345,7 @@ function GoalkeeperCard({
           </span>
         ) : null}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen del tiro (pista)</div>
           {/* IMPORTANTE: el mapa de ORIGEN necesita el conjunto COMPLETO de
@@ -355,6 +356,24 @@ function GoalkeeperCard({
               playerIds. gk.events (filtrado a playerIds.includes) se
               queda corto para este mapa concreto. */}
           <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact theme="light" />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Intervención del portero</div>
+          {/* Tercer dominio espacial, separado de origen y destino a
+              propósito: responde a "¿dónde interviene?", no a "¿desde dónde
+              tiran?" ni "¿dónde entra el balón?". */}
+          <GoalkeeperInterventionMap
+            theme="light"
+            counts={gk.interventionZones}
+            accent="#2563eb"
+            compact
+            maxWidth={150}
+          />
+          {gk.interventionsUnlocated > 0 && (
+            <div style={{ fontSize: 8, color: "#6b7280", marginTop: 2 }}>
+              {gk.interventionsUnlocated} sin ubicación registrada
+            </div>
+          )}
         </div>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Destino del tiro (portería) · verde parada / rojo gol</div>

@@ -772,3 +772,95 @@ describe("Faltas recibidas", () => {
     expect(md.events[0].originGrid).toBe("Z1L");
   });
 });
+
+// ── FASE 4: TIROS RECIBIDOS E INTERVENCIONES NO REGISTRADAS ───────────
+describe("Ficha del portero: tiros recibidos y no registradas", () => {
+  /** Una parada, un gol encajado y un tiro cuya respuesta no se registró. */
+  function partidoMixto(): MatchData {
+    const tiro = (declarado?: string) =>
+      event({
+        type: ActionType.SHOT,
+        playerIds: ["rival-1", "gk1"],
+        destinationGrid: "G5",
+        metadata: {
+          isOpponent: true,
+          targetGoalkeeperId: "gk1",
+          ...(declarado ? { goalieResponse: declarado } : {}),
+        },
+      });
+    return matchData({
+      players: [player({ id: "gk1", role: Role.GOALKEEPER, number: 1, isOnPitch: true, individualTimeSeconds: 600 })],
+      events: [
+        tiro("SAVE"),
+        tiro("UNSPECIFIED"),
+        event({
+          type: ActionType.GOAL,
+          playerIds: ["rival-1", "gk1"],
+          metadata: { isOpponent: true, targetGoalkeeperId: "gk1" },
+        }),
+      ],
+    });
+  }
+
+  /** Texto de la página del portero del informe completo. */
+  async function fichaPortero(md: MatchData): Promise<string> {
+    await exportGoalkeeperReportPdf(md);
+    return (toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "";
+  }
+
+  it("muestra tiros recibidos = 3, contando el no registrado", async () => {
+    const texto = await fichaPortero(partidoMixto());
+    expect(texto).toContain("Tiros recibidos");
+    expect(texto).toMatch(/Tiros recibidos\s*3/);
+  });
+
+  it("declara las intervenciones no registradas por separado", async () => {
+    const texto = await fichaPortero(partidoMixto());
+    expect(texto).toContain("Intervenciones no registradas: 1");
+  });
+
+  it("paradas 1, encajados 1 y efectividad 50% sobre los resueltos", async () => {
+    const texto = await fichaPortero(partidoMixto());
+    expect(texto).toMatch(/Paradas\s*1/);
+    expect(texto).toMatch(/Encajados\s*1/);
+    expect(texto).toContain("50%");
+    // El denominador se explica: 1 parada + 1 encajado = 2, no 3.
+    expect(texto).toContain("1 paradas + 1 encajados = 2");
+  });
+
+  it("la etiqueta NO induce a pensar que el denominador son todos los tiros", async () => {
+    const texto = await fichaPortero(partidoMixto());
+    expect(texto).toContain("% paradas (resueltos)");
+    expect(texto).toContain("tiros a puerta resueltos");
+    expect(texto).not.toContain("Efectividad");
+  });
+
+  it("UNSPECIFIED no altera el porcentaje", async () => {
+    const md = partidoMixto();
+    const conExtra = matchData({
+      players: md.players,
+      events: [
+        ...md.events,
+        event({
+          type: ActionType.SHOT,
+          playerIds: ["rival-1", "gk1"],
+          destinationGrid: "G2",
+          metadata: { isOpponent: true, targetGoalkeeperId: "gk1", goalieResponse: "UNSPECIFIED" },
+        }),
+      ],
+    });
+    const texto = await fichaPortero(conExtra);
+    // Sigue siendo 50%: solo cambian los tiros recibidos y las no registradas.
+    expect(texto).toContain("50%");
+    expect(texto).toMatch(/Tiros recibidos\s*4/);
+    expect(texto).toContain("Intervenciones no registradas: 2");
+  });
+
+  it("ningún código técnico llega a la ficha", async () => {
+    const texto = await fichaPortero(partidoMixto());
+    expect(texto).not.toContain("UNSPECIFIED");
+    expect(texto).not.toMatch(/SAVE_DEFLECT|SAVE_CATCH|GOAL_CONCEDED/);
+    expect(texto).not.toMatch(/\bEXIT\b/);
+    expect(texto).not.toMatch(/GK[1-5]/);
+  });
+});

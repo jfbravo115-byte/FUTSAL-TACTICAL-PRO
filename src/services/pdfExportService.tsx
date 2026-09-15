@@ -325,11 +325,25 @@ function GoalkeeperCard({
             lo que realmente se registró — un disparo detenido sin subtipo no
             se convierte en blocaje ni en despeje. */}
         <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
+          <span>Tiros recibidos <b>{gk.shotsAgainst}</b></span>
           <span>Paradas <b>{gk.totalSaves}</b></span>
           <span>Salidas <b>{gk.exits}</b></span>
           <span>Encajados <b>{gk.conceded}</b></span>
-          <span>Efectividad <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b></span>
+          {/* La etiqueta dice explícitamente "resueltos" porque el
+              denominador son paradas + encajados, NO todos los tiros
+              recibidos: las intervenciones no registradas quedan fuera. */}
+          <span>
+            % paradas (resueltos){" "}
+            <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b>
+          </span>
         </div>
+      </div>
+      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>
+        % paradas calculado sobre tiros a puerta resueltos ({gk.totalSaves} paradas +{" "}
+        {gk.conceded} encajados = {gk.shotsFaced}).
+        {gk.shotsUndeclared > 0
+          ? ` Intervenciones no registradas: ${gk.shotsUndeclared} — son tiros recibidos, pero no consta si el portero intervino, así que no entran en el porcentaje.`
+          : ""}
       </div>
       <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>
         Desglose de paradas: blocajes {gk.saveCatch} · despejes {gk.saveDeflect}

@@ -690,3 +690,204 @@ describe("Tiros cuya respuesta no se registró", () => {
     expect(gk.effectivenessPct).toBe(50);   // 1 / (1+1)
   });
 });
+
+// ── ZONAS DE INTERVENCIÓN (GK1-GK5) ─────────────────────────────────────
+//
+// Tercera dimensión espacial. Aquí se comprueba que llega íntegra al informe
+// por los DOS caminos posibles: el evento propio del portero y el tiro rival
+// enriquecido del Modelo C. Si solo funcionara uno de los dos, el mapa del
+// PDF mostraría la mitad de las intervenciones sin avisar.
+
+/** Tiro rival respondido por nuestro portero (Modelo C: un solo evento). */
+function rivalShot(
+  response: GoalieAction | "UNSPECIFIED",
+  zone: string | undefined,
+  extra: { gkId?: string; exitOutcome?: "success" | "fail"; timestamp?: number } = {},
+): GameEvent {
+  const gkId = extra.gkId ?? "gk1";
+  return event({
+    type: ActionType.SHOT,
+    playerIds: [gkId],
+    timestamp: extra.timestamp ?? 0,
+    goalkeeperZone: zone as any,
+    metadata: {
+      isOpponent: true,
+      goalieResponse: response,
+      targetGoalkeeperId: gkId,
+      ...(extra.exitOutcome ? { exitOutcome: extra.exitOutcome } : {}),
+    } as any,
+  });
+}
+
+/** Caso de prueba obligatorio: una intervención de cada tipo en cada zona. */
+function mandatoryZoneMatch(): MatchData {
+  return matchData({
+    players: [player({ id: "gk1", number: 1, individualTimeSeconds: 1200 })],
+    events: [
+      rivalShot(GoalieAction.SAVE, "GK1", { timestamp: 1000 }),
+      rivalShot(GoalieAction.SAVE_CATCH, "GK2", { timestamp: 2000 }),
+      rivalShot(GoalieAction.SAVE_DEFLECT, "GK3", { timestamp: 3000 }),
+      rivalShot(GoalieAction.EXIT, "GK4", { exitOutcome: "success", timestamp: 4000 }),
+      rivalShot(GoalieAction.EXIT, "GK5", { exitOutcome: "fail", timestamp: 5000 }),
+      rivalShot("UNSPECIFIED", undefined, { timestamp: 6000 }),
+    ],
+  });
+}
+
+describe("buildGoalkeeperReports · zonas de intervención", () => {
+  it("caso obligatorio: cada zona registra exactamente una intervención", () => {
+    const [gk] = buildGoalkeeperReports(mandatoryZoneMatch());
+    expect(gk.interventionZones).toEqual({ GK1: 1, GK2: 1, GK3: 1, GK4: 1, GK5: 1 });
+    // UNSPECIFIED no es una intervención: ni se ubica ni se cuenta como tal.
+    expect(gk.interventionsUnlocated).toBe(0);
+    expect(gk.shotsUndeclared).toBe(1);
+  });
+
+  it("Modelo C · SHOT + SAVE + GK1 alimenta la zona 1", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot(GoalieAction.SAVE, "GK1")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK1).toBe(1);
+    expect(gk.interventionZonesByAction[GoalieAction.SAVE]?.GK1).toBe(1);
+    expect(gk.saveGeneric).toBe(1);
+  });
+
+  it("Modelo C · SHOT + SAVE_CATCH + GK2 alimenta la zona 2 como blocaje", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot(GoalieAction.SAVE_CATCH, "GK2")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK2).toBe(1);
+    expect(gk.interventionZonesByAction[GoalieAction.SAVE_CATCH]?.GK2).toBe(1);
+    expect(gk.interventionZonesByAction[GoalieAction.SAVE]).toBeUndefined();
+  });
+
+  it("Modelo C · SHOT + SAVE_DEFLECT + GK3 alimenta la zona 3 como despeje", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot(GoalieAction.SAVE_DEFLECT, "GK3")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK3).toBe(1);
+    expect(gk.interventionZonesByAction[GoalieAction.SAVE_DEFLECT]?.GK3).toBe(1);
+  });
+
+  it("Modelo C · SHOT + EXIT con éxito + GK4 alimenta la zona 4 y el detalle de éxito", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot(GoalieAction.EXIT, "GK4", { exitOutcome: "success" })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK4).toBe(1);
+    expect(gk.exitZonesSuccess.GK4).toBe(1);
+    expect(gk.exitZonesFail.GK4).toBe(0);
+  });
+
+  it("Modelo C · SHOT + EXIT fallida + GK5 alimenta la zona 5 y el detalle de fallo", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot(GoalieAction.EXIT, "GK5", { exitOutcome: "fail" })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK5).toBe(1);
+    expect(gk.exitZonesFail.GK5).toBe(1);
+    expect(gk.exitZonesSuccess.GK5).toBe(0);
+  });
+
+  it("evento GK independiente (no Modelo C) con zona cuenta igual", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({
+          type: GoalieAction.SAVE_CATCH,
+          playerIds: ["gk1"],
+          goalkeeperZone: "GK2" as any,
+          metadata: { isOpponent: false } as any,
+        }),
+        event({
+          type: GoalieAction.EXIT,
+          playerIds: ["gk1"],
+          goalkeeperZone: "GK5" as any,
+          metadata: { isOpponent: false, exitOutcome: "success" } as any,
+        }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones).toEqual({ GK1: 0, GK2: 1, GK3: 0, GK4: 0, GK5: 1 });
+    expect(gk.interventionZonesByAction[GoalieAction.SAVE_CATCH]?.GK2).toBe(1);
+    expect(gk.interventionZonesByAction[GoalieAction.EXIT]?.GK5).toBe(1);
+  });
+
+  it("UNSPECIFIED no se coloca en ninguna zona ni aparece en el desglose por tipo", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [rivalShot("UNSPECIFIED", undefined), rivalShot("UNSPECIFIED", "GK3" as any)],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones).toEqual({ GK1: 0, GK2: 0, GK3: 0, GK4: 0, GK5: 0 });
+    expect(gk.interventionsUnlocated).toBe(0);
+    expect(Object.keys(gk.interventionZonesByAction)).toEqual([]);
+    expect(gk.shotsUndeclared).toBe(2);
+  });
+
+  it("una intervención real sin zona se cuenta aparte, nunca se reparte", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        rivalShot(GoalieAction.SAVE, "GK1"),
+        rivalShot(GoalieAction.SAVE, undefined),
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], metadata: { isOpponent: false } as any }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones.GK1).toBe(1);
+    expect(gk.interventionsUnlocated).toBe(2);
+    expect(gk.totalSaves).toBe(3);
+  });
+
+  it("dos porteros: cada ficha muestra solo sus zonas, sin contaminación cruzada", () => {
+    // Portero A sale sustituido; portero B entra. El tiro enriquecido se
+    // atribuye por targetGoalkeeperId, no por "quién está en pista ahora".
+    const md = matchData({
+      players: [
+        player({ id: "gkA", number: 1, name: "Ana", individualTimeSeconds: 600, isOnPitch: false }),
+        player({ id: "gkB", number: 12, name: "Bea", individualTimeSeconds: 600, isOnPitch: true }),
+      ],
+      events: [
+        rivalShot(GoalieAction.SAVE, "GK1", { gkId: "gkA", timestamp: 1000 }),
+        rivalShot(GoalieAction.SAVE_CATCH, "GK2", { gkId: "gkA", timestamp: 2000 }),
+        rivalShot(GoalieAction.SAVE_DEFLECT, "GK4", { gkId: "gkB", timestamp: 3000 }),
+        rivalShot(GoalieAction.EXIT, "GK5", { gkId: "gkB", exitOutcome: "success", timestamp: 4000 }),
+      ],
+    });
+    const [a, b] = buildGoalkeeperReports(md);
+    expect(a.id).toBe("gkA");
+    expect(a.interventionZones).toEqual({ GK1: 1, GK2: 1, GK3: 0, GK4: 0, GK5: 0 });
+    expect(b.id).toBe("gkB");
+    expect(b.interventionZones).toEqual({ GK1: 0, GK2: 0, GK3: 0, GK4: 1, GK5: 1 });
+    expect(b.exitZonesSuccess.GK5).toBe(1);
+    expect(a.exitZonesSuccess.GK5).toBe(0);
+  });
+
+  it("origen, destino y zona de intervención no comparten contadores", () => {
+    // El mismo tiro lleva las tres coordenadas. Cada una va a su mapa.
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        {
+          ...rivalShot(GoalieAction.SAVE, "GK3"),
+          originGrid: "Z3C" as any,
+          destinationGrid: "G7" as any,
+        },
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.interventionZones).toEqual({ GK1: 0, GK2: 0, GK3: 1, GK4: 0, GK5: 0 });
+    // La zona de pista no se cuela en el recuento de zonas de portero.
+    expect(Object.values(gk.interventionZones).reduce((a, b) => a + b, 0)).toBe(1);
+    expect(gk.mappedInterventions).toBe(1); // destino: dominio aparte
+  });
+});

@@ -864,3 +864,163 @@ describe("Ficha del portero: tiros recibidos y no registradas", () => {
     expect(texto).not.toMatch(/GK[1-5]/);
   });
 });
+
+
+// ── ZONAS DE INTERVENCIÓN EN EL PDF ─────────────────────────────────────
+//
+// El servicio ya calculaba bien las zonas (ver goalkeeperReportService.test);
+// lo que fallaba era la ficha del PDF. Estos tests miran el nodo que se
+// rasteriza, que es exactamente lo que acaba viendo el usuario.
+
+/** Tiro rival respondido por nuestro portero (Modelo C: un solo evento). */
+function rivalShot(
+  response: GoalieAction | "UNSPECIFIED",
+  zone: string | undefined,
+  extra: { gkId?: string; exitOutcome?: "success" | "fail"; timestamp?: number } = {},
+): GameEvent {
+  const gkId = extra.gkId ?? "gk1";
+  return event({
+    type: ActionType.SHOT,
+    playerIds: [gkId],
+    timestamp: extra.timestamp ?? 0,
+    goalkeeperZone: zone as any,
+    metadata: {
+      isOpponent: true,
+      goalieResponse: response,
+      targetGoalkeeperId: gkId,
+      ...(extra.exitOutcome ? { exitOutcome: extra.exitOutcome } : {}),
+    } as any,
+  });
+}
+
+/** Caso obligatorio: una intervención de cada tipo, una por zona. */
+function mandatoryZoneMatch(): MatchData {
+  return matchData({
+    players: [player({ id: "gk1", number: 1, name: "Portero", role: Role.GOALKEEPER, individualTimeSeconds: 1200 })],
+    events: [
+      rivalShot(GoalieAction.SAVE, "GK1", { timestamp: 1000 }),
+      rivalShot(GoalieAction.SAVE_CATCH, "GK2", { timestamp: 2000 }),
+      rivalShot(GoalieAction.SAVE_DEFLECT, "GK3", { timestamp: 3000 }),
+      rivalShot(GoalieAction.EXIT, "GK4", { exitOutcome: "success", timestamp: 4000 }),
+      rivalShot(GoalieAction.EXIT, "GK5", { exitOutcome: "fail", timestamp: 5000 }),
+      rivalShot("UNSPECIFIED", undefined, { timestamp: 6000 }),
+    ],
+  });
+}
+
+/** Región del PDF titulada "ZONAS DE INTERVENCIÓN". */
+function zonesBlock(pageNode: HTMLElement): HTMLElement {
+  const titles = Array.from(pageNode.querySelectorAll("div")).filter(
+    (d) => (d.textContent || "").trim().toLowerCase() === "zonas de intervención",
+  );
+  if (titles.length === 0) throw new Error("bloque ZONAS DE INTERVENCIÓN no encontrado en la ficha");
+  return titles[0].parentElement as HTMLElement;
+}
+
+describe("PDF de porteros · bloque ZONAS DE INTERVENCIÓN", () => {
+  it("caso obligatorio: el bloque muestra Zona 1..Zona 5 con una intervención cada una", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    const block = zonesBlock(page);
+    const text = (block.textContent || "").replace(/\s+/g, " ");
+
+    for (const n of [1, 2, 3, 4, 5]) {
+      expect(text).toContain(`Zona ${n}`);
+    }
+    // Resumen numérico legible: cada línea "Zona N · descripción" + conteo.
+    const filas = Array.from(block.querySelectorAll("[data-gk-zone-row]"));
+    expect(filas.length).toBe(5);
+    for (const fila of filas) {
+      expect((fila.textContent || "").trim()).toMatch(/1$/);
+    }
+    expect(text).toContain("Sin ubicación registrada");
+  });
+
+  it("las cinco regiones del mapa se dibujan en la ficha del PDF", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const block = zonesBlock(toJpegMock.mock.calls[0][0] as HTMLElement);
+    // Mismo componente que la pantalla de captura: una región por zona,
+    // localizada por su etiqueta accesible (nunca por el código interno).
+    const regiones = block.querySelectorAll("[data-gk-zone]");
+    expect(regiones.length).toBe(5);
+    expect(block.querySelector("svg")).not.toBeNull();
+  });
+
+  it("el desglose por tipo reparte cada intervención en su zona", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const block = zonesBlock(toJpegMock.mock.calls[0][0] as HTMLElement);
+    const filas = Array.from(block.querySelectorAll("tbody tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("td")).map((td) => (td.textContent || "").trim()),
+    );
+    const buscar = (etiqueta: string) => filas.find((f) => f[0] === etiqueta);
+    expect(buscar("Parada")).toEqual(["Parada", "1", "", "", "", ""]);
+    expect(buscar("Blocaje")).toEqual(["Blocaje", "", "1", "", "", ""]);
+    expect(buscar("Despeje")).toEqual(["Despeje", "", "", "1", "", ""]);
+    expect(buscar("Salida")).toEqual(["Salida", "", "", "", "1", "1"]);
+    expect(buscar("— con éxito")).toEqual(["— con éxito", "", "", "", "1", ""]);
+    expect(buscar("— falladas")).toEqual(["— falladas", "", "", "", "", "1"]);
+  });
+
+  it("la ficha nunca imprime los códigos internos GK1-GK5", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    const text = page.textContent || "";
+    for (const id of ["GK1", "GK2", "GK3", "GK4", "GK5"]) {
+      expect(text).not.toContain(id);
+    }
+  });
+
+  it("la ficha nunca imprime UNSPECIFIED, SAVE_DEFLECT ni EXIT", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const text = (toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "";
+    for (const code of ["UNSPECIFIED", "SAVE_DEFLECT", "SAVE_CATCH", "SAVE_PARRY", "EXIT"]) {
+      expect(text).not.toContain(code);
+    }
+  });
+
+  it("UNSPECIFIED no se cuela en ninguna zona del mapa del PDF", async () => {
+    const md = matchData({
+      players: [player({ id: "gk1", number: 1, role: Role.GOALKEEPER, individualTimeSeconds: 600 })],
+      events: [rivalShot("UNSPECIFIED", undefined), rivalShot("UNSPECIFIED", undefined)],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const block = zonesBlock(toJpegMock.mock.calls[0][0] as HTMLElement);
+    const filas = Array.from(block.querySelectorAll("[data-gk-zone-row]"));
+    expect(filas.length).toBe(5);
+    for (const fila of filas) {
+      expect((fila.textContent || "").trim()).toMatch(/0$/);
+    }
+    // No hay intervenciones, así que tampoco hay desglose por tipo.
+    expect(block.querySelector("tbody")).toBeNull();
+  });
+
+  it("dos porteros: cada ficha del PDF muestra solo sus propias zonas", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "gkA", number: 1, name: "Ana", role: Role.GOALKEEPER, individualTimeSeconds: 600, isOnPitch: false }),
+        player({ id: "gkB", number: 12, name: "Bea", role: Role.GOALKEEPER, individualTimeSeconds: 600 }),
+      ],
+      events: [
+        rivalShot(GoalieAction.SAVE, "GK1", { gkId: "gkA", timestamp: 1000 }),
+        rivalShot(GoalieAction.SAVE_CATCH, "GK2", { gkId: "gkA", timestamp: 2000 }),
+        rivalShot(GoalieAction.SAVE_DEFLECT, "GK4", { gkId: "gkB", timestamp: 3000 }),
+        rivalShot(GoalieAction.EXIT, "GK5", { gkId: "gkB", exitOutcome: "success", timestamp: 4000 }),
+      ],
+    });
+    await exportGoalkeeperReportPdf(md);
+    const conteos = (node: HTMLElement) =>
+      Array.from(zonesBlock(node).querySelectorAll("[data-gk-zone-row]")).map((d) =>
+        Number((d.textContent || "").trim().slice(-1)),
+      );
+    expect(conteos(toJpegMock.mock.calls[0][0] as HTMLElement)).toEqual([1, 1, 0, 0, 0]); // Ana
+    expect(conteos(toJpegMock.mock.calls[1][0] as HTMLElement)).toEqual([0, 0, 0, 1, 1]); // Bea
+  });
+
+  it("origen, destino y zonas de intervención son tres bloques distintos", async () => {
+    await exportGoalkeeperReportPdf(mandatoryZoneMatch());
+    const text = ((toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "").replace(/\s+/g, " ");
+    expect(text).toContain("Origen de los tiros");
+    expect(text).toContain("Destino de los tiros");
+    expect(text).toContain("Zonas de intervención");
+  });
+});

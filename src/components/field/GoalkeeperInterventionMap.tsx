@@ -193,6 +193,10 @@ export function GoalkeeperInterventionMap({
             {(["GK1", "GK2", "GK3", "GK4"] as const).map((id) => (
               <rect
                 key={id}
+                // Marca estable de la región, para poder comprobar en tests
+                // que las cinco zonas se dibujan también cuando el mapa es de
+                // solo lectura (PDF), donde no hay botones accesibles.
+                data-gk-zone={id}
                 x={0}
                 y={GK_BAND_LAYOUT[id].y}
                 width={GK_VIEWBOX.width}
@@ -217,6 +221,7 @@ export function GoalkeeperInterventionMap({
 
           {/* Zona 5: el exterior del área. */}
           <rect
+            data-gk-zone="GK5"
             x={0}
             y={GK_BAND_LAYOUT.GK5.y}
             width={GK_VIEWBOX.width}

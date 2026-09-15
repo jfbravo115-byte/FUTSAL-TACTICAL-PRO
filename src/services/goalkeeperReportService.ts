@@ -95,6 +95,11 @@ export type GoalkeeperReportEntry = {
    * en una misma métrica.
    */
   interventionZones: GkZoneTally;
+  /**
+   * Qué hizo el portero en cada zona. Solo aparecen los tipos realmente
+   * registrados: un histórico sin subtipo no se convierte en despeje.
+   */
+  interventionZonesByAction: Partial<Record<GoalieAction, GkZoneTally>>;
   /** Intervenciones sin zona registrada. Se declara, no se reparte. */
   interventionsUnlocated: number;
   /** Salidas por zona, y su desglose de resultado. */
@@ -183,6 +188,23 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       const interventionZones = zoneTally.byZone;
       const interventionsUnlocated = zoneTally.unlocated;
 
+      // Desglose por tipo: qué hizo el portero en cada zona. Se construye
+      // con la acción EFECTIVA, así que cubre tanto los eventos propios del
+      // portero como los tiros rivales enriquecidos del Modelo C.
+      const interventionZonesByAction: Partial<Record<GoalieAction, GkZoneTally>> = {};
+      for (const action of [
+        GoalieAction.SAVE,
+        GoalieAction.SAVE_CATCH,
+        GoalieAction.SAVE_DEFLECT,
+        GoalieAction.EXIT,
+        GoalieAction.SAVE_PARRY,
+      ] as const) {
+        const deTipo = zonedEvents.filter((e) => effectiveGoalieAction(e) === action);
+        if (deTipo.length > 0) {
+          interventionZonesByAction[action] = tallyGoalkeeperZones(deTipo).byZone;
+        }
+      }
+
       const exitZones = tallyGoalkeeperZones(exitEvents).byZone;
       const exitZonesSuccess = tallyGoalkeeperZones(
         exitEvents.filter((e) => exitOutcomeOf(e) === "success"),
@@ -221,6 +243,7 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         exitsFail,
         exitsUnknown,
         interventionZones,
+        interventionZonesByAction,
         interventionsUnlocated,
         exitZones,
         exitZonesSuccess,

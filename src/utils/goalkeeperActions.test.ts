@@ -16,6 +16,7 @@ import {
   eventAcceptsGoalkeeperZone,
   exitOutcomeOf,
   GoalieResponse,
+  goalieRespondingToShot,
   goalieResponseOf,
   isGoalieResponse,
   targetGoalkeeperIdOf,
@@ -556,5 +557,109 @@ describe("Tiro enriquecido con la respuesta del portero", () => {
     const e = ev({ type: ActionType.SHOT, metadata: { isOpponent: true, goalieResponse: "PARADON" } });
     expect(goalieResponseOf(e)).toBeNull();
     expect(isGoalieResponse("PARADON")).toBe(false);
+  });
+});
+
+// ── EL ENCADENADO SOLO APLICA A TIROS DEL RIVAL ───────────────────────
+describe("¿A qué tiros se ofrece respuesta del portero?", () => {
+  const nuestroGk = gk({ id: "gk1", isOpponent: false, isOnPitch: true });
+  const nuestroGkSuplente = gk({ id: "gk3", number: 13, isOpponent: false, isOnPitch: false });
+  const suGk = gk({ id: "gk2", number: 1, isOpponent: true, isOnPitch: true });
+  const jugador = gk({ id: "p7", number: 7, role: Role.PLAYER, isOpponent: false });
+  const plantilla = [nuestroGk, nuestroGkSuplente, suGk, jugador];
+
+  it("SHOT del RIVAL con nuestro portero en pista → SÍ ofrece respuesta", () => {
+    const portero = goalieRespondingToShot(ActionType.SHOT, true, plantilla);
+    expect(portero).not.toBeNull();
+    expect(portero!.id).toBe("gk1");
+  });
+
+  it("SHOT PROPIO → NO ofrece respuesta, aunque el portero rival esté en pista", () => {
+    // No interrumpimos la captura de nuestros tiros para preguntar por el
+    // portero contrario: sus paradas no se analizan.
+    expect(goalieRespondingToShot(ActionType.SHOT, false, plantilla)).toBeNull();
+  });
+
+  it("SHOT del rival SIN portero nuestro identificable → fallback seguro", () => {
+    const sinPortero = [suGk, jugador];
+    expect(goalieRespondingToShot(ActionType.SHOT, true, sinPortero)).toBeNull();
+    // Tampoco si nuestro portero está fuera de pista.
+    const banquillo = [{ ...nuestroGk, isOnPitch: false }, suGk];
+    expect(goalieRespondingToShot(ActionType.SHOT, true, banquillo)).toBeNull();
+  });
+
+  it("tras sustituir, usa el portero que está EN PISTA en ese momento", () => {
+    const trasCambio = [
+      { ...nuestroGk, isOnPitch: false },
+      { ...nuestroGkSuplente, isOnPitch: true },
+      suGk,
+    ];
+    expect(goalieRespondingToShot(ActionType.SHOT, true, trasCambio)!.id).toBe("gk3");
+  });
+
+  it("solo los tiros abren respuesta: ninguna otra acción lo hace", () => {
+    for (const tipo of [
+      ActionType.GOAL,
+      ActionType.LOSS,
+      ActionType.STEAL,
+      ActionType.FOUL,
+      ActionType.CORNER,
+      GoalieAction.SAVE,
+      GoalieAction.EXIT,
+    ]) {
+      expect(goalieRespondingToShot(tipo, true, plantilla)).toBeNull();
+    }
+  });
+});
+
+// ── COHERENCIA RESPUESTA ↔ destinationGrid ────────────────────────────
+describe("Semántica de OUT frente a la respuesta del portero", () => {
+  const nuestroGk = gk({ id: "gk1", isOpponent: false });
+
+  const tiro = (response: GoalieResponse | null, destino?: string) =>
+    ev({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      destinationGrid: destino,
+      metadata: {
+        isOpponent: true,
+        targetGoalkeeperId: "gk1",
+        ...(response ? { goalieResponse: response } : {}),
+      },
+    });
+
+  it("DESPEJE + OUT es legítimo: el botón se llama 'Tiro Fuera / Desviado'", () => {
+    // Un portero que desvía un balón fuera para córner es el caso más común
+    // de despeje en futsal. No se prohíbe.
+    const e = tiro(GoalieAction.SAVE_DEFLECT, "OUT");
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
+    expect(isAnySave(e)).toBe(true);
+  });
+
+  it("PARADA y BLOCAJE dentro de la portería cuentan igual", () => {
+    for (const r of PRODUCIBLE_SAVE_TYPES as GoalieResponse[]) {
+      expect(goalieStatsDelta(tiro(r, "G5"), nuestroGk).saves).toBe(1);
+    }
+  });
+
+  it("una respuesta declarada manda sobre el destino: no se descuenta por OUT", () => {
+    // Si el usuario declaró que el portero intervino, la parada cuenta
+    // aunque el balón acabara fuera. No se contradice al usuario.
+    expect(goalieStatsDelta(tiro(GoalieAction.SAVE, "OUT"), nuestroGk).saves).toBe(1);
+    expect(goalieStatsDelta(tiro(GoalieAction.SAVE_CATCH, "OUT"), nuestroGk).saves).toBe(1);
+  });
+
+  it("SALIDA no lleva destino, y si lo llevara seguiría siendo salida", () => {
+    const sinDestino = tiro(GoalieAction.EXIT, undefined);
+    expect(sinDestino.destinationGrid).toBeUndefined();
+    expect(isExit(sinDestino)).toBe(true);
+    expect(isAnySave(sinDestino)).toBe(false);
+    // Robustez: un destino heredado no la convierte en parada.
+    expect(isAnySave(tiro(GoalieAction.EXIT, "G5"))).toBe(false);
+  });
+
+  it("SIN respuesta declarada, el destino decide (comportamiento histórico)", () => {
+    expect(goalieStatsDelta(tiro(null, "G5"), nuestroGk).saves).toBe(1);
+    expect(goalieStatsDelta(tiro(null, "OUT"), nuestroGk).saves).toBe(0);
   });
 });

@@ -183,6 +183,26 @@ export function isExitOutcome(raw: unknown): raw is ExitOutcome {
 }
 
 /**
+ * Portero NUESTRO que debe responder a un tiro, o null si no procede.
+ *
+ * El encadenado solo se ofrece para tiros DEL RIVAL contra nuestra portería.
+ * Nuestros propios tiros conservan su flujo de siempre: no se interrumpe la
+ * toma de datos para preguntar por el portero contrario, cuyas paradas no
+ * estamos analizando.
+ *
+ * Devuelve el portero que está EN PISTA en ese momento, así que una
+ * sustitución previa se refleja sola. Si no hay ninguno identificable
+ * devuelve null y el flujo continúa como antes.
+ */
+export function goalieRespondingToShot<
+  P extends Pick<Player, "id" | "role" | "isOpponent" | "isOnPitch">,
+>(type: ActionType | GoalieAction, eventIsOpponent: boolean, players: P[]): P | null {
+  if (type !== ActionType.SHOT) return null;
+  if (!eventIsOpponent) return null; // nuestros tiros no abren respuesta
+  return players.find((p) => p.isOnPitch && p.role === Role.GOALKEEPER && !p.isOpponent) ?? null;
+}
+
+/**
  * Resultado declarado de una salida, o null si no se registró. Vale tanto
  * para un evento EXIT propio como para un tiro cuya respuesta fue EXIT.
  */

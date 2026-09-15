@@ -99,6 +99,7 @@ import {
   eventAcceptsGoalkeeperZone,
   ExitOutcome,
   GoalieResponse,
+  goalieRespondingToShot,
   EXIT_OUTCOME_LABEL,
   eventTargetsOpposingGoalie,
   formatExit,
@@ -2155,15 +2156,6 @@ export default function MatchTracker() {
       ),
     }));
   };
-
-  /**
-   * Portero que encara un tiro: el que está en pista del bando CONTRARIO al
-   * del evento. Si no hay ninguno identificable, el flujo no ofrece respuesta.
-   */
-  const targetGoalieFor = (isOpponentEvent: boolean): Player | undefined =>
-    matchData.players.find(
-      (p) => p.isOnPitch && p.role === Role.GOALKEEPER && p.isOpponent !== isOpponentEvent,
-    );
 
   const handleCorner = (isOpponent: boolean, side: CornerSide) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
@@ -7070,13 +7062,15 @@ export default function MatchTracker() {
                               },
                             );
                           } else {
-                            // MODELO C: si el tiro tiene portero identificable,
-                            // se ofrece su respuesta ANTES del destino. Así la
-                            // ocasión queda en un solo evento en vez de
-                            // obligar a registrar el tiro y la parada aparte.
-                            const ofreceRespuesta =
-                              pendingAction.type === ActionType.SHOT &&
-                              !!targetGoalieFor(pendingAction.isOpponent);
+                            // MODELO C: solo en tiros DEL RIVAL contra nuestra
+                            // portería se ofrece la respuesta antes del
+                            // destino. Nuestros propios tiros conservan su
+                            // flujo de siempre, sin paso extra.
+                            const ofreceRespuesta = !!goalieRespondingToShot(
+                              pendingAction.type,
+                              pendingAction.isOpponent,
+                              matchData.players,
+                            );
                             setPendingAction((prev) => ({
                               ...prev!,
                               originGrid: id,

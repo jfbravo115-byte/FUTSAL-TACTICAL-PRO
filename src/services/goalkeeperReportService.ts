@@ -14,7 +14,8 @@
 import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
 import { GkZoneTally, tallyGoalkeeperZones } from "../utils/goalkeeperZones";
 import {
-  acceptsGoalkeeperZone,
+  effectiveGoalieAction,
+  eventAcceptsGoalkeeperZone,
   exitOutcomeOf,
   isGoalieEventOwnedBy,
   formatExit,
@@ -128,9 +129,14 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       // propio evento. Es corrección de LECTURA: el JSON no se toca.
       const ownEvents = matchData.events.filter((e) => isGoalieEventOwnedBy(e, p));
 
-      const saveCatch = ownEvents.filter((e) => e.type === GoalieAction.SAVE_CATCH).length;
-      const saveDeflect = ownEvents.filter((e) => e.type === GoalieAction.SAVE_DEFLECT).length;
-      const saveGeneric = ownEvents.filter((e) => e.type === GoalieAction.SAVE).length;
+      // El desglose se hace por ACCIÓN EFECTIVA: así una parada cuenta igual
+      // venga como evento propio del portero o como respuesta declarada
+      // dentro del tiro rival. Una ocasión, una parada.
+      const countAction = (action: GoalieAction) =>
+        ownEvents.filter((e) => effectiveGoalieAction(e) === action).length;
+      const saveCatch = countAction(GoalieAction.SAVE_CATCH);
+      const saveDeflect = countAction(GoalieAction.SAVE_DEFLECT);
+      const saveGeneric = countAction(GoalieAction.SAVE);
       // SAVE_PARRY histórico entra aquí, no en "despejes": se registró bajo un
       // botón que decía PARADA, así que su subtipo real es desconocido.
       const saveUnspecified = ownEvents.filter(isUnspecifiedSave).length;
@@ -152,7 +158,7 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
       // ZONA DE INTERVENCIÓN (GK1-GK5). Se cuentan las acciones que admiten
       // zona: paradas con tipo propio y salidas. Las que no la registraron se
       // declaran aparte en vez de repartirse.
-      const zonedEvents = ownEvents.filter((e) => acceptsGoalkeeperZone(e.type));
+      const zonedEvents = ownEvents.filter(eventAcceptsGoalkeeperZone);
       const zoneTally = tallyGoalkeeperZones(zonedEvents);
       const interventionZones = zoneTally.byZone;
       const interventionsUnlocated = zoneTally.unlocated;
@@ -174,7 +180,7 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         .map((e) => ({
           timeLabel: fmtMilliseconds(e.timestamp),
           period: e.period,
-          type: isExit(e) ? formatExit(e) : formatGoalieAction(e.type),
+          type: isExit(e) ? formatExit(e) : formatGoalieAction(effectiveGoalieAction(e) ?? e.type),
         }));
 
       return {

@@ -12,7 +12,13 @@ import {
   attributedGoalieId,
   eventTargetsOpposingGoalie,
   acceptsGoalkeeperZone,
+  effectiveGoalieAction,
+  eventAcceptsGoalkeeperZone,
   exitOutcomeOf,
+  GoalieResponse,
+  goalieResponseOf,
+  isGoalieResponse,
+  targetGoalkeeperIdOf,
   formatExit,
   formatGoalieAction,
   goalieStatsDelta,
@@ -395,5 +401,160 @@ describe("Ningún consumidor puede olvidar un tipo nuevo", () => {
       metadata: { isOpponent: true },
     });
     expect(isGoalieEventOwnedBy(gol, { id: "gkA", role: Role.GOALKEEPER, isOpponent: false })).toBe(true);
+  });
+});
+
+// ── MODELO C: TIRO RIVAL + RESPUESTA DEL PORTERO = UNA OCASIÓN ─────────
+describe("Tiro enriquecido con la respuesta del portero", () => {
+  const nuestroGk = gk({ id: "gk1", isOpponent: false });
+  const suGk = gk({ id: "gk2", isOpponent: true });
+
+  /** Tiro del rival contra nuestra portería, con respuesta declarada. */
+  const tiroRival = (response: GoalieResponse, extra: Partial<GameEvent> = {}) =>
+    ev({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      originGrid: "Z4C",
+      destinationGrid: response === GoalieAction.EXIT ? undefined : "G5",
+      metadata: {
+        isOpponent: true,
+        goalieResponse: response,
+        targetGoalkeeperId: "gk1",
+        ...(response === GoalieAction.EXIT ? { exitOutcome: "success" } : {}),
+      },
+      ...extra,
+    });
+
+  it("REGRESIÓN: una jugada con parada NUNCA produce dos paradas", () => {
+    // El defecto original: registrar el tiro y la parada por separado daba
+    // dos paradas y dos ocasiones. Aquí es un solo evento.
+    const ocasion = tiroRival(GoalieAction.SAVE);
+    expect(goalieStatsDelta(ocasion, nuestroGk).saves).toBe(1);
+    expect(goalieStatsDelta(ocasion, suGk).saves).toBe(0);
+    // Y sigue siendo UN solo intento de tiro.
+    expect(isAnySave(ocasion)).toBe(true);
+    expect(isUnspecifiedSave(ocasion)).toBe(false);
+  });
+
+  it("SHOT + PARADA → 1 tiro / 1 parada", () => {
+    const e = tiroRival(GoalieAction.SAVE);
+    expect(effectiveGoalieAction(e)).toBe(GoalieAction.SAVE);
+    expect(goalieStatsDelta(e, nuestroGk)).toEqual({ saves: 1, conceded: 0, exits: 0, exitsSuccess: 0 });
+  });
+
+  it("SHOT + BLOCAJE → 1 tiro / 1 parada de subtipo blocaje", () => {
+    const e = tiroRival(GoalieAction.SAVE_CATCH);
+    expect(effectiveGoalieAction(e)).toBe(GoalieAction.SAVE_CATCH);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
+  });
+
+  it("SHOT + DESPEJE → 1 tiro / 1 parada de subtipo despeje", () => {
+    const e = tiroRival(GoalieAction.SAVE_DEFLECT);
+    expect(effectiveGoalieAction(e)).toBe(GoalieAction.SAVE_DEFLECT);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
+  });
+
+  it("SHOT + SALIDA éxito → salida, NO parada", () => {
+    const e = tiroRival(GoalieAction.EXIT);
+    expect(isExit(e)).toBe(true);
+    expect(isAnySave(e)).toBe(false);
+    expect(goalieStatsDelta(e, nuestroGk)).toEqual({ saves: 0, conceded: 0, exits: 1, exitsSuccess: 1 });
+  });
+
+  it("SHOT + SALIDA fallo → salida sin éxito, NO parada", () => {
+    const e = ev({
+      ...tiroRival(GoalieAction.EXIT),
+      metadata: { isOpponent: true, goalieResponse: GoalieAction.EXIT, exitOutcome: "fail", targetGoalkeeperId: "gk1" },
+    });
+    expect(goalieStatsDelta(e, nuestroGk)).toEqual({ saves: 0, conceded: 0, exits: 1, exitsSuccess: 0 });
+  });
+
+  it("SHOT SIN respuesta conserva el comportamiento de siempre", () => {
+    const e = ev({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      destinationGrid: "G5",
+      metadata: { isOpponent: true },
+    });
+    expect(effectiveGoalieAction(e)).toBeNull();
+    expect(isUnspecifiedSave(e)).toBe(true);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
+  });
+
+  it("la respuesta la firma el portero OBJETIVO, nunca el del bando del tiro", () => {
+    const e = tiroRival(GoalieAction.SAVE_CATCH);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
+    expect(goalieStatsDelta(e, suGk)).toEqual({ saves: 0, conceded: 0, exits: 0, exitsSuccess: 0 });
+  });
+
+  it("identifica al portero por el id explícito", () => {
+    const e = tiroRival(GoalieAction.SAVE);
+    expect(targetGoalkeeperIdOf(e, [nuestroGk, suGk])).toBe("gk1");
+  });
+
+  it("si falta el id explícito, lo deduce por bando (eventos anteriores)", () => {
+    const e = ev({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      destinationGrid: "G5",
+      metadata: { isOpponent: true },
+    });
+    expect(targetGoalkeeperIdOf(e, [nuestroGk, suGk])).toBe("gk1");
+  });
+
+  it("con DOS porteros, la respuesta va al que encaró el tiro", () => {
+    const gkSuplente = gk({ id: "gk3", number: 13, isOpponent: false, isOnPitch: false });
+    const e = ev({
+      ...tiroRival(GoalieAction.SAVE),
+      playerIds: ["rival-10", "gk3"],
+      metadata: { isOpponent: true, goalieResponse: GoalieAction.SAVE, targetGoalkeeperId: "gk3" },
+    });
+    expect(targetGoalkeeperIdOf(e, [nuestroGk, gkSuplente, suGk])).toBe("gk3");
+    expect(goalieStatsDelta(e, gkSuplente).saves).toBe(1);
+    expect(goalieStatsDelta(e, nuestroGk).saves).toBe(0);
+  });
+
+  it("tras sustituir al portero, borrar resta al que lo firmó", () => {
+    // El borrado usa el MISMO delta que el registro, y decide por identidad.
+    const gkSuplente = gk({ id: "gk3", number: 13, isOpponent: false });
+    const e = ev({
+      ...tiroRival(GoalieAction.SAVE_DEFLECT),
+      playerIds: ["rival-10", "gk1"],
+      metadata: { isOpponent: true, goalieResponse: GoalieAction.SAVE_DEFLECT, targetGoalkeeperId: "gk1" },
+    });
+    // gk1 ya no está en pista; gk3 sí. No cambia nada.
+    const salido = { ...nuestroGk, isOnPitch: false };
+    const entrado = { ...gkSuplente, isOnPitch: true };
+    expect(goalieStatsDelta(e, salido).saves).toBe(1);
+    expect(goalieStatsDelta(e, entrado).saves).toBe(0);
+  });
+
+  it("acepta zona de intervención sobre el tiro enriquecido", () => {
+    expect(eventAcceptsGoalkeeperZone(tiroRival(GoalieAction.SAVE))).toBe(true);
+    expect(eventAcceptsGoalkeeperZone(ev({ type: GoalieAction.EXIT }))).toBe(true);
+    // Un tiro sin respuesta no pide zona de portero.
+    expect(
+      eventAcceptsGoalkeeperZone(ev({ type: ActionType.SHOT, metadata: { isOpponent: true } })),
+    ).toBe(false);
+  });
+
+  it("una acción suelta del portero (Camino B) sigue funcionando igual", () => {
+    const suelta = ev({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"], metadata: { isOpponent: false } });
+    expect(effectiveGoalieAction(suelta)).toBe(GoalieAction.SAVE_CATCH);
+    expect(goalieStatsDelta(suelta, nuestroGk).saves).toBe(1);
+  });
+
+  it("el histórico sin goalieResponse y SAVE_PARRY no se tocan", () => {
+    const historico = ev({ type: GoalieAction.SAVE_PARRY, playerIds: ["gk1"], metadata: { isOpponent: false } });
+    expect(effectiveGoalieAction(historico)).toBe(GoalieAction.SAVE_PARRY);
+    expect(isUnspecifiedSave(historico)).toBe(true);
+    expect(goalieStatsDelta(historico, nuestroGk).saves).toBe(1);
+    expect(goalieResponseOf(historico)).toBeNull();
+  });
+
+  it("no acepta como respuesta un valor arbitrario", () => {
+    const e = ev({ type: ActionType.SHOT, metadata: { isOpponent: true, goalieResponse: "PARADON" } });
+    expect(goalieResponseOf(e)).toBeNull();
+    expect(isGoalieResponse("PARADON")).toBe(false);
   });
 });

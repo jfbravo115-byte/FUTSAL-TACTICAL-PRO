@@ -518,3 +518,95 @@ describe("Distribución por zona de intervención", () => {
     expect(gk.interventionsUnlocated).toBe(0);
   });
 });
+
+// ── MODELO C EN EL INFORME: UNA OCASIÓN, NUNCA DOS ────────────────────
+describe("Tiro rival con respuesta del portero", () => {
+  const tiro = (response: string, extra: Record<string, any> = {}) =>
+    event({
+      type: ActionType.SHOT,
+      playerIds: ["rival-10", "gk1"],
+      originGrid: "Z4C",
+      destinationGrid: response === "EXIT" ? undefined : "G5",
+      goalkeeperZone: "GK3",
+      metadata: { isOpponent: true, goalieResponse: response, targetGoalkeeperId: "gk1", ...extra },
+    });
+
+  it("REGRESIÓN: una jugada con parada da 1 parada y 1 ocasión, no 2", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("SAVE")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.totalSaves).toBe(1);
+    expect(gk.shotsFaced).toBe(1);
+    expect(gk.timeline).toHaveLength(1);
+    // Y una sola intervención ubicada.
+    expect(gk.interventionZones.GK3).toBe(1);
+  });
+
+  it("el subtipo del tiro enriquecido se desglosa correctamente", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("SAVE_CATCH"), tiro("SAVE_DEFLECT")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveCatch).toBe(1);
+    expect(gk.saveDeflect).toBe(1);
+    expect(gk.saveUnspecified).toBe(0);
+    expect(gk.totalSaves).toBe(2);
+  });
+
+  it("una SALIDA dentro del tiro cuenta como salida, no como parada", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("EXIT", { exitOutcome: "success" })],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.exits).toBe(1);
+    expect(gk.exitsSuccess).toBe(1);
+    expect(gk.totalSaves).toBe(0);
+    expect(gk.exitZones.GK3).toBe(1);
+  });
+
+  it("la cronología nombra la respuesta, sin códigos técnicos", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [tiro("SAVE_DEFLECT")],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.timeline[0].type).toBe("Despeje");
+    expect(gk.timeline[0].type).not.toMatch(/SAVE|SHOT|EXIT|GK[1-5]/);
+  });
+
+  it("un tiro SIN respuesta sigue contando como parada sin subtipo", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        event({
+          type: ActionType.SHOT,
+          playerIds: ["rival-10", "gk1"],
+          destinationGrid: "G5",
+          metadata: { isOpponent: true },
+        }),
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    expect(gk.saveUnspecified).toBe(1);
+    expect(gk.totalSaves).toBe(1);
+  });
+
+  it("conviven el tiro enriquecido y la acción suelta sin mezclarse", () => {
+    const md = matchData({
+      players: [player({ individualTimeSeconds: 600 })],
+      events: [
+        tiro("SAVE"),                                                   // Camino A
+        event({ type: GoalieAction.SAVE_CATCH, playerIds: ["gk1"] }),   // Camino B
+      ],
+    });
+    const [gk] = buildGoalkeeperReports(md);
+    // Dos ocasiones REALES distintas: 2 paradas. No hay duplicación.
+    expect(gk.totalSaves).toBe(2);
+    expect(gk.saveGeneric).toBe(1);
+    expect(gk.saveCatch).toBe(1);
+  });
+});

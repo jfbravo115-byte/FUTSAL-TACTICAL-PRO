@@ -44,6 +44,7 @@ import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
 import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
+import { describeSetPieceOutcomes } from "../utils/setPieceModel";
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { safeImageSrc } from "../utils/safeImageSrc";
@@ -235,6 +236,22 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
       {describeCorners(zones.corners) && (
         <div style={{ fontSize: 10, color: "#374151", marginTop: 4, fontWeight: 700 }}>
           {describeCorners(zones.corners)}
+        </div>
+      )}
+
+      {/* Balón parado: cómo se ejecutó. Es OTRA dimensión, no sustituye al
+          lado del córner ni a la ubicación de la falta — va debajo, con su
+          propio total, y lo no registrado se declara en vez de repartirse. */}
+      {(describeSetPieceOutcomes(zones.setPieces.corners) ||
+        describeSetPieceOutcomes(zones.setPieces.fouls)) && (
+        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700 }}>Balón parado · ejecución</div>
+          {describeSetPieceOutcomes(zones.setPieces.corners) && (
+            <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
+          )}
+          {describeSetPieceOutcomes(zones.setPieces.fouls) && (
+            <div>Faltas cometidas: {describeSetPieceOutcomes(zones.setPieces.fouls)}</div>
+          )}
         </div>
       )}
 

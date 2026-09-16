@@ -92,6 +92,25 @@ import {
 } from "../utils/fieldZones";
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
+import { formatEventTypeLabel } from "../utils/eventLabels";
+import {
+  applyFoulToCounters,
+  applyFoulToPlayerStat,
+  foulStatDelta,
+  withEventLocation,
+  withSetPieceOutcome,
+} from "../utils/foulModel";
+import {
+  SET_PIECE_ORIGINS,
+  SET_PIECE_ORIGIN_LABEL,
+  SET_PIECE_OUTCOMES,
+  SET_PIECE_OUTCOME_DESCRIPTION,
+  SET_PIECE_OUTCOME_LABEL,
+  SetPieceOrigin,
+  SetPieceOutcome,
+  formatSetPieceOrigin,
+  formatSetPieceOutcome,
+} from "../utils/setPieceModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
@@ -121,6 +140,15 @@ import { SimpleExportModal } from "../components/SimpleExportModal";
 import Markdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
 import { savePartido, getPartido } from "../services/partidosService";
+
+/** Iconos del selector "¿acción desde?". Solo presentación. */
+const SET_PIECE_ORIGIN_ICON: Record<SetPieceOrigin, string> = {
+  normal: "⚽",
+  free_kick: "🎯",
+  corner: "🚩",
+  penalty: "🥅",
+  double_penalty: "🔴",
+};
 
 
 
@@ -1350,7 +1378,15 @@ export default function MatchTracker() {
     isOpponent: boolean;
   } | null>(null);
   /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
-  const [pendingCorner, setPendingCorner] = useState<{ isOpponent: boolean } | null>(null);
+  // El córner se captura en dos pasos: esquina y, después, cómo se ejecutó.
+  // El segundo es omitible y su ausencia es un dato válido.
+  const [pendingCorner, setPendingCorner] = useState<{
+    isOpponent: boolean;
+    side?: CornerSide;
+  } | null>(null);
+  // Desenlace de una falta YA registrada. Igual que la ubicación: llega
+  // después y cancelarlo no deshace nada.
+  const [pendingFoulOutcome, setPendingFoulOutcome] = useState<{ eventId: string } | null>(null);
   /** Portero que va a registrar una salida, a la espera del resultado. */
   const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
   /** Salida ya registrada a la espera de ubicación OPCIONAL. */
@@ -1365,7 +1401,7 @@ export default function MatchTracker() {
     isOpponent: boolean;
     originGrid?: string;
     destinationGrid?: string;
-    setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
+    setPiece?: SetPieceOrigin;
     subType?: string;
     /** Modelo C: respuesta del portero declarada dentro del mismo tiro. */
     goalieResponse?: GoalieResponseDeclared;
@@ -1957,48 +1993,42 @@ export default function MatchTracker() {
     }
 
     setMatchData((prev) => {
-      const nextPlayers = prev.players.map((p) => {
-        if (p.id === playerId) {
-          return {
-            ...p,
-            stats: { ...p.stats, fouls: p.stats.fouls + 1 },
-          };
-        }
-        return p;
-      });
+      const foulEvent: GameEvent = {
+        id: foulEventId,
+        timestamp: prev.matchClock,
+        wallClock: Date.now(),
+        period: prev.period,
+        playerIds: playerId ? [playerId] : [],
+        // Sin esto una falta no puede atribuirse a quién estaba realmente en
+        // pista, a diferencia del resto de eventos.
+        onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
+        type: ActionType.FOUL,
+        gameState,
+        // La zona se guarda desde la perspectiva del equipo que COMETE la
+        // falta. Una falta recibida se obtiene espejando en presentación,
+        // nunca guardando una segunda zona.
+        attackDirection:
+          attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
+        metadata: { isOpponent: !isTeam },
+        scoreAtEvent: {
+          team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
+          opponent: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length,
+        },
+      };
 
+      // Las dos dimensiones reglamentarias, con las mismas funciones que usa
+      // el borrado (utils/foulModel): equipo e individual.
       return {
         ...prev,
-        fouls: {
-          ...prev.fouls,
-          [isTeam ? "team" : "opponent"]: newCount,
-        },
-        events: [
-          {
-            id: foulEventId,
-            timestamp: prev.matchClock,
-            wallClock: Date.now(),
-            period: prev.period,
-            playerIds: playerId ? [playerId] : [],
-            // Faltaba: sin esto una falta no puede atribuirse a quién estaba
-            // realmente en pista, a diferencia del resto de eventos.
-            onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
-            type: ActionType.FOUL,
-            gameState,
-            // La zona se guarda desde la perspectiva del equipo que COMETE la
-            // falta. Una falta recibida se obtiene espejando en presentación,
-            // nunca guardando una segunda zona.
-            attackDirection:
-              attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
-            metadata: { isOpponent: !isTeam },
-            scoreAtEvent: {
-              team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
-              opponent: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length,
-            },
+        fouls: applyFoulToCounters(prev.fouls, foulEvent, 1),
+        events: [foulEvent, ...prev.events],
+        players: prev.players.map((p) => ({
+          ...p,
+          stats: {
+            ...p.stats,
+            fouls: applyFoulToPlayerStat(p.stats.fouls, foulStatDelta(foulEvent, p, 1)),
           },
-          ...prev.events,
-        ],
-        players: nextPlayers,
+        })),
       };
     });
 
@@ -2017,10 +2047,16 @@ export default function MatchTracker() {
     if (!pending) return;
     setMatchData((prev) => ({
       ...prev,
-      events: prev.events.map((e) =>
-        e.id === pending.eventId ? { ...e, originGrid: zoneId } : e,
-      ),
+      events: withEventLocation(prev.events, pending.eventId, zoneId),
     }));
+    setPendingFoulOutcome({ eventId: pending.eventId });
+  };
+
+  /** Omitir la ubicación no salta el desenlace: son dos preguntas distintas. */
+  const skipFoulLocation = () => {
+    const pending = pendingFoulLocation;
+    setPendingFoulLocation(null);
+    if (pending) setPendingFoulOutcome({ eventId: pending.eventId });
   };
 
   /**
@@ -2072,13 +2108,47 @@ export default function MatchTracker() {
     }));
   };
 
-  const handleCorner = (isOpponent: boolean, side: CornerSide) => {
+  /**
+   * Registro de córner. `cornerSide` sigue siendo el dato autoritativo y
+   * `originGrid` el enlace con las 12 zonas.
+   *
+   * `outcome` es OPCIONAL y su ausencia es un dato en sí: significa que no se
+   * registró cómo se ejecutó, igual que en cualquier córner anterior a Fase
+   * 5. No se guarda ningún marcador de "desconocido" — eso obligaría a migrar.
+   *
+   * Un córner ejecutado en tiro NO crea un SHOT: si el operador quiere
+   * registrar además el tiro, lo hace como acción propia y lo declara con
+   * `setPiece: 'corner'`. Son dos declaraciones independientes.
+   */
+  const handleCorner = (
+    isOpponent: boolean,
+    side: CornerSide,
+    outcome?: SetPieceOutcome,
+  ) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
     setPendingCorner(null);
     handleAction(ActionType.CORNER, undefined, {
       originGrid: cornerOriginGrid(side),
-      metadata: { isOpponent, cornerSide: side },
+      metadata: {
+        isOpponent,
+        cornerSide: side,
+        ...(outcome ? { setPieceOutcome: outcome } : {}),
+      },
     });
+  };
+
+  /**
+   * Añade el desenlace a una falta YA registrada y contabilizada. No crea
+   * ningún evento, no toca el contador reglamentario y puede omitirse.
+   */
+  const assignFoulOutcome = (outcome: SetPieceOutcome) => {
+    const pending = pendingFoulOutcome;
+    setPendingFoulOutcome(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: withSetPieceOutcome(prev.events, pending.eventId, outcome),
+    }));
   };
 
   const handleAction = (
@@ -2366,6 +2436,12 @@ export default function MatchTracker() {
           }
           if (event.type === ActionType.RED_CARD)
             stats.redCards = Math.max(0, stats.redCards - 1);
+          // Registrar una falta suma en stats.fouls del jugador (ver
+          // handleFoul), pero borrarla solo devolvía el contador del equipo:
+          // la falta individual únicamente podía crecer. Registro y borrado
+          // usan ahora la MISMA función con el signo cambiado, y nunca deja
+          // el contador por debajo de cero.
+          stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
           
           // Las acciones de portero ya se han deshecho arriba con
           // goalieStatsDelta; no se duplican aqui.
@@ -2380,16 +2456,8 @@ export default function MatchTracker() {
         return { ...p, stats, plusMinus: pm };
       });
 
-      // Special case: team fouls
-      let nextFouls = { ...prev.fouls };
-      if (event.type === ActionType.FOUL) {
-        const isOpponent = event.metadata?.isOpponent ?? false;
-        if (isOpponent) {
-          nextFouls.opponent = Math.max(0, nextFouls.opponent - 1);
-        } else {
-          nextFouls.team = Math.max(0, nextFouls.team - 1);
-        }
-      }
+      // Contador reglamentario del equipo.
+      const nextFouls = applyFoulToCounters(prev.fouls, event, -1);
 
       let nextTimeouts = { ...prev.timeoutsUsed };
       if (event.type === ActionType.TIMEOUT) {
@@ -4173,22 +4241,11 @@ export default function MatchTracker() {
                                     </div>
                                     <div className="flex flex-col">
                                       <span className="text-[9px] font-black uppercase truncate text-white">
-                                        {e.type === ActionType.GOAL ? "⚽ Gol"
-                                          : e.type === ActionType.SHOT ? "🎯 Tiro"
-                                          : e.type === ActionType.STEAL ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
-                                          : e.type === ActionType.INTERCEPTION ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
-                                          : e.type === ActionType.LOSS ? (
-                                              e.metadata?.subType === 'bad_pass' ? "🎯 Error pase"
-                                              : e.metadata?.subType === 'bad_dribble' ? "🏃 Error regate"
-                                              : e.metadata?.subType === 'bad_control' ? "🤲 Error control"
-                                              : "❌ Pérdida")
-                                          : e.type === ActionType.UNFORCED_ERROR ? "❌ Pérdida"
-                                          : e.type === ActionType.ASSIST ? "👟 Asistencia"
-                                          : e.type === ActionType.FOUL ? "⚠️ Falta"
-                                          : e.type === GoalieAction.GOAL_CONCEDED ? "🔴 Gol encajado"
-                                          : e.type === GoalieAction.EXIT ? `🧤 ${formatExit(e)}`
-                                          : (e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE_DEFLECT) ? `🧤 ${formatGoalieAction(e.type)}`
-                                          : e.type.replace(/_/g, " ")}
+                                        {/* Fuente única (utils/eventLabels): aquí se
+                                            imprimía el código interno para cualquier
+                                            tipo sin rama propia, y por eso el córner
+                                            salía como CORNER. */}
+                                        {formatEventTypeLabel(e)}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
                                         {matchData.players.find(
@@ -4196,15 +4253,14 @@ export default function MatchTracker() {
                                         )?.name || "Equipo"}
                                       </span>
                                     </div>
-                                    {e.metadata?.setPiece && e.metadata.setPiece !== "normal" && (
-                                      <span className={`text-[6px] font-black px-1 rounded-sm border shrink-0 ${
-                                        e.metadata.setPiece === "penalty" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                                        : e.metadata.setPiece === "free_kick" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                    {formatSetPieceOrigin(e) && (
+                                      <span className={`text-[6px] font-black px-1 rounded-sm border shrink-0 uppercase ${
+                                        e.metadata?.setPiece === "penalty" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                        : e.metadata?.setPiece === "free_kick" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                        : e.metadata?.setPiece === "corner" ? "bg-violet-500/20 text-violet-400 border-violet-500/30"
                                         : "bg-red-500/20 text-red-400 border-red-500/30"
                                       }`}>
-                                        {e.metadata.setPiece === "penalty" ? "PENALTI"
-                                          : e.metadata.setPiece === "free_kick" ? "FALTA"
-                                          : "DOBLE P."}
+                                        {formatSetPieceOrigin(e)}
                                       </span>
                                     )}
                                   </div>
@@ -6217,24 +6273,68 @@ export default function MatchTracker() {
                   {pendingCorner.isOpponent ? matchData.opponentName : matchData.teamName} · ¿desde qué esquina?
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {(["left", "right"] as CornerSide[]).map((side) => (
+              {!pendingCorner.side ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["left", "right"] as CornerSide[]).map((side) => (
+                      <button
+                        key={side}
+                        onClick={() =>
+                          setPendingCorner({ isOpponent: pendingCorner.isOpponent, side })
+                        }
+                        className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
+                      >
+                        <Flag size={22} className="text-violet-300" />
+                        <span className="text-[11px] font-black uppercase text-white">
+                          {formatCornerLabel(side)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                    Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
+                    en cualquiera de las dos partes.
+                  </p>
+                </>
+              ) : (
+                /* Segundo paso: cómo se ejecutó. Omitirlo deja un córner
+                   perfectamente válido, sin desenlace registrado. */
+                <>
+                  <p className="text-[10px] text-slate-300 text-center font-black uppercase">
+                    {formatCornerLabel(pendingCorner.side)} · ¿cómo se ejecuta?
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {SET_PIECE_OUTCOMES.map((outcome) => (
+                      <button
+                        key={outcome}
+                        data-set-piece-outcome={outcome}
+                        onClick={() =>
+                          handleCorner(pendingCorner.isOpponent, pendingCorner.side!, outcome)
+                        }
+                        className="py-5 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-1"
+                      >
+                        <span className="text-[11px] font-black uppercase text-white">
+                          {SET_PIECE_OUTCOME_LABEL[outcome]}
+                        </span>
+                        <span className="text-[8px] text-slate-400 text-center px-2 leading-tight">
+                          {SET_PIECE_OUTCOME_DESCRIPTION[outcome]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                   <button
-                    key={side}
-                    onClick={() => handleCorner(pendingCorner.isOpponent, side)}
-                    className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
+                    data-set-piece-outcome="none"
+                    onClick={() => handleCorner(pendingCorner.isOpponent, pendingCorner.side!)}
+                    className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-300"
                   >
-                    <Flag size={22} className="text-violet-300" />
-                    <span className="text-[11px] font-black uppercase text-white">
-                      {formatCornerLabel(side)}
-                    </span>
+                    Sin especificar
                   </button>
-                ))}
-              </div>
-              <p className="text-[9px] text-slate-500 text-center leading-relaxed">
-                Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
-                en cualquiera de las dos partes.
-              </p>
+                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                    El córner se registra igual. «Sin especificar» no inventa nada: queda
+                    como subtipo no registrado.
+                  </p>
+                </>
+              )}
               <button
                 onClick={() => setPendingCorner(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
@@ -6257,10 +6357,49 @@ export default function MatchTracker() {
               </div>
               <PitchZones onSelect={assignFoulLocation} />
               <button
-                onClick={() => setPendingFoulLocation(null)}
+                onClick={skipFoulLocation}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
               >
                 Omitir ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── FALTA: desenlace OPCIONAL. La falta y su contador reglamentario
+            ya están registrados; esto solo completa el evento. ────────── */}
+        {pendingFoulOutcome && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">Falta registrada</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ¿Cómo se ejecuta? Es opcional: la falta y su contador ya están registrados.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {SET_PIECE_OUTCOMES.map((outcome) => (
+                  <button
+                    key={outcome}
+                    data-set-piece-outcome={outcome}
+                    onClick={() => assignFoulOutcome(outcome)}
+                    className="py-5 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-orange-500/25 hover:border-orange-400 transition-all flex flex-col items-center gap-1"
+                  >
+                    <span className="text-[11px] font-black uppercase text-white">
+                      {SET_PIECE_OUTCOME_LABEL[outcome]}
+                    </span>
+                    <span className="text-[8px] text-slate-400 text-center px-2 leading-tight">
+                      {SET_PIECE_OUTCOME_DESCRIPTION[outcome]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                data-set-piece-outcome="none"
+                onClick={() => setPendingFoulOutcome(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-300"
+              >
+                Sin especificar
               </button>
             </div>
           </div>
@@ -6387,12 +6526,14 @@ export default function MatchTracker() {
                     ¿Acción desde?
                   </span>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {[
-                      { id: "normal",         label: "Jugada",     icon: "⚽" },
-                      { id: "free_kick",      label: "Falta",      icon: "🎯" },
-                      { id: "penalty",        label: "Penalti",    icon: "🥅" },
-                      { id: "double_penalty", label: "Doble P.",   icon: "🔴" },
-                    ].map((opt) => {
+                    {/* Catálogo único (utils/setPieceModel). Declarar aquí que
+                        el tiro viene de un córner NO crea ningún evento
+                        CORNER: es una declaración sobre este tiro. */}
+                    {SET_PIECE_ORIGINS.map((id) => ({
+                      id,
+                      label: SET_PIECE_ORIGIN_LABEL[id],
+                      icon: SET_PIECE_ORIGIN_ICON[id],
+                    })).map((opt) => {
                       const isSel = (pendingAction.setPiece || "normal") === opt.id;
                       return (
                         <button

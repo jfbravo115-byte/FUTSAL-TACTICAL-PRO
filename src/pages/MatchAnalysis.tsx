@@ -30,6 +30,7 @@ import {
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
+import { describeSetPieceOutcomes } from "../utils/setPieceModel";
 import { generateTacticalReport } from "../services/tacticalAnalysisService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
@@ -340,6 +341,22 @@ export default function MatchAnalysis() {
 
               {describeCorners(zones.corners) && (
                 <div className="mt-2 text-[10px] text-violet-300 font-black">{describeCorners(zones.corners)}</div>
+              )}
+              {/* Desglose por ejecución. Va DEBAJO del lado y de los mapas:
+                  añade una dimensión, no sustituye ninguna. */}
+              {(describeSetPieceOutcomes(zones.setPieces.corners) ||
+                describeSetPieceOutcomes(zones.setPieces.fouls)) && (
+                <div className="mt-2 text-[9px] text-slate-400 leading-relaxed">
+                  <div className="font-black text-slate-300 uppercase tracking-widest text-[8px]">
+                    Balón parado · ejecución
+                  </div>
+                  {describeSetPieceOutcomes(zones.setPieces.corners) && (
+                    <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
+                  )}
+                  {describeSetPieceOutcomes(zones.setPieces.fouls) && (
+                    <div>Faltas cometidas: {describeSetPieceOutcomes(zones.setPieces.fouls)}</div>
+                  )}
+                </div>
               )}
               {zones.unlocated > 0 && (
                 <div className="mt-1 text-[9px] text-slate-500">

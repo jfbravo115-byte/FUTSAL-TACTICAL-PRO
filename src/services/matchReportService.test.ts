@@ -228,3 +228,67 @@ describe("generateMatchReport — tiros y destacados descriptivos", () => {
     expect(r.highlights.topRecoverer?.recoveries).toBe(4);
   });
 });
+
+// ── BALÓN PARADO EN EL RESUMEN DETERMINISTA ─────────────────────────────
+//
+// Este resumen es el que recibe Tactical Pro. Hasta ahora no mencionaba los
+// córners, así que el modelo solo los veía en el JSON crudo.
+
+import { formatMatchReportAsMarkdown } from "./matchReportService";
+
+function corner(outcome?: "shot" | "play", opponent = false): GameEvent {
+  return event({
+    type: ActionType.CORNER,
+    originGrid: "Z4L",
+    metadata: { isOpponent: opponent, cornerSide: "left", ...(outcome ? { setPieceOutcome: outcome } : {}) },
+  });
+}
+
+describe("balón parado en el informe", () => {
+  const conBalonParado = () =>
+    matchData({
+      players: [player()],
+      events: [
+        corner("shot"),
+        corner("shot"),
+        corner("play"),
+        corner(),
+        corner("play", true),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], metadata: { isOpponent: false, setPieceOutcome: "shot" } }),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], metadata: { isOpponent: false } }),
+      ],
+    });
+
+  it("desglosa córners y faltas propias, y separa al rival", () => {
+    const r = generateMatchReport(conBalonParado());
+    expect(r.setPieces.corners.team).toEqual({ total: 4, shot: 2, play: 1, unrecorded: 1 });
+    expect(r.setPieces.corners.opponent).toEqual({ total: 1, shot: 0, play: 1, unrecorded: 0 });
+    expect(r.setPieces.fouls.team).toEqual({ total: 2, shot: 1, play: 0, unrecorded: 1 });
+  });
+
+  it("el markdown que recibe Tactical Pro ya menciona los córners", () => {
+    const md = formatMatchReportAsMarkdown(generateMatchReport(conBalonParado()));
+    expect(md).toContain("Balón parado");
+    expect(md).toContain("córners");
+    expect(md).toContain("2 tiro");
+    expect(md).toContain("subtipo no registrado");
+    expect(md).not.toMatch(/setPieceOutcome|CORNER|'shot'/);
+  });
+
+  it("un partido sin balón parado no redacta la línea", () => {
+    const md = formatMatchReportAsMarkdown(generateMatchReport(matchData({ players: [player()], events: [] })));
+    expect(md).not.toContain("Balón parado");
+  });
+
+  it("un partido histórico declara sus córners como subtipo no registrado", () => {
+    const r = generateMatchReport(matchData({ players: [player()], events: [corner(), corner()] }));
+    expect(r.setPieces.corners.team).toEqual({ total: 2, shot: 0, play: 0, unrecorded: 2 });
+  });
+
+  it("el desglose nunca altera el contador reglamentario de faltas", () => {
+    const md = conBalonParado();
+    const r = generateMatchReport(md);
+    expect(r.fouls.team).toBe(md.fouls.team);
+    expect(r.teamTotals.fouls).toBe(md.fouls.team);
+  });
+});

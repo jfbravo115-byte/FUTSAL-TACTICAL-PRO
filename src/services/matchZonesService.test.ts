@@ -274,3 +274,88 @@ describe("goalkeeperZone no contamina los agregados de origen", () => {
     expect(bucket.zones.find((z) => z.zone === "Z4R")!.total).toBeGreaterThan(0);
   });
 });
+
+// ── BALÓN PARADO ────────────────────────────────────────────────────────
+//
+// El desglose por ejecución se AÑADE a la dimensión espacial: el lado del
+// córner y los sectores siguen respondiendo a lo suyo. Y la comprobación que
+// motiva todo esto: un córner ejecutado en tiro y un tiro declarado "desde
+// córner" son dos declaraciones independientes que no pueden contarse dos
+// veces en el mismo agregado.
+
+describe("desglose de balón parado", () => {
+  const partido = (events: any[]) => ({ ...base, events });
+
+  it("desglosa los córners por ejecución sin perder el lado", () => {
+    const zones = buildZoneDashboard(
+      partido([
+        ev("c1", ActionType.CORNER, cornerOriginGrid("left"), false, undefined, { cornerSide: "left", setPieceOutcome: "shot" }),
+        ev("c2", ActionType.CORNER, cornerOriginGrid("right"), false, undefined, { cornerSide: "right", setPieceOutcome: "play" }),
+        ev("c3", ActionType.CORNER, cornerOriginGrid("left"), false, undefined, { cornerSide: "left" }),
+      ]),
+      false,
+    );
+    expect(zones.setPieces.corners).toEqual({ total: 3, shot: 1, play: 1, unrecorded: 1 });
+    // La dimensión espacial sigue intacta.
+    expect(zones.corners.left).toBe(2);
+    expect(zones.corners.right).toBe(1);
+    expect(zones.totals.corners).toBe(3);
+  });
+
+  it("desglosa las faltas cometidas y respeta las que no tienen ubicación", () => {
+    const zones = buildZoneDashboard(
+      partido([
+        ev("f1", ActionType.FOUL, "Z2C", false, undefined, { setPieceOutcome: "shot" }),
+        ev("f2", ActionType.FOUL, undefined, false, undefined, { setPieceOutcome: "play" }),
+        ev("f3", ActionType.FOUL, undefined),
+      ]),
+      false,
+    );
+    expect(zones.setPieces.fouls).toEqual({ total: 3, shot: 1, play: 1, unrecorded: 1 });
+    expect(zones.totals.fouls).toBe(3);
+    expect(zones.unlocated).toBe(2);
+  });
+
+  it("NO hay doble conteo: un córner en tiro más un tiro desde córner", () => {
+    const zones = buildZoneDashboard(
+      partido([
+        ev("c1", ActionType.CORNER, cornerOriginGrid("left"), false, undefined, { cornerSide: "left", setPieceOutcome: "shot" }),
+        ev("s1", ActionType.SHOT, "Z4C", false, "G2", { setPiece: "corner" }),
+      ]),
+      false,
+    );
+    expect(zones.totals.corners).toBe(1);
+    expect(zones.setPieces.corners.total).toBe(1);
+    expect(zones.totals.attempts).toBe(1); // el tiro, una sola vez
+    // El tiro no entra en el desglose de balón parado: es un tiro.
+    expect(zones.setPieces.corners.shot).toBe(1);
+  });
+
+  it("NO hay doble conteo: una falta en tiro más un tiro de falta", () => {
+    const zones = buildZoneDashboard(
+      partido([
+        ev("f1", ActionType.FOUL, "Z2C", true, undefined, { setPieceOutcome: "shot" }),
+        ev("s1", ActionType.SHOT, "Z4C", false, "G5", { setPiece: "free_kick" }),
+      ]),
+      false,
+    );
+    expect(zones.totals.attempts).toBe(1);
+    expect(zones.totals.fouls).toBe(0); // la falta es del rival
+    expect(buildZoneDashboard(partido([
+      ev("f1", ActionType.FOUL, "Z2C", true, undefined, { setPieceOutcome: "shot" }),
+      ev("s1", ActionType.SHOT, "Z4C", false, "G5", { setPiece: "free_kick" }),
+    ]), true).setPieces.fouls).toEqual({ total: 1, shot: 1, play: 0, unrecorded: 0 });
+  });
+
+  it("un partido histórico sin el campo no pierde ni un córner ni una falta", () => {
+    const zones = buildZoneDashboard(
+      partido([
+        ev("c1", ActionType.CORNER, cornerOriginGrid("left"), false, undefined, { cornerSide: "left" }),
+        ev("f1", ActionType.FOUL, "Z1C"),
+      ]),
+      false,
+    );
+    expect(zones.setPieces.corners).toEqual({ total: 1, shot: 0, play: 0, unrecorded: 1 });
+    expect(zones.setPieces.fouls).toEqual({ total: 1, shot: 0, play: 0, unrecorded: 1 });
+  });
+});

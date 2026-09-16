@@ -32,6 +32,7 @@
  * migrar más adelante. De ahí que no exista el campo.)
  */
 import { ActionType, GameEvent } from "../types/futsal";
+import { formatSetPieceOutcome } from "./setPieceModel";
 import { Zone12Id, ZoneLane, makeZone12 } from "./fieldZones";
 
 export type CornerSide = "left" | "right";
@@ -74,6 +75,24 @@ export function formatCornerSideLabel(side: CornerSide): string {
 /** `"Córner · izquierda"`. */
 export function formatCornerLabel(side: CornerSide): string {
   return `Córner · ${SIDE_LABEL[side]}`;
+}
+
+/**
+ * Etiqueta de un córner concreto para Historial y listados.
+ *
+ *   "Córner · izquierda · Tiro"   lado y desenlace registrados
+ *   "Córner · izquierda"          sin desenlace: no se inventa
+ *   "Córner"                      sin lado ni desenlace
+ *
+ * Nunca devuelve el código interno: el Historial llegó a imprimir `CORNER`
+ * en crudo porque no había ninguna etiqueta para este tipo.
+ */
+export function formatCornerEventLabel(event: GameEvent): string {
+  const side = isCornerSide(event.metadata?.cornerSide)
+    ? (event.metadata!.cornerSide as CornerSide)
+    : cornerSideFromGrid(event.originGrid);
+  const outcome = formatSetPieceOutcome(event);
+  return ["Córner", side ? SIDE_LABEL[side] : null, outcome].filter(Boolean).join(" · ");
 }
 
 // ── AGREGADOS ───────────────────────────────────────────────────────────

@@ -12,6 +12,11 @@ import {
   Role,
 } from "../types/futsal";
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
+import {
+  SetPieceOutcomeSummary,
+  describeSetPieceOutcomes,
+  summarizeSetPieceOutcomes,
+} from "../utils/setPieceModel";
 
 export type MatchReportPlayerLine = {
   id: string;
@@ -55,6 +60,16 @@ export type MatchReportRelevantEvent = {
   isOpponent: boolean;
 };
 
+/**
+ * Balón parado del equipo propio y del rival. El total no cambia de
+ * significado: el desglose solo dice cómo se ejecutó cada uno, y lo que no
+ * se registró se declara como tal en vez de repartirse.
+ */
+export type MatchReportSetPieces = {
+  corners: { team: SetPieceOutcomeSummary; opponent: SetPieceOutcomeSummary };
+  fouls: { team: SetPieceOutcomeSummary; opponent: SetPieceOutcomeSummary };
+};
+
 export type MatchReport = {
   generatedAt: string;
   isFinal: boolean;
@@ -73,6 +88,7 @@ export type MatchReport = {
     maxRotLabel: string | null;
     totalRotationsCount: number;
   };
+  setPieces: MatchReportSetPieces;
   teamTotals: {
     goals: number;
     /** Intentos totales: gol + tiro a portería + tiro fuera. */
@@ -341,6 +357,16 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       maxRotLabel: maxRotSeconds !== null ? fmtSeconds(maxRotSeconds) : null,
       totalRotationsCount,
     },
+    setPieces: {
+      corners: {
+        team: summarizeSetPieceOutcomes(matchData.events, ActionType.CORNER, false),
+        opponent: summarizeSetPieceOutcomes(matchData.events, ActionType.CORNER, true),
+      },
+      fouls: {
+        team: summarizeSetPieceOutcomes(matchData.events, ActionType.FOUL, false),
+        opponent: summarizeSetPieceOutcomes(matchData.events, ActionType.FOUL, true),
+      },
+    },
     teamTotals,
     highlights: {
       topTot: topTot ? { id: topTot.id, number: topTot.number, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
@@ -371,6 +397,20 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   lines.push(
     `Recuperaciones **${r.teamTotals.recoveries}** · pérdidas + errores **${r.teamTotals.lossesAndErrors}** · balance **${r.teamTotals.recoveryLossBalance >= 0 ? "+" : ""}${r.teamTotals.recoveryLossBalance}**`,
   );
+  const cornersTxt = describeSetPieceOutcomes(r.setPieces.corners.team);
+  const foulsTxt = describeSetPieceOutcomes(r.setPieces.fouls.team);
+  if (cornersTxt || foulsTxt) {
+    lines.push(
+      `Balón parado — córners **${cornersTxt ?? 0}**` +
+        (foulsTxt ? ` · faltas cometidas **${foulsTxt}**` : "") +
+        (r.setPieces.corners.opponent.total > 0
+          ? ` · córners del rival **${describeSetPieceOutcomes(r.setPieces.corners.opponent)}**`
+          : ""),
+    );
+    lines.push(
+      "«Subtipo no registrado» significa que no consta cómo se ejecutó; no es una estimación.",
+    );
+  }
   lines.push("");
 
   if (r.goalkeeper) {

@@ -34,6 +34,7 @@ import {
 } from "../utils/legacyZoneMap";
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
+import { SetPieceOutcomeSummary, summarizeSetPieceOutcomes } from "../utils/setPieceModel";
 
 export { GOAL_ZONE_IDS } from "../utils/goalZones";
 
@@ -78,6 +79,15 @@ export type ZoneDashboard = {
   goal: GoalZoneStats[];
   out: number;
   corners: CornerSummary;
+  /**
+   * Desglose por desenlace del balón parado. NO sustituye a la dimensión
+   * espacial: `corners` sigue dando el lado y los sectores siguen dando la
+   * ubicación. Esto responde a otra pregunta: cómo se ejecutó.
+   */
+  setPieces: {
+    corners: SetPieceOutcomeSummary;
+    fouls: SetPieceOutcomeSummary;
+  };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
   totals: {
@@ -289,6 +299,12 @@ export function buildZoneDashboard(
     (e) => period === undefined || e.period === period,
   );
   const corners = summarizeCorners(periodEvents, opponent);
+  // Mismo conjunto acotado por período que los córners: el desglose debe
+  // cuadrar con el total que se muestra al lado.
+  const setPieces = {
+    corners: summarizeSetPieceOutcomes(periodEvents, ActionType.CORNER, opponent),
+    fouls: summarizeSetPieceOutcomes(periodEvents, ActionType.FOUL, opponent),
+  };
 
   return {
     zone12,
@@ -296,6 +312,7 @@ export function buildZoneDashboard(
     goal,
     out,
     corners,
+    setPieces,
     unlocated,
     totals: {
       zonedActions: (zone12?.total ?? 0) + (legacy?.total ?? 0),

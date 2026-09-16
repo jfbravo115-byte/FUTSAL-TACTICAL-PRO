@@ -41,11 +41,11 @@ import {
   ZoneDashboard,
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
 import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
-import { GoalkeeperOriginMap, GoalkeeperImpactMap } from "../components/export/GoalkeeperMaps";
 import { safeImageSrc } from "../utils/safeImageSrc";
 
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
@@ -297,83 +297,6 @@ function PlayersTable({ report }: { report: MatchReport }) {
   );
 }
 
-function GoalkeeperCard({
-  gk,
-  allEvents,
-  isOnlyRelevantGoalkeeper,
-}: {
-  gk: GoalkeeperReportEntry;
-  allEvents: GameEvent[];
-  /** ¿Es este el único portero relevante de SU equipo en todo el
-   *  partido? Determina el fallback legacy del mapa de origen (ver
-   *  GoalkeeperOriginMap) — evita atribuir un disparo rival ambiguo a
-   *  más de un portero cuando hubo varios. */
-  isOnlyRelevantGoalkeeper: boolean;
-}) {
-  return (
-    <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 900 }}>#{gk.number} {gk.name}</div>
-          <div style={{ fontSize: 10, color: "#6b7280" }}>
-            {gk.totLabel} en pista{!gk.isOnPitch ? " · sustituido" : ""}{gk.isOpponent ? " · rival" : ""}
-          </div>
-        </div>
-        {/* La cifra que manda es "Paradas": es la misma que pinta de verde el
-            mapa de impacto. El desglose por subtipo va debajo y solo declara
-            lo que realmente se registró — un disparo detenido sin subtipo no
-            se convierte en blocaje ni en despeje. */}
-        <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
-          <span>Paradas <b>{gk.totalSaves}</b></span>
-          <span>Encajados <b>{gk.conceded}</b></span>
-          <span>Efectividad <b>{gk.effectivenessPct === null ? "—" : `${gk.effectivenessPct}%`}</b></span>
-        </div>
-      </div>
-      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>
-        Desglose de paradas: blocajes {gk.saveCatch} · despejes {gk.saveParry}
-        {gk.saveGeneric > 0 ? ` · genéricas ${gk.saveGeneric}` : ""}
-        {gk.saveUnspecified > 0 ? ` · sin subtipo registrado ${gk.saveUnspecified}` : ""}
-        {gk.shotsFaced > 0 && gk.mappedInterventions < gk.shotsFaced
-          ? ` — el mapa de portería muestra ${gk.mappedInterventions} de ${gk.shotsFaced} (el resto no tiene zona registrada)`
-          : ""}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen del tiro (pista)</div>
-          {/* IMPORTANTE: el mapa de ORIGEN necesita el conjunto COMPLETO de
-              eventos del partido (matchData.events), no solo los propios
-              del portero — la lógica original (extraída de MatchTracker.tsx,
-              ver GoalkeeperMaps.tsx) también contabiliza disparos del rival
-              mientras este portero está en pista, que NO llevan su id en
-              playerIds. gk.events (filtrado a playerIds.includes) se
-              queda corto para este mapa concreto. */}
-          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact theme="light" />
-        </div>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Destino del tiro (portería) · verde parada / rojo gol</div>
-          {/* El mapa de IMPACTO sí debe usar solo intervenciones propias
-              del portero (gk.events) — no se toca, es correcto tal cual. */}
-          <GoalkeeperImpactMap events={gk.events} />
-        </div>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Últimas intervenciones</div>
-          {gk.timeline.length === 0 ? (
-            <div style={{ fontSize: 10, color: "#9ca3af" }}>Sin datos registrados.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {gk.timeline.slice(-6).reverse().map((t, i) => (
-                <div key={i} style={{ fontSize: 10, display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f3f4f6", paddingBottom: 2 }}>
-                  <span style={{ color: "#6b7280" }}>{t.timeLabel}</span>
-                  <span style={{ fontWeight: 700 }}>{t.type}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function EventsSection({ report }: { report: MatchReport }) {
   if (report.relevantEvents.length === 0) return null;
@@ -647,7 +570,12 @@ const captureOpts = {
   style: { opacity: "1", visibility: "visible" as const },
 };
 
-async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
+/**
+ * Captura los nodos dados y los ensambla en un PDF A4. Exportada para que el
+ * botón "Porteros + Mapa" de MatchTracker use ESTA captura y no una copia
+ * paralela: había dos, y solo una recibía las correcciones.
+ */
+export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
   const images: string[] = [];
   for (const node of nodes) {
     const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });

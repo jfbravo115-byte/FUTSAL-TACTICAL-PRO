@@ -57,6 +57,7 @@ import {
   ActionType,
   GoalieAction,
   Role,
+  GoalkeeperInterventionZone,
 } from "../types/futsal";
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
@@ -92,7 +93,27 @@ import {
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
+import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
+import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
+import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
+import { capturePagesToPdf } from "../services/pdfExportService";
+import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
+import {
+  acceptsGoalkeeperZone,
+  eventAcceptsGoalkeeperZone,
+  ExitOutcome,
+  GOALIE_RESPONSE_UNSPECIFIED,
+  GoalieResponseDeclared,
+  goalieRespondingToShot,
+  EXIT_OUTCOME_LABEL,
+  eventTargetsOpposingGoalie,
+  formatExit,
+  formatGoalieAction,
+  isAnySave,
+  goalieStatsDelta,
+} from "../utils/goalkeeperActions";
 import { formatGoalZoneLabel } from "../utils/goalZones";
+import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { effectiveSlotIndex, isRoleAllowedInSlot, findAvailableSlotForRole, normalizeMatchPlayers } from "../utils/lineupIntegrity";
 import { QuickMatchDataModal } from "../components/QuickMatchDataModal";
 import { SimpleExportModal } from "../components/SimpleExportModal";
@@ -626,15 +647,25 @@ const StatsExportTemplate = React.forwardRef<
         {players.map((p) => {
           // Eventos del partido donde el portero está involucrado, filtrados por
           // mitad si se especifica (evita acumular 1ª+2ª en la misma tarjeta/mapa)
-          const allGoalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
-          const goalieEvents = periodFilter ? allGoalieEvents.filter(periodFilter) : allGoalieEvents;
-          const saves = goalieEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = goalieEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
-          const shotsFaced = saves + conceded;
-          const effectiveness = shotsFaced > 0 ? ((saves / shotsFaced) * 100).toFixed(1) : "0.0";
+          // MISMO informe que la pantalla y que el PDF. Cuando la sección es
+          // de una mitad concreta se le pasa el partido con los eventos de esa
+          // mitad: el cálculo no cambia, solo el conjunto que se le da.
+          const scopedMatch = periodFilter
+            ? { ...matchData, events: matchData.events.filter(periodFilter) }
+            : matchData;
+          const report = buildGoalkeeperReport(scopedMatch, p);
+          const saves = report.totalSaves;
+          const conceded = report.conceded;
+          const shotsFaced = report.shotsAgainst;
+          const effectiveness =
+            report.effectivenessPct === null ? "0.0" : report.effectivenessPct.toFixed(1);
+          const isOnlyRelevantGoalkeeper =
+            matchData.players.filter(
+              (pl) => pl.role === Role.GOALKEEPER && pl.isOpponent === p.isOpponent,
+            ).length === 1;
 
           // No mostrar porteros sin ninguna intervención en esta mitad concreta
-          if (periodFilter && shotsFaced === 0) return null;
+          if (periodFilter && shotsFaced === 0 && report.exits === 0) return null;
 
           return (
             <div
@@ -690,113 +721,28 @@ const StatsExportTemplate = React.forwardRef<
                 </div>
               </div>
 
-              {/* Goal Map and Pitch Map Row */}
-              <div className="grid grid-cols-3 gap-8">
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <MapIcon size={14} /> ORIGEN DE TIRO (PISTA)
-                  </h4>
-                  <div className="flex-1 flex items-center justify-center">
-                    {renderPitchOriginMap(p, isOpponent, periodFilter ? matchData.events.filter(periodFilter) : matchData.events)}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <Shield size={14} /> IMPACTO (PORTERÍA)
-                  </h4>
-                  <div className="aspect-[3/2] bg-slate-900 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center p-4">
-                    {/* Simplified Goal Representation */}
-                    <div className="absolute inset-x-8 bottom-0 top-6 border-x-4 border-t-4 border-white/40 rounded-t-lg"></div>
-                    <div className="absolute inset-x-8 bottom-0 h-[2px] bg-white/20"></div>
-
-                    {[...Array(9)].map((_, i) => {
-                      const zoneId = `G${i + 1}`;
-                      const zoneEvents = goalieEvents.filter(e => e.metadata?.zone === zoneId || e.destinationGrid === zoneId);
-                      const zoneSaves = zoneEvents.filter(e => e.type !== GoalieAction.GOAL_CONCEDED && e.type !== ActionType.GOAL).length;
-                      const zoneGoals = zoneEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL).length;
-                      
-                      // Zone coordinates (standard 3x3 grid)
-                      const x = (i % 3) * 30 + 20;
-                      const y = Math.floor(i / 3) * 30 + 25;
-
-                      if (zoneSaves === 0 && zoneGoals === 0) return null;
-
-                      return (
-                        <div 
-                          key={zoneId}
-                          className="absolute flex flex-col items-center"
-                          style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
-                        >
-                          <div className="flex gap-1">
-                             {zoneSaves > 0 && (
-                               <div className="w-6 h-6 rounded-full bg-green-600 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
-                                 {zoneSaves}
-                               </div>
-                             )}
-                             {zoneGoals > 0 && (
-                               <div className="w-6 h-6 rounded-full bg-red-600 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
-                                 {zoneGoals}
-                               </div>
-                             )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {goalieEvents.filter(e => e.metadata?.zone || e.destinationGrid).length === 0 && (
-                      <span className="text-[10px] font-black text-slate-700 uppercase italic">Sin datos de zona</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <Activity size={14} /> ACCIONES REGISTRADAS
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4 h-full">
-                    {(() => {
-                      // Solo eventos donde el portero es el AUTOR (no el destinatario de un
-                      // tiro/gol rival), y ya filtrados por la mitad correspondiente
-                      const ownEvents = goalieEvents.filter(e => e.playerIds[0] === p.id);
-                      const ownGoals = ownEvents.filter(e => e.type === ActionType.GOAL).length;
-                      const ownShots = ownEvents.filter(e => e.type === ActionType.SHOT).length;
-                      const ownSteals = ownEvents.filter(e => e.type === ActionType.STEAL).length;
-                      const ownLosses = ownEvents.filter(e => e.type === ActionType.LOSS).length;
-                      const ownFouls = ownEvents.filter(e => e.type === ActionType.FOUL).length;
-                      const ownAssists = ownEvents.filter(e => e.type === ActionType.ASSIST).length;
-                      return [
-                        { label: 'GOLES', value: ownGoals, color: 'text-green-500' },
-                        { label: 'TIROS', value: ownShots, color: 'text-amber-500' },
-                        { label: 'RECUPER.', value: ownSteals, color: 'text-purple-400' },
-                        { label: 'PÉRDIDAS', value: ownLosses, color: 'text-red-400' },
-                        { label: 'FALTAS', value: ownFouls, color: 'text-orange-400' },
-                        { label: 'ASIST.', value: ownAssists, color: 'text-blue-400' },
-                      ];
-                    })().map((action, i) => (
-                      <div key={i} className="bg-black/30 border border-white/5 p-4 rounded-2xl flex flex-col justify-center">
-                         <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{action.label}</span>
-                         <span className={`text-2xl font-black ${action.color} tabular-nums leading-none`}>{action.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* Tres mapas, tres preguntas distintas: desde dónde tiran,
+                  dónde termina el balón y dónde interviene el portero. Es el
+                  mismo componente que usa la pestaña Porteros. */}
+              <GoalkeeperAnalysisPanel
+                report={report}
+                goalie={p}
+                isOpponent={isOpponent}
+                allEvents={scopedMatch.events}
+                isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper}
+              />
 
               {/* Timeline simple */}
               <div className="flex flex-col gap-3">
                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2 mb-1">Últimas Intervenciones</h4>
                  <div className="grid grid-cols-3 gap-3">
-                    {goalieEvents
-                      .filter(e => e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.GOAL_CONCEDED)
+                    {report.timeline
                       .slice(-6)
                       .reverse()
-                      .map((e, idx) => (
+                      .map((t, idx) => (
                         <div key={idx} className="bg-white/5 p-3 rounded-xl border border-white/5 flex items-center gap-3">
-                           <span className="font-mono text-[9px] text-blue-400 font-bold">{formatTime(e.timestamp)}</span>
-                           <span className={`text-[8px] font-black uppercase ${e.type === GoalieAction.GOAL_CONCEDED ? 'text-red-400' : 'text-amber-400'}`}>
-                             {e.type === GoalieAction.GOAL_CONCEDED ? 'GOL ENCAJADO' : 'PARADA'}
-                           </span>
+                           <span className="font-mono text-[9px] text-blue-400 font-bold">{t.timeLabel}</span>
+                           <span className="text-[8px] font-black uppercase text-amber-400">{t.type}</span>
                         </div>
                     ))}
                  </div>
@@ -1405,6 +1351,12 @@ export default function MatchTracker() {
   } | null>(null);
   /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
   const [pendingCorner, setPendingCorner] = useState<{ isOpponent: boolean } | null>(null);
+  /** Portero que va a registrar una salida, a la espera del resultado. */
+  const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
+  /** Salida ya registrada a la espera de ubicación OPCIONAL. */
+  const [pendingInterventionLocation, setPendingInterventionLocation] = useState<{
+    eventId: string;
+  } | null>(null);
   const [isLocalTeamOpen, setIsLocalTeamOpen] = useState(false);
   const [isOpponentTeamOpen, setIsOpponentTeamOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
@@ -1415,7 +1367,10 @@ export default function MatchTracker() {
     destinationGrid?: string;
     setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
     subType?: string;
-    step: "origin" | "target" | "player" | "subtype" | null;
+    /** Modelo C: respuesta del portero declarada dentro del mismo tiro. */
+    goalieResponse?: GoalieResponseDeclared;
+    exitOutcome?: ExitOutcome;
+    step: "origin" | "target" | "player" | "subtype" | "response" | "exitOutcome" | null;
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -1876,31 +1831,19 @@ export default function MatchTracker() {
       return;
     }
 
-    // GOALKEEPER PDF — 2 pages
+    // PDF DE PORTEROS — 3 páginas por equipo.
+    //
+    // La captura la hace el helper compartido del servicio de PDF: antes había
+    // aquí una copia del mismo bucle, y una corrección en una no llegaba a la
+    // otra. Las páginas las monta <GoalkeeperPdfPages>, que lee el mismo
+    // informe que la pantalla.
     setReportType(Role.GOALKEEPER);
     try {
       await new Promise(r => setTimeout(r, 600));
-      const captureOpts = { cacheBust: true, pixelRatio: 1.5,
-        quality: 0.82, backgroundColor: '#ffffff', style: { opacity: '1', visibility: 'visible' } };
-      const gkRefs = [pdfGkPage1Ref, pdfGkPage2Ref, pdfGkPage3Ref];
-      const images: string[] = [];
-      for (const ref of gkRefs) {
-        if (!ref.current) continue;
-        const url = await toJpeg(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
-        if (url && url.length > 1000) images.push(url);
-      }
-      if (images.length === 0) throw new Error('No goalkeeper pages generated');
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      for (let i = 0; i < images.length; i++) {
-        if (i > 0) pdf.addPage();
-        const img = new Image();
-        img.src = images[i];
-        await new Promise(r => { img.onload = r; });
-        const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
-        pdf.addImage(images[i], 'JPEG', 0, 0, pdfW, imgH);
-      }
+      const gkNodes = [pdfGkPage1Ref, pdfGkPage2Ref, pdfGkPage3Ref]
+        .map(ref => ref.current)
+        .filter((node): node is HTMLDivElement => node !== null);
+      const pdf = await capturePagesToPdf(gkNodes);
       pdf.save(`porteros_${matchData.teamName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
     } catch (err) {
       console.error('GK PDF failed', err);
@@ -2089,6 +2032,46 @@ export default function MatchTracker() {
    * una fase posterior y su ausencia aquí es lo que evita tener que migrar
    * estos eventos.
    */
+  /**
+   * Salida / intervención del portero.
+   *
+   * ORDEN DELIBERADO, igual que en las faltas: la acción se registra con su
+   * resultado y DESPUÉS se ofrece la ubicación. Si se omite, la salida sigue
+   * siendo válida y contabilizable — la ubicación nunca bloquea el registro.
+   */
+  const handleGoalieExit = (goalieId: string, outcome: ExitOutcome) => {
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+    const goalie = matchData.players.find((p) => p.id === goalieId);
+    if (!goalie) return;
+
+    setPendingExit(null);
+    handleAction(GoalieAction.EXIT, goalieId, {
+      metadata: { isOpponent: goalie.isOpponent, exitOutcome: outcome },
+    });
+    // handleAction abre por su cuenta el paso de ubicación opcional.
+  };
+
+  /**
+   * Añade la zona de intervención a una acción de portero ya registrada.
+   * Escribe `goalkeeperZone`, que es un campo PROPIO con su propio dominio
+   * (GK1-GK5): no toca `originGrid` ni `destinationGrid`, y no se cuenta como
+   * origen de tiro en ningún agregado.
+   *
+   * Un toque directo sobre la zona selecciona Y continúa: sin diálogo de
+   * confirmación, que en directo cuesta tiempo.
+   */
+  const assignGoalkeeperZone = (zone: GoalkeeperInterventionZone) => {
+    const pending = pendingInterventionLocation;
+    setPendingInterventionLocation(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: prev.events.map((e) =>
+        e.id === pending.eventId ? { ...e, goalkeeperZone: zone } : e,
+      ),
+    }));
+  };
+
   const handleCorner = (isOpponent: boolean, side: CornerSide) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
     setPendingCorner(null);
@@ -2170,7 +2153,10 @@ export default function MatchTracker() {
     const eventPlayerIds = [];
     if (playerId) eventPlayerIds.push(playerId);
     if (targetGoalieId && !eventPlayerIds.includes(targetGoalieId)) {
-      if (type === ActionType.SHOT || isGoal || type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) {
+      // Solo un disparo o un gol tienen "portero objetivo". Antes tambien se
+      // anadia en las paradas, y eso acreditaba la parada del portero local
+      // TAMBIEN al portero rival.
+      if (eventTargetsOpposingGoalie(type)) {
         eventPlayerIds.push(targetGoalieId);
       }
     }
@@ -2206,6 +2192,10 @@ export default function MatchTracker() {
       metadata: {
         ...metadata?.metadata,
         isOpponent: isOpponentEvent,
+        // Identidad explícita del portero que encara la acción. Antes solo se
+        // podía deducir por bando desde playerIds; guardarla hace que la
+        // atribución y el borrado no dependan de esa inferencia.
+        ...(targetGoalieId ? { targetGoalkeeperId: targetGoalieId } : {}),
       },
       scoreAtEvent: {
         team: currentGoals + (isGoal && !isOpponentEvent ? 1 : 0),
@@ -2255,21 +2245,16 @@ export default function MatchTracker() {
           }
         }
 
-        // 2. Stats for the target Goalkeeper (Saves/Conceded)
-        if (p.id === targetGoalieId && p.role === Role.GOALKEEPER) {
-          if (isGoal) {
-            stats.conceded += 1;
-          } else if (type === ActionType.SHOT || type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) {
-            if (metadata?.destinationGrid !== "OUT") {
-              stats.saves += 1;
-            }
-          }
-        }
-
-        // 3. Fallback for specific Goalie Buttons if they were assigned as effectivePlayerId
-        if (p.id === effectivePlayerId && p.role === Role.GOALKEEPER && p.id !== targetGoalieId) {
-           if (type === GoalieAction.GOAL_CONCEDED) stats.conceded += 1;
-           if (type === GoalieAction.SAVE_CATCH || type === GoalieAction.SAVE_PARRY) stats.saves += 1;
+        // 2. Estadisticas de portero. Fuente unica (utils/goalkeeperActions):
+        // decide por la identidad del jugador y el bando registrado EN EL
+        // EVENTO, y es exactamente la misma que usa el borrado, de modo que
+        // registrar y deshacer no pueden desalinearse.
+        const gkDelta = goalieStatsDelta(newEvent, p);
+        stats.saves += gkDelta.saves;
+        stats.conceded += gkDelta.conceded;
+        if (gkDelta.exits) stats.exits = (stats.exits ?? 0) + gkDelta.exits;
+        if (gkDelta.exitsSuccess) {
+          stats.exitsSuccess = (stats.exitsSuccess ?? 0) + gkDelta.exitsSuccess;
         }
 
         // Global Plus/Minus logic (only for Local Team)
@@ -2309,6 +2294,13 @@ export default function MatchTracker() {
         timeoutsUsed: nextTimeouts,
       };
     });
+
+    // La acción YA está registrada. La zona de intervención se ofrece después
+    // y es omitible; se hace aquí para que cualquier superficie de captura
+    // (panel de portero o menú radial) se comporte igual.
+    if (eventAcceptsGoalkeeperZone(newEvent) && !metadata?.goalkeeperZone) {
+      setPendingInterventionLocation({ eventId: newEvent.id });
+    }
   };
 
   const handleDeleteEvent = (event: GameEvent) => {
@@ -2326,14 +2318,22 @@ export default function MatchTracker() {
             (isOpponentEvent ? !p.isOpponent : p.isOpponent)
           );
 
+          // Estadisticas de portero: se deshace con la MISMA funcion con la
+          // que se registraron, sobre el portero al que el evento fue
+          // atribuido. Antes se decidia por el rol y el bando ACTUALES.
+          const gkDelta = goalieStatsDelta(event, p);
+          stats.saves = Math.max(0, stats.saves - gkDelta.saves);
+          stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
+          if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
+          if (gkDelta.exitsSuccess) {
+            stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
+          }
+
           if (event.type === ActionType.GOAL) {
-            if (isOpposingKeeper) stats.conceded = Math.max(0, stats.conceded - 1);
-            else stats.goals = Math.max(0, stats.goals - 1);
+            if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
           }
           if (event.type === ActionType.SHOT) {
-            if (isOpposingKeeper) {
-              if (event.destinationGrid !== "OUT") stats.saves = Math.max(0, stats.saves - 1);
-            } else {
+            if (!isOpposingKeeper) {
               if (event.destinationGrid === "OUT") {
                 stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
               } else {
@@ -2367,14 +2367,8 @@ export default function MatchTracker() {
           if (event.type === ActionType.RED_CARD)
             stats.redCards = Math.max(0, stats.redCards - 1);
           
-          // Specific goalie actions
-          if (event.type === GoalieAction.GOAL_CONCEDED)
-            stats.conceded = Math.max(0, stats.conceded - 1);
-          if (
-            event.type === GoalieAction.SAVE_CATCH ||
-            event.type === GoalieAction.SAVE_PARRY
-          )
-            stats.saves = Math.max(0, stats.saves - 1);
+          // Las acciones de portero ya se han deshecho arriba con
+          // goalieStatsDelta; no se duplican aqui.
         }
 
         // Revert plusMinus if we have the on-pitch list
@@ -2847,8 +2841,17 @@ export default function MatchTracker() {
   };
 
   const renderGoalieCard = (goalie: Player, isOpponent: boolean) => {
-    const totalShotsAgainst = goalie.stats.saves + goalie.stats.conceded;
-    const saveRate = totalShotsAgainst > 0 ? (goalie.stats.saves / totalShotsAgainst) * 100 : 0;
+    // FUENTE ÚNICA. Antes esta ficha leía goalie.stats.saves/conceded, el
+    // contador acumulado anterior a Fase 4: no distinguía blocaje de despeje,
+    // ignoraba las salidas y no sabía nada de la zona de intervención. Ahora
+    // lee el MISMO informe que el PDF, así que pantalla y exportación cuentan
+    // el partido con el mismo vocabulario.
+    const report = buildGoalkeeperReport(matchData, goalie);
+    const saveRate = report.effectivenessPct ?? 0;
+    const isOnlyRelevantGoalkeeper =
+      matchData.players.filter(
+        (p) => p.role === Role.GOALKEEPER && p.isOpponent === goalie.isOpponent,
+      ).length === 1;
 
     return (
       <div
@@ -2885,99 +2888,14 @@ export default function MatchTracker() {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-1.5">
-          <div className="bg-black/20 p-1.5 rounded-xl flex flex-col items-center">
-            <span className="text-[7px] font-black text-slate-500 uppercase mb-1 text-center truncate w-full">Paradas</span>
-            <span className={`text-lg font-black ${isOpponent ? 'text-rose-400' : 'text-blue-400'}`}>{goalie.stats.saves}</span>
-          </div>
-          <div className="bg-black/20 p-1.5 rounded-xl flex flex-col items-center">
-            <span className="text-[7px] font-black text-slate-500 uppercase mb-1 text-center truncate w-full">G. Enc</span>
-            <span className="text-lg font-black text-red-500">{goalie.stats.conceded}</span>
-          </div>
-          <div className={`${isOpponent ? 'bg-red-600/20 border-red-500/20' : 'bg-blue-600/20 border-blue-500/20'} p-1.5 rounded-xl flex flex-col items-center border`}>
-            <span className={`text-[7px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase mb-1 text-center truncate w-full`}>T. Rec.</span>
-            <span className="text-lg font-black text-white">{totalShotsAgainst}</span>
-          </div>
-          <div className="bg-green-500/10 p-1.5 rounded-xl flex flex-col items-center border border-green-500/10">
-            <span className="text-[7px] font-black text-green-500 uppercase mb-1 text-center truncate w-full">Goles</span>
-            <span className="text-lg font-black text-green-400">{goalie.stats.goals}</span>
-          </div>
-          <div className="bg-amber-500/10 p-1.5 rounded-xl flex flex-col items-center border border-amber-500/10">
-            <span className="text-[7px] font-black text-amber-500 uppercase mb-1 text-center truncate w-full">Tiros</span>
-            <span className="text-lg font-black text-amber-400">{goalie.stats.shots}</span>
-          </div>
-        </div>
-
-        <div className="mt-4 flex gap-2">
-          <div className="flex-1 p-3 bg-black/40 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-[8px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase tracking-widest flex items-center gap-1`}>
-                <MapIcon size={10} /> Origen (Pista)
-              </span>
-            </div>
-            {renderPitchOriginMap(goalie, isOpponent, matchData.events, true)}
-          </div>
-
-          <div className="flex-[1.5] p-3 bg-black/40 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-[8px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase tracking-widest flex items-center gap-1`}>
-                <Crosshair size={10} /> Impacto (Portería)
-              </span>
-              <span className="text-[7px] font-bold text-slate-500 uppercase">Zonificación</span>
-            </div>
-            <div className="grid grid-cols-3 grid-rows-3 gap-1 aspect-[3/2] w-full max-w-[200px] mx-auto border-t-[4px] border-x-[4px] border-slate-700 rounded-t-xl relative bg-black/80 shadow-2xl overflow-hidden p-1">
-              <div className={`absolute inset-0 bg-gradient-to-b ${isOpponent ? 'from-red-600/5' : 'from-blue-600/5'} to-transparent pointer-events-none`}></div>
-              {Array.from({ length: 9 }).map((_, i) => {
-                const z = `G${i + 1}`;
-                const saves = matchData.events.filter((e) => {
-                  const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || (e.type === ActionType.SHOT && e.destinationGrid !== "OUT")) && (e.destinationGrid === z || e.metadata?.zone === z);
-                }).length;
-                const goals = matchData.events.filter((e) => {
-                  const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && (e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL) && (e.destinationGrid === z || e.metadata?.zone === z);
-                }).length;
-
-                // Color logic: green=saves only, red=goals only, orange=both, empty=none
-                const hasSaves = saves > 0;
-                const hasGoals = goals > 0;
-                const bgColor = hasSaves && hasGoals
-                  ? 'bg-orange-500/30 border-orange-400/40'
-                  : hasSaves
-                  ? 'bg-green-500/25 border-green-400/30'
-                  : hasGoals
-                  ? 'bg-red-500/30 border-red-400/40'
-                  : 'bg-white/5 border-white/10';
-                const textColor = hasSaves && hasGoals ? 'text-orange-300' : hasSaves ? 'text-green-300' : 'text-red-300';
-                const total = saves + goals;
-
-                return (
-                  <div key={z} title={formatGoalZoneLabel(z) ?? undefined} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
-                    {total > 0 && (
-                      <div className="flex flex-col items-center justify-center leading-none gap-0.5">
-                        <span className={`text-[11px] font-black ${textColor} drop-shadow-sm`}>{total}</span>
-                        {hasSaves && hasGoals && (
-                          <div className="flex gap-0.5">
-                            <span className="text-[6px] text-green-400 font-black">{saves}P</span>
-                            <span className="text-[6px] text-red-400 font-black">{goals}G</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/* Etiqueta accesible; el codigo interno G1-G9 no se imprime. */}
-                    <span className="sr-only">{formatGoalZoneLabel(z)}</span>
-                  </div>
-                );
-              })}
-            </div>
-            {/* Legend */}
-            <div className="flex gap-3 justify-center mt-1.5">
-              <span className="flex items-center gap-1 text-[7px] font-black text-green-400"><span className="w-2 h-2 rounded-sm bg-green-500/40 inline-block"></span>Paradas</span>
-              <span className="flex items-center gap-1 text-[7px] font-black text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500/40 inline-block"></span>Goles</span>
-              <span className="flex items-center gap-1 text-[7px] font-black text-orange-400"><span className="w-2 h-2 rounded-sm bg-orange-500/40 inline-block"></span>Ambos</span>
-            </div>
-          </div>
-        </div>
+        <GoalkeeperAnalysisPanel
+          report={report}
+          goalie={goalie}
+          isOpponent={isOpponent}
+          allEvents={matchData.events}
+          isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper}
+          compact
+        />
 
         {goalie.isOnPitch && (
           <div className="grid grid-cols-3 gap-2 mt-3">
@@ -2988,10 +2906,16 @@ export default function MatchTracker() {
               Nueva Acción
             </button>
             <button
-              onClick={() => handleAction(GoalieAction.SAVE_PARRY, goalie.id)}
+              onClick={() => handleAction(GoalieAction.SAVE, goalie.id)}
               className={`py-2.5 ${isOpponent ? 'bg-red-500/20 border-red-500/30' : 'bg-amber-500/20 border-amber-500/30'} ${isOpponent ? 'text-red-300' : 'text-amber-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
             >
               Parada
+            </button>
+            <button
+              onClick={() => setPendingExit({ goalieId: goalie.id })}
+              className={`py-2.5 ${isOpponent ? 'bg-red-500/10 border-red-500/20' : 'bg-cyan-500/15 border-cyan-500/30'} ${isOpponent ? 'text-red-300' : 'text-cyan-300'} text-[9px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-95`}
+            >
+              Salida
             </button>
             <button
               onClick={() => executeSwap(goalie.id, true)}
@@ -3474,420 +3398,20 @@ export default function MatchTracker() {
         </div>
       )}
 
-      {/* ── GOALKEEPER PDF PAGES — 3 pages by half ─── */}
-      {(() => {
-        const allGkPlayers = matchData.players.filter(p => p.role === Role.GOALKEEPER && !p.isOpponent);
-        const allGkRivalPlayers = matchData.players.filter(p => p.role === Role.GOALKEEPER && p.isOpponent);
-        const allGkTeams = [
-          { players: allGkPlayers, name: matchData.teamName, vsName: matchData.opponentName, accent: '#3b82f6', score: `${goals} — ${opponentGoals}` },
-          { players: allGkRivalPlayers, name: matchData.opponentName, vsName: matchData.teamName, accent: '#ef4444', score: `${opponentGoals} — ${goals}` },
-        ].filter(t => t.players.length > 0);
-
-        if (allGkTeams.length === 0) return null;
-
-        const gkPageStyle: React.CSSProperties = {
-          position: 'absolute', top: 0, left: 0, zIndex: -300,
-          opacity: 0.01, pointerEvents: 'none',
-          width: 794, backgroundColor: '#ffffff',
-          fontFamily: "'Inter', sans-serif", color: '#0f172a', padding: 40,
-        };
-
-        const headerStyle: React.CSSProperties = {
-          background: '#0f172a', color: 'white', padding: '14px 24px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
-        };
-        const slStyle: React.CSSProperties = {
-          fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase',
-          letterSpacing: '0.1em', marginBottom: 10, paddingBottom: 6, borderBottom: '0.5px solid #e2e8f0',
-        };
-        const footerStyle: React.CSSProperties = {
-          marginTop: 20, borderTop: '0.5px solid #e2e8f0', paddingTop: 8,
-          display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#94a3b8',
-        };
-
-        const redGrad = (v: number) => {
-          if (v === 0) return '#1e293b';
-          const g = Math.round(255 - v * 220), b = Math.round(255 - v * 220);
-          return `rgb(255,${g},${b})`;
-        };
-        const textOnRed = (v: number) => v > 0.5 ? '#ffffff' : v > 0 ? '#7f1d1d' : '#475569';
-
-        const renderZoneMap = (events: any[], isGoalGrid: boolean) => {
-          const zones = isGoalGrid
-            ? ['G1','G2','G3','G4','G5','G6','G7','G8','G9']
-            : ['A1','A2','A3','B1','B2','B3','C1','C2','C3'];
-          const counts: Record<string, number> = {};
-          zones.forEach(z => counts[z] = 0);
-          events.forEach(e => {
-            const z = isGoalGrid
-              ? (e.metadata?.zone || e.destinationGrid || '').toUpperCase()
-              : (e.originGrid || e.metadata?.originGrid || '').toUpperCase();
-            if (zones.includes(z)) counts[z] = (counts[z] || 0) + 1;
-          });
-          const maxV = Math.max(...Object.values(counts), 1);
-          const W = 80, H = isGoalGrid ? 54 : 116;
-          const cW = (W - 4) / 3, cH = (H - 4) / 3;
-          return (
-            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}
-              style={{ border: '1.5px solid #334155', borderRadius: 3, background: '#0f172a' }}>
-              {zones.map((z, idx) => {
-                const v = counts[z] || 0;
-                const col = idx % 3, row = Math.floor(idx / 3);
-                const x = 2 + col * cW, y = 2 + row * cH;
-                const intensity = v / maxV;
-                return (
-                  <g key={z}>
-                    <rect x={x} y={y} width={cW - 1} height={cH - 1}
-                      fill={redGrad(v > 0 ? 0.15 + intensity * 0.85 : 0)} />
-                    {v > 0 && (
-                      <text x={x + cW/2 - 0.5} y={y + cH/2} textAnchor="middle"
-                        dominantBaseline="central" fontSize="8"
-                        fill={textOnRed(intensity)} fontWeight="500">{v}</text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          );
-        };
-
-        const gkRow = (p: Player, accent: string, halfEvents: any[]) => {
-          const saves = halfEvents.filter(e => e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH).length;
-          const conceded = halfEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED).length;
-          const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0;
-          const recoveries = halfEvents.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
-          const losses = halfEvents.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
-          const shots = halfEvents.filter(e => e.type === ActionType.SHOT).length;
-          const goals_scored = halfEvents.filter(e => e.type === ActionType.GOAL).length;
-          const mins = Math.round(halfEvents.reduce((acc, e) => acc, (p.individualTimeSeconds || 0) / 60));
-          return { saves, conceded, savePct, recoveries, losses, shots, goals_scored, mins: Math.round((p.individualTimeSeconds || 0) / 60) };
-        };
-
-        const GkTable = ({ players, accent, halfLabel, halfFilter }: { players: Player[], accent: string, halfLabel: string, halfFilter: (e: any) => boolean }) => (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                {['Portero','Par.','Enc.','%Par.','Rec.','Pérd.','Tiros','Goles','Min.'].map((h, i) => (
-                  <th key={h} style={{ padding: '4px 5px', textAlign: i === 0 ? 'left' : 'center', fontWeight: 700, fontSize: 9,
-                    color: ['#64748b','#16a34a','#dc2626','#d97706','#9333ea','#ea580c','#2563eb','#16a34a','#0284c7'][i] }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {players.map(p => {
-                // Use SHOT/GOAL events from rival (same as PORTERO tab)
-                const isGkInvolved = (e: any) =>
-                  e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-                const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
-                const saves = halfEvts.filter(e =>
-                  (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                  e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                ).length;
-                const conceded = halfEvts.filter(e =>
-                  e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                ).length;
-                const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
-                const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
-                const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
-                const shots = halfEvts.filter(e => e.type === ActionType.SHOT).length;
-                const goals_scored = halfEvts.filter(e => e.type === ActionType.GOAL).length;
-                const mins = Math.round((p.individualTimeSeconds || 0) / 60);
-                return (
-                  <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
-                    <td style={{ padding: '4px 5px', textAlign: 'left', fontWeight: 600 }}>
-                      <span style={{ color: accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}
-                    </td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#16a34a', fontWeight: saves > 0 ? 700 : 400 }}>{saves}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#dc2626', fontWeight: conceded > 0 ? 700 : 400 }}>{conceded}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#d97706', fontWeight: 700 }}>{savePct !== null ? `${savePct}%` : '—'}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#9333ea' }}>{recoveries}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#ea580c' }}>{losses}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#2563eb' }}>{shots}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#16a34a' }}>{goals_scored}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center' }}>{mins}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        );
-
-        const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
-          <div>
-            {players.map(p => {
-              // Use SHOT/GOAL events from rival (same as PORTERO tab) - NOT SAVE_PARRY events
-              const isGoalieInvolved = (e: any) =>
-                e.playerIds.includes(p.id) ||
-                // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
-                (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-
-              const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
-
-              // Saves = rival shots that were NOT goals and NOT out (same logic as PORTERO tab)
-              const saveEvts = halfEvts.filter(e =>
-                (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                e.type === GoalieAction.SAVE_PARRY ||
-                e.type === GoalieAction.SAVE_CATCH ||
-                e.type === GoalieAction.SAVE
-              );
-              // Goals conceded = rival goals
-              const goalEvts = halfEvts.filter(e =>
-                e.type === GoalieAction.GOAL_CONCEDED ||
-                e.type === ActionType.GOAL
-              );
-              const totalSaves = saveEvts.length;
-              const totalGoals = goalEvts.length;
-              if (totalSaves === 0 && totalGoals === 0) {
-                return (
-                  <div key={p.id} style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>
-                      <span style={{ color: accent, marginRight: 4 }}>#{p.number}</span>{p.name}
-                    </div>
-                    <div style={{ fontSize: 9, color: '#94a3b8', fontStyle: 'italic' }}>Sin participación en esta parte.</div>
-                  </div>
-                );
-              }
-              return (
-                <div key={p.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '0.5px solid #f1f5f9' }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
-                    <span style={{ color: accent, marginRight: 4 }}>#{p.number}</span>{p.name}
-                  </div>
-                  {totalSaves > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', marginBottom: 6 }}>
-                        Paradas ({totalSaves})
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(saveEvts, false)}
-                        </div>
-                        <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(saveEvts, true)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {totalGoals > 0 && (
-                    <div>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: 6 }}>
-                        Goles encajados ({totalGoals})
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(goalEvts, false)}
-                        </div>
-                        <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(goalEvts, true)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 7, color: '#94a3b8' }}>Intensidad:</span>
-                    <div style={{ display: 'flex' }}>
-                      {[0.15, 0.35, 0.55, 0.75, 0.95].map((v, i) => (
-                        <div key={i} style={{ width: 14, height: 8, background: redGrad(v), borderRadius: i === 0 ? '2px 0 0 2px' : i === 4 ? '0 2px 2px 0' : 0 }} />
-                      ))}
-                    </div>
-                    <span style={{ fontSize: 7, color: '#94a3b8' }}>Pocos → Muchos tiros</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-
-        const isFirstHalf = (e: any) => e.period === Period.FIRST || e.period === 0;
-        const isSecondHalf = (e: any) => e.period === Period.SECOND || e.period === 1;
-        const totalPages = allGkTeams.length * 3;
-
-        return (
-          <>
-            {allGkTeams.map((team, ti) => (
-              <React.Fragment key={ti}>
-                {/* Page 1: 1ª Parte */}
-                <div ref={ti === 0 ? pdfGkPage1Ref : undefined} style={gkPageStyle}>
-                  <div style={headerStyle}>
-                    <div>
-                      <div style={{ fontSize: 8, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
-                        Goalkeeper Report · 1ª Parte
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 700 }}>{team.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>vs {team.vsName} · {team.score}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 8, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#1e3a5f', color: '#93c5fd', textTransform: 'uppercase' }}>
-                        1ª PARTE
-                      </div>
-                      <div style={{ fontSize: 8, color: '#64748b', marginTop: 6 }}>
-                        {new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ ...slStyle }}>1. estadísticas — primera parte</div>
-                  <GkTable players={team.players} accent={team.accent} halfLabel="1ª" halfFilter={isFirstHalf} />
-                  <p style={{ fontSize: 8, color: '#94a3b8', marginTop: 6, marginBottom: 16 }}>
-                    % Paradas = Paradas / (Paradas + Goles encajados) × 100
-                  </p>
-                  <div style={{ ...slStyle }}>2. mapas de zona — primera parte</div>
-                  <GkMaps players={team.players} halfFilter={isFirstHalf} accent={team.accent} />
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 1} / {totalPages}</span>
-                  </div>
-                </div>
-
-                {/* Page 2: 2ª Parte */}
-                <div ref={ti === 0 ? pdfGkPage2Ref : undefined} style={gkPageStyle}>
-                  <div style={headerStyle}>
-                    <div>
-                      <div style={{ fontSize: 8, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
-                        Goalkeeper Report · 2ª Parte
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 700 }}>{team.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>vs {team.vsName} · {team.score}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 8, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#1e3a2f', color: '#86efac', textTransform: 'uppercase' }}>
-                        2ª PARTE
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ ...slStyle }}>3. estadísticas — segunda parte</div>
-                  <GkTable players={team.players} accent={team.accent} halfLabel="2ª" halfFilter={isSecondHalf} />
-                  <p style={{ fontSize: 8, color: '#94a3b8', marginTop: 6, marginBottom: 16 }}>
-                    % Paradas = Paradas / (Paradas + Goles encajados) × 100
-                  </p>
-                  <div style={{ ...slStyle }}>4. mapas de zona — segunda parte</div>
-                  <GkMaps players={team.players} halfFilter={isSecondHalf} accent={team.accent} />
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 2} / {totalPages}</span>
-                  </div>
-                </div>
-
-                {/* Page 3: Comparativa */}
-                <div ref={ti === 0 ? pdfGkPage3Ref : undefined} style={gkPageStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
-                      <span style={{ fontSize: 14, fontWeight: 700 }}>{team.name} — Comparativa del partido</span>
-                    </div>
-                    <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {ti * 3 + 3} / {totalPages}</span>
-                  </div>
-
-                  {team.players.map(p => {
-                    const isGkInvolved = (e: any) =>
-                      e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-                    const ev1 = matchData.events.filter(e => isGkInvolved(e) && isFirstHalf(e));
-                    const ev2 = matchData.events.filter(e => isGkInvolved(e) && isSecondHalf(e));
-                    const evAll = matchData.events.filter(e => isGkInvolved(e));
-
-                    const calcStats = (evts: any[]) => {
-                      const saves = evts.filter(e =>
-                        (e.type === ActionType.SHOT && e.destinationGrid !== 'OUT') ||
-                        e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE
-                      ).length;
-                      const conceded = evts.filter(e =>
-                        e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL
-                      ).length;
-                      return {
-                        saves,
-                        conceded,
-                        savePct: saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0,
-                        recoveries: evts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
-                        losses: evts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
-                      };
-                    };
-
-                    const s1 = calcStats(ev1);
-                    const s2 = calcStats(ev2);
-                    const sAll = calcStats(evAll);
-
-                    const compareItems = [
-                      { label: 'Paradas', v1: s1.saves, v2: s2.saves },
-                      { label: 'Goles encajados', v1: s1.conceded, v2: s2.conceded },
-                      { label: '% Paradas', v1: s1.savePct, v2: s2.savePct, suffix: '%', maxVal: 100 },
-                      { label: 'Recuperaciones', v1: s1.recoveries, v2: s2.recoveries },
-                      { label: 'Pérdidas', v1: s1.losses, v2: s2.losses },
-                    ];
-
-                    return (
-                      <div key={p.id} style={{ marginBottom: 28 }}>
-                        <div style={{ ...slStyle, color: team.accent }}>
-                          {p.name} (#{p.number}) — comparativa 1ª vs 2ª parte
-                        </div>
-
-                        {/* Compare bars */}
-                        <div style={{ marginBottom: 14 }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
-                            <div />
-                            <div style={{ fontSize: 8, fontWeight: 600, color: '#93c5fd', textAlign: 'center' }}>1ª Parte</div>
-                            <div style={{ fontSize: 8, fontWeight: 600, color: '#86efac', textAlign: 'center' }}>2ª Parte</div>
-                          </div>
-                          {compareItems.map(item => {
-                            const maxV = item.maxVal || Math.max(item.v1, item.v2, 1);
-                            const p1Pct = Math.round((item.v1 / maxV) * 100);
-                            const p2Pct = Math.round((item.v2 / maxV) * 100);
-                            return (
-                              <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                                <div style={{ fontSize: 8, color: '#64748b' }}>{item.label}</div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${p1Pct}%`, height: '100%', background: '#3b82f6', borderRadius: 3 }} />
-                                  </div>
-                                  <span style={{ fontSize: 9, fontWeight: 500, color: '#1e293b', minWidth: 22 }}>{item.v1}{item.suffix || ''}</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${p2Pct}%`, height: '100%', background: '#22c55e', borderRadius: 3 }} />
-                                  </div>
-                                  <span style={{ fontSize: 9, fontWeight: 500, color: '#1e293b', minWidth: 22 }}>{item.v2}{item.suffix || ''}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Totals */}
-                        <div style={{ fontSize: 8, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-                          Totales del partido
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                          {[
-                            { label: 'Total paradas', val: sAll.saves, color: '#16a34a' },
-                            { label: 'Goles encajados', val: sAll.conceded, color: '#dc2626' },
-                            { label: '% Paradas', val: `${sAll.savePct}%`, color: '#d97706' },
-                            { label: 'Minutos', val: Math.round((p.individualTimeSeconds || 0) / 60), color: '#0284c7' },
-                          ].map(t => (
-                            <div key={t.label} style={{ background: '#f8fafc', border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 8, textAlign: 'center' }}>
-                              <div style={{ fontSize: 7, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 3 }}>{t.label}</div>
-                              <div style={{ fontSize: 18, fontWeight: 500, color: t.color }}>{t.val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 3} / {totalPages}</span>
-                  </div>
-                </div>
-              </React.Fragment>
-            ))}
-          </>
-        );
-      })()}
+      {/* ── PÁGINAS DEL PDF DE PORTEROS (porteros_*.pdf) ───────────────
+          La plantilla vive en components/export/GoalkeeperPdfPages: tenía su
+          propia aritmética (paradas a mano, atribución por "portero en pista",
+          rejilla A1-C3) y por eso el PDF real no enseñaba salidas, subtipos ni
+          zonas de intervención. Ahora consume el mismo informe que la
+          pantalla y pinta la misma ficha que el informe de porteros. */}
+      <GoalkeeperPdfPages
+        matchData={matchData}
+        goals={goals}
+        opponentGoals={opponentGoals}
+        page1Ref={pdfGkPage1Ref}
+        page2Ref={pdfGkPage2Ref}
+        page3Ref={pdfGkPage3Ref}
+      />
 
             <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_auto] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"
@@ -4662,8 +4186,8 @@ export default function MatchTracker() {
                                           : e.type === ActionType.ASSIST ? "👟 Asistencia"
                                           : e.type === ActionType.FOUL ? "⚠️ Falta"
                                           : e.type === GoalieAction.GOAL_CONCEDED ? "🔴 Gol encajado"
-                                          : e.type === GoalieAction.SAVE_PARRY ? "🧤 Parada"
-                                          : e.type === GoalieAction.SAVE_CATCH ? "🧤 Parada"
+                                          : e.type === GoalieAction.EXIT ? `🧤 ${formatExit(e)}`
+                                          : (e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE_DEFLECT) ? `🧤 ${formatGoalieAction(e.type)}`
                                           : e.type.replace(/_/g, " ")}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
@@ -5204,7 +4728,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5215,7 +4739,7 @@ export default function MatchTracker() {
                               colorScheme={showRivalStats ? "red" : "blue"}
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent === showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5229,7 +4753,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5240,7 +4764,7 @@ export default function MatchTracker() {
                               colorScheme="orange"
                               players={matchData.players}
                               events={matchData.events.filter(ev => 
-                                (ev.type === ActionType.SHOT || ev.type === GoalieAction.SAVE_CATCH || ev.type === GoalieAction.SAVE_PARRY) && 
+                                isAnySave(ev) && 
                                 !!ev.metadata?.isOpponent !== showRivalStats &&
                                 (selectedMapPlayerId === "all" || ev.playerIds.includes(selectedMapPlayerId))
                               )}
@@ -5704,14 +5228,7 @@ export default function MatchTracker() {
                                               matchData.events.filter(
                                                 (e) =>
                                                   e.playerIds.includes(p.id) &&
-                                                  (e.type ===
-                                                    GoalieAction.SAVE_PARRY ||
-                                                    e.type ===
-                                                      GoalieAction.SAVE_CATCH ||
-                                                    (e.type ===
-                                                      ActionType.SHOT &&
-                                                      e.metadata
-                                                        ?.isOpponent)) &&
+                                                  isAnySave(e) &&
                                                   (e.destinationGrid === z ||
                                                     e.metadata?.zone === z),
                                               ).length;
@@ -6633,6 +6150,63 @@ export default function MatchTracker() {
       {/* MODALS & OVERLAYS */}
       <AnimatePresence>
         {/* Shot Tracking Modal */}
+        {/* ── SALIDA: resultado primero, ubicación después ────────────── */}
+        {pendingExit && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">Salida del portero</h3>
+                <p className="text-[10px] text-slate-400 mt-1">¿Cómo se resolvió?</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {(["success", "fail"] as ExitOutcome[]).map((outcome) => (
+                  <button
+                    key={outcome}
+                    onClick={() => handleGoalieExit(pendingExit.goalieId, outcome)}
+                    className={`py-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      outcome === "success"
+                        ? "border-white/15 bg-white/5 hover:bg-green-500/25 hover:border-green-400"
+                        : "border-white/15 bg-white/5 hover:bg-red-500/25 hover:border-red-400"
+                    }`}
+                  >
+                    <span className="text-xl">{outcome === "success" ? "✔" : "✘"}</span>
+                    <span className="text-[11px] font-black uppercase text-white">
+                      {EXIT_OUTCOME_LABEL[outcome]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setPendingExit(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── SALIDA: ubicación OPCIONAL, la salida ya está registrada ─── */}
+        {pendingInterventionLocation && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">¿Dónde intervino el portero?</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Opcional: la acción ya está registrada y se mantiene aunque lo omitas.
+                </p>
+              </div>
+              <GoalkeeperInterventionMap onSelect={assignGoalkeeperZone} />
+              <button
+                onClick={() => setPendingInterventionLocation(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Sin ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── CÓRNER: solo hay que elegir la esquina ──────────────────── */}
         {pendingCorner && (
           <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
@@ -6942,15 +6516,112 @@ export default function MatchTracker() {
                               },
                             );
                           } else {
+                            // MODELO C: solo en tiros DEL RIVAL contra nuestra
+                            // portería se ofrece la respuesta antes del
+                            // destino. Nuestros propios tiros conservan su
+                            // flujo de siempre, sin paso extra.
+                            const ofreceRespuesta = !!goalieRespondingToShot(
+                              pendingAction.type,
+                              pendingAction.isOpponent,
+                              matchData.players,
+                            );
                             setPendingAction((prev) => ({
                               ...prev!,
                               originGrid: id,
-                              step: "target",
+                              step: ofreceRespuesta ? "response" : "target",
                             }));
                           }
                         }}
                         selected={pendingAction.originGrid}
                       />
+                    </div>
+                  )}
+
+                  {/* MODELO C — ¿interviene el portero? Una sola secuencia
+                      para la ocasión completa: el tiro y la respuesta quedan
+                      en un único evento, nunca como dos ocasiones. */}
+                  {pendingAction.step === "response" && (
+                    <div className="w-full space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
+                        ¿Interviene el portero?
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { type: GoalieAction.SAVE, label: "PARADA" },
+                          { type: GoalieAction.SAVE_CATCH, label: "BLOCAJE" },
+                          { type: GoalieAction.SAVE_DEFLECT, label: "DESPEJE" },
+                          { type: GoalieAction.EXIT, label: "SALIDA" },
+                        ] as const).map((opt) => (
+                          <button
+                            key={opt.type}
+                            onClick={() =>
+                              setPendingAction((prev) => ({
+                                ...prev!,
+                                goalieResponse: opt.type,
+                                step: opt.type === GoalieAction.EXIT ? "exitOutcome" : "target",
+                              }))
+                            }
+                            className="py-4 rounded-2xl border-2 border-white/10 bg-white/5 hover:bg-blue-500/25 hover:border-blue-400 text-[11px] font-black uppercase text-white transition-all active:scale-95"
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Deja constancia EXPLÍCITA de que no se registra la
+                          intervención. No dice que el portero no tocara el
+                          balón: dice que no lo sabemos, y por eso el sistema
+                          no inventará una parada. */}
+                      <button
+                        onClick={() =>
+                          setPendingAction((prev) => ({
+                            ...prev!,
+                            goalieResponse: GOALIE_RESPONSE_UNSPECIFIED,
+                            step: "target",
+                          }))
+                        }
+                        className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+                      >
+                        No registrar intervención
+                      </button>
+                    </div>
+                  )}
+
+                  {/* SALIDA dentro del tiro: resultado y listo. No se pide
+                      destino en portería — el balón no llegó a ella. */}
+                  {pendingAction.step === "exitOutcome" && (
+                    <div className="w-full space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
+                        Salida del portero · ¿cómo se resolvió?
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {(["success", "fail"] as ExitOutcome[]).map((outcome) => (
+                          <button
+                            key={outcome}
+                            onClick={() => {
+                              if (!pendingAction) return;
+                              const current = pendingAction;
+                              setPendingAction(null);
+                              handleAction(current.type, current.playerId, {
+                                originGrid: current.originGrid,
+                                metadata: {
+                                  isOpponent: current.isOpponent,
+                                  setPiece: current.setPiece || "normal",
+                                  goalieResponse: GoalieAction.EXIT,
+                                  exitOutcome: outcome,
+                                },
+                              });
+                            }}
+                            className={`py-6 rounded-2xl border-2 border-white/15 bg-white/5 flex flex-col items-center gap-2 transition-all active:scale-95 ${
+                              outcome === "success" ? "hover:bg-green-500/25" : "hover:bg-red-500/25"
+                            }`}
+                          >
+                            <span className="text-xl">{outcome === "success" ? "✔" : "✘"}</span>
+                            <span className="text-[11px] font-black uppercase text-white">
+                              {EXIT_OUTCOME_LABEL[outcome]}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -6973,6 +6644,9 @@ export default function MatchTracker() {
                               metadata: {
                                 isOpponent: current.isOpponent,
                                 setPiece: current.setPiece || "normal",
+                                ...(current.goalieResponse
+                                  ? { goalieResponse: current.goalieResponse }
+                                  : {}),
                               },
                             },
                           );

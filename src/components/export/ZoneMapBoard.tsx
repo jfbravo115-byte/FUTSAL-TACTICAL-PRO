@@ -28,6 +28,7 @@ import React from "react";
 import { ActionType, GameEvent, GoalieAction } from "../../types/futsal";
 import { FutsalPitch, GoalCaptionTexts } from "../field/FutsalPitch";
 import { isZone12Id } from "../../utils/fieldZones";
+import { isAnySave } from "../../utils/goalkeeperActions";
 import { LEGACY_DISCLAIMER, classifyZone, isLegacyZoneId } from "../../utils/legacyZoneMap";
 
 // ── PRESUPUESTO DE LA PÁGINA ────────────────────────────────────────────
@@ -149,12 +150,10 @@ export function buildZoneMaps(events: GameEvent[]): ZoneMapDef[] {
       title: "Tiros recibidos",
       color: "#0ea5e9",
       isRivalAction: true,
-      events: rival.filter(
-        (e) =>
-          e.type === ActionType.SHOT ||
-          e.type === GoalieAction.SAVE_PARRY ||
-          e.type === GoalieAction.SAVE_CATCH,
-      ),
+      // Un tiro recibido es cualquier disparo del rival, lo detuviera o no el
+      // portero. isAnySave cubre los cuatro tipos vivos y el histórico
+      // SAVE_PARRY, de modo que añadir un tipo nuevo no vuelve a olvidarse.
+      events: rival.filter((e) => e.type === ActionType.SHOT || isAnySave(e)),
     },
   ];
 }

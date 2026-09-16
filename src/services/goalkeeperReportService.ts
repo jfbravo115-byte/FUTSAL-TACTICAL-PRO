@@ -11,7 +11,22 @@
  * renderGoalieSection en MatchTracker.tsx (playerIds.includes(p.id)) —
  * no se inventa ningún criterio nuevo.
  */
-import { ActionType, GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
+import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
+import { GkZoneTally, tallyGoalkeeperZones } from "../utils/goalkeeperZones";
+import {
+  effectiveGoalieAction,
+  hasUndeclaredIntervention,
+  eventAcceptsGoalkeeperZone,
+  exitOutcomeOf,
+  isGoalieEventOwnedBy,
+  formatExit,
+  formatGoalieAction,
+  hasGoalZone,
+  isAnySave,
+  isConcededGoal,
+  isExit,
+  isUnspecifiedSave,
+} from "../utils/goalkeeperActions";
 
 export type GoalkeeperTimelineEntry = {
   timeLabel: string;
@@ -29,9 +44,16 @@ export type GoalkeeperReportEntry = {
   totLabel: string;
   /** Nº de eventos GoalieAction.SAVE_CATCH — se presenta como "Blocaje/Atrapada". */
   saveCatch: number;
-  /** Nº de eventos GoalieAction.SAVE_PARRY — se presenta como "Despeje/Rechace". */
+  /**
+   * SIEMPRE 0. SAVE_PARRY quedó congelado en Fase 4 y sus eventos históricos
+   * cuentan en `saveUnspecified`: se capturaron bajo un botón que decía
+   * "PARADA", así que su subtipo real es desconocido y NO son despejes. El
+   * campo se conserva para no romper consumidores existentes.
+   */
   saveParry: number;
   saveGeneric: number;
+  /** Despejes/rechaces con subtipo explícito (SAVE_DEFLECT). */
+  saveDeflect: number;
   /**
    * Paradas registradas como disparo rival a puerta (ActionType.SHOT) sin
    * subtipo de intervención. El dato existe y es real, pero NO permite saber
@@ -41,13 +63,49 @@ export type GoalkeeperReportEntry = {
   saveUnspecified: number;
   totalSaves: number;
   conceded: number;
+  /**
+   * Denominador de la efectividad: intervenciones RESUELTAS, es decir
+   * paradas más goles encajados. NO incluye los tiros cuya respuesta el
+   * operador decidió no registrar — inflar el denominador con ocasiones que
+   * no sabemos cómo acabaron haría bajar el porcentaje sin motivo.
+   */
   shotsFaced: number;
+  /**
+   * Tiros recibidos cuya respuesta NO se declaró (goalieResponse
+   * 'UNSPECIFIED'). Se cuentan aparte: son tiros recibidos, pero no paradas.
+   */
+  shotsUndeclared: number;
+  /** Total de tiros recibidos: resueltos más no declarados. */
+  shotsAgainst: number;
   /**
    * Intervenciones con zona de portería registrada, es decir las que el mapa
    * de impacto puede dibujar. Permite que cabecera y mapa cuadren a la vista
    * en vez de parecer contradictorios.
    */
   mappedInterventions: number;
+  /** Salidas/intervenciones registradas. */
+  exits: number;
+  exitsSuccess: number;
+  exitsFail: number;
+  /** Salidas sin resultado registrado. Nunca se infiere. */
+  exitsUnknown: number;
+  /**
+   * Distribución de intervenciones por zona del portero (GK1-GK5). Dominio
+   * SEPARADO del origen del tiro y del destino en portería: nunca se mezclan
+   * en una misma métrica.
+   */
+  interventionZones: GkZoneTally;
+  /**
+   * Qué hizo el portero en cada zona. Solo aparecen los tipos realmente
+   * registrados: un histórico sin subtipo no se convierte en despeje.
+   */
+  interventionZonesByAction: Partial<Record<GoalieAction, GkZoneTally>>;
+  /** Intervenciones sin zona registrada. Se declara, no se reparte. */
+  interventionsUnlocated: number;
+  /** Salidas por zona, y su desglose de resultado. */
+  exitZones: GkZoneTally;
+  exitZonesSuccess: GkZoneTally;
+  exitZonesFail: GkZoneTally;
   effectivenessPct: number | null;
   events: GameEvent[]; // eventos propios (para los mapas, ya filtrados)
   timeline: GoalkeeperTimelineEntry[];
@@ -62,53 +120,6 @@ const fmtSeconds = (totalSeconds: number): string => {
 
 const fmtMilliseconds = (ms: number): string => fmtSeconds(Math.max(0, ms) / 1000);
 
-const GOALIE_ACTION_LABEL: Record<string, string> = {
-  [GoalieAction.SAVE]: "Parada",
-  [GoalieAction.SAVE_CATCH]: "Blocaje",
-  [GoalieAction.SAVE_PARRY]: "Despeje",
-  [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
-  // Un disparo rival detenido que se registró sin subtipo. Se nombra por lo
-  // que realmente se sabe; no se decide por él si fue blocaje o despeje.
-  [ActionType.SHOT]: "Parada (sin subtipo registrado)",
-  [ActionType.GOAL]: "Gol encajado",
-};
-
-// ── PREDICADOS COMPARTIDOS ──────────────────────────────────────────────
-// Cabecera y mapa de impacto DEBEN clasificar cada evento igual. La
-// contradicción anterior ("Blocajes 0 · Despejes 0" bajo un mapa lleno de
-// círculos verdes) venía justamente de que cada uno usaba su propio criterio:
-// el mapa contaba como parada todo lo que no fuese gol, mientras la cabecera
-// solo miraba los tipos GoalieAction.SAVE*.
-
-/** Gol encajado. Incluye ActionType.GOAL: al marcar el rival, el portero del
- *  equipo contrario queda añadido al evento como participante. */
-export function isConcededGoal(e: GameEvent): boolean {
-  return e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL;
-}
-
-/** Parada con subtipo explícito registrado. */
-export function isTypedSave(e: GameEvent): boolean {
-  return (
-    e.type === GoalieAction.SAVE ||
-    e.type === GoalieAction.SAVE_PARRY ||
-    e.type === GoalieAction.SAVE_CATCH
-  );
-}
-
-/** Disparo rival a puerta detenido, registrado sin subtipo de intervención. */
-export function isUnspecifiedSave(e: GameEvent): boolean {
-  return e.type === ActionType.SHOT && e.destinationGrid?.toUpperCase() !== "OUT";
-}
-
-export function isAnySave(e: GameEvent): boolean {
-  return isTypedSave(e) || isUnspecifiedSave(e);
-}
-
-/** ¿El evento lleva zona de portería, y por tanto el mapa puede dibujarlo? */
-export function hasGoalZone(e: GameEvent): boolean {
-  return !!(e.destinationGrid || e.metadata?.zone);
-}
-
 /**
  * ¿Este portero es "relevante" para el informe? Ha jugado algo de tiempo
  * o participa en algún evento — mismo criterio que "jugadores utilizados"
@@ -116,6 +127,17 @@ export function hasGoalZone(e: GameEvent): boolean {
  */
 function isRelevantGoalkeeper(p: Player, events: GameEvent[]): boolean {
   return p.individualTimeSeconds > 0 || events.some((e) => e.playerIds.includes(p.id));
+}
+
+/**
+ * Entrada del informe para UN portero concreto, sin filtro de relevancia.
+ *
+ * Existe para que una pantalla pueda pedir la ficha de un portero que todavía
+ * no ha intervenido (suplente en el banquillo) y obtener ceros calculados con
+ * las mismas reglas, en vez de inventarse su propio recuento.
+ */
+export function buildGoalkeeperReport(matchData: MatchData, p: Player): GoalkeeperReportEntry {
+  return buildEntry(matchData, p);
 }
 
 export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEntry[] {
@@ -126,31 +148,96 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
   return goalkeepers
     .slice()
     .sort((a, b) => a.number - b.number)
-    .map((p) => {
-      const ownEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
+    .map((p) => buildEntry(matchData, p));
+}
 
-      const saveParry = ownEvents.filter((e) => e.type === GoalieAction.SAVE_PARRY).length;
-      const saveCatch = ownEvents.filter((e) => e.type === GoalieAction.SAVE_CATCH).length;
-      const saveGeneric = ownEvents.filter((e) => e.type === GoalieAction.SAVE).length;
+function buildEntry(matchData: MatchData, p: Player): GoalkeeperReportEntry {
+  {
+      // ATRIBUCIÓN COMPARTIDA (corrección de Fase 4).
+      //
+      // Antes bastaba con que playerIds incluyera al portero. La captura
+      // anterior a Fase 4 metía TAMBIÉN al portero rival en la parada del
+      // portero local, así que un partido histórico acreditaba la misma
+      // parada a los dos. Ahora una acción de portero solo cuenta para el
+      // portero de su mismo bando, decidido por el bando registrado en el
+      // propio evento. Es corrección de LECTURA: el JSON no se toca.
+      const ownEvents = matchData.events.filter((e) => isGoalieEventOwnedBy(e, p));
+
+      // El desglose se hace por ACCIÓN EFECTIVA: así una parada cuenta igual
+      // venga como evento propio del portero o como respuesta declarada
+      // dentro del tiro rival. Una ocasión, una parada.
+      const countAction = (action: GoalieAction) =>
+        ownEvents.filter((e) => effectiveGoalieAction(e) === action).length;
+      const saveCatch = countAction(GoalieAction.SAVE_CATCH);
+      const saveDeflect = countAction(GoalieAction.SAVE_DEFLECT);
+      const saveGeneric = countAction(GoalieAction.SAVE);
+      // SAVE_PARRY histórico entra aquí, no en "despejes": se registró bajo un
+      // botón que decía PARADA, así que su subtipo real es desconocido.
       const saveUnspecified = ownEvents.filter(isUnspecifiedSave).length;
-      const totalSaves = saveParry + saveCatch + saveGeneric + saveUnspecified;
+      const saveParry = 0;
+      const totalSaves = saveCatch + saveDeflect + saveGeneric + saveUnspecified;
+
+      const exitEvents = ownEvents.filter(isExit);
+      const exits = exitEvents.length;
+      const exitsSuccess = exitEvents.filter((e) => exitOutcomeOf(e) === "success").length;
+      const exitsFail = exitEvents.filter((e) => exitOutcomeOf(e) === "fail").length;
+      const exitsUnknown = exits - exitsSuccess - exitsFail;
       const conceded = ownEvents.filter(isConcededGoal).length;
+      // Efectividad = paradas / (paradas + encajados). Semántica intacta
+      // respecto a los partidos anteriores, para que sigan siendo comparables.
       const shotsFaced = totalSaves + conceded;
+      // Tiros recibidos cuya respuesta el operador no registró. Se declaran
+      // aparte en lugar de convertirse en paradas.
+      const shotsUndeclared = ownEvents.filter(hasUndeclaredIntervention).length;
+      const shotsAgainst = shotsFaced + shotsUndeclared;
       const mappedInterventions = ownEvents.filter(
         (e) => (isAnySave(e) || isConcededGoal(e)) && hasGoalZone(e),
       ).length;
       const effectivenessPct = shotsFaced > 0 ? Math.round((totalSaves / shotsFaced) * 100) : null;
 
+      // ZONA DE INTERVENCIÓN (GK1-GK5). Se cuentan las acciones que admiten
+      // zona: paradas con tipo propio y salidas. Las que no la registraron se
+      // declaran aparte en vez de repartirse.
+      const zonedEvents = ownEvents.filter(eventAcceptsGoalkeeperZone);
+      const zoneTally = tallyGoalkeeperZones(zonedEvents);
+      const interventionZones = zoneTally.byZone;
+      const interventionsUnlocated = zoneTally.unlocated;
+
+      // Desglose por tipo: qué hizo el portero en cada zona. Se construye
+      // con la acción EFECTIVA, así que cubre tanto los eventos propios del
+      // portero como los tiros rivales enriquecidos del Modelo C.
+      const interventionZonesByAction: Partial<Record<GoalieAction, GkZoneTally>> = {};
+      for (const action of [
+        GoalieAction.SAVE,
+        GoalieAction.SAVE_CATCH,
+        GoalieAction.SAVE_DEFLECT,
+        GoalieAction.EXIT,
+        GoalieAction.SAVE_PARRY,
+      ] as const) {
+        const deTipo = zonedEvents.filter((e) => effectiveGoalieAction(e) === action);
+        if (deTipo.length > 0) {
+          interventionZonesByAction[action] = tallyGoalkeeperZones(deTipo).byZone;
+        }
+      }
+
+      const exitZones = tallyGoalkeeperZones(exitEvents).byZone;
+      const exitZonesSuccess = tallyGoalkeeperZones(
+        exitEvents.filter((e) => exitOutcomeOf(e) === "success"),
+      ).byZone;
+      const exitZonesFail = tallyGoalkeeperZones(
+        exitEvents.filter((e) => exitOutcomeOf(e) === "fail"),
+      ).byZone;
+
       // Mismos predicados que las estadísticas: si una intervención cuenta
       // arriba, aparece también aquí.
       const timeline: GoalkeeperTimelineEntry[] = ownEvents
-        .filter((e) => isAnySave(e) || isConcededGoal(e))
+        .filter((e) => isAnySave(e) || isConcededGoal(e) || isExit(e))
         .slice()
         .sort((a, b) => a.timestamp - b.timestamp)
         .map((e) => ({
           timeLabel: fmtMilliseconds(e.timestamp),
           period: e.period,
-          type: GOALIE_ACTION_LABEL[e.type] || String(e.type),
+          type: isExit(e) ? formatExit(e) : formatGoalieAction(effectiveGoalieAction(e) ?? e.type),
         }));
 
       return {
@@ -164,14 +251,27 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         saveParry,
         saveCatch,
         saveGeneric,
+        saveDeflect,
         saveUnspecified,
+        exits,
+        exitsSuccess,
+        exitsFail,
+        exitsUnknown,
+        interventionZones,
+        interventionZonesByAction,
+        interventionsUnlocated,
+        exitZones,
+        exitZonesSuccess,
+        exitZonesFail,
         mappedInterventions,
         totalSaves,
         conceded,
         shotsFaced,
+        shotsUndeclared,
+        shotsAgainst,
         effectivenessPct,
         events: ownEvents,
         timeline,
       };
-    });
+  }
 }

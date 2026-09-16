@@ -1,0 +1,572 @@
+/**
+ * src/utils/goalkeeperActions.ts
+ *
+ * Catálogo único de acciones de portero: taxonomía, etiquetas y predicados.
+ * Función pura, sin React y sin DOM.
+ *
+ * Existe para que captura, estadísticas, mapas, informes y exportaciones
+ * clasifiquen y nombren cada acción EXACTAMENTE igual. La auditoría de Fase 4
+ * encontró el problema contrario: el mismo evento se rotulaba "PARADA" al
+ * capturarlo y "Despeje" al leerlo, porque cada superficie tenía su propia
+ * tabla.
+ *
+ * TAXONOMÍA
+ * ---------
+ *   SAVE          Parada genérica (botón rápido por defecto)
+ *   SAVE_CATCH    Blocaje / atrapada
+ *   SAVE_DEFLECT  Despeje / rechace
+ *   EXIT          Salida / intervención
+ *   SAVE_PARRY    CONGELADO — histórico, nunca se vuelve a producir
+ *   GOAL_CONCEDED Histórico; los goles nuevos se derivan del GOAL rival
+ *
+ * POR QUÉ SAVE_PARRY QUEDA CONGELADO
+ * ----------------------------------
+ * Hasta Fase 4 era el único tipo producible, y se emitía bajo un botón que
+ * decía "PARADA". Sus eventos NO son despejes: son paradas de subtipo
+ * desconocido. Reutilizarlo para el despeje habría reetiquetado datos
+ * históricos con una información que nadie registró.
+ */
+import { ActionType, GameEvent, GoalieAction, Player, Role } from "../types/futsal";
+import { Zone12Id, isZone12Id, mirrorZone12 } from "./fieldZones";
+import { classifyZone } from "./legacyZoneMap";
+
+// ── TAXONOMÍA ───────────────────────────────────────────────────────────
+
+/** Paradas que la captura PUEDE emitir a partir de Fase 4. */
+export const PRODUCIBLE_SAVE_TYPES: readonly GoalieAction[] = [
+  GoalieAction.SAVE,
+  GoalieAction.SAVE_CATCH,
+  GoalieAction.SAVE_DEFLECT,
+];
+
+/**
+ * TODOS los tipos de parada, vivos e históricos. Para consumidores que
+ * enumeran tipos en vez de usar un predicado (p. ej. capas de filtro): así
+ * añadir un tipo nuevo no se olvida en ninguno.
+ */
+export const GOALIE_SAVE_TYPES: readonly GoalieAction[] = [
+  GoalieAction.SAVE,
+  GoalieAction.SAVE_CATCH,
+  GoalieAction.SAVE_DEFLECT,
+  GoalieAction.SAVE_PARRY,
+];
+
+/** Todo lo que la captura puede emitir hoy como acción de portero. */
+export const PRODUCIBLE_GOALIE_ACTIONS: readonly GoalieAction[] = [
+  ...PRODUCIBLE_SAVE_TYPES,
+  GoalieAction.EXIT,
+];
+
+/**
+ * Tipos que NO deben volver a producirse. Solo se leen, para no romper
+ * partidos guardados.
+ */
+export const FROZEN_GOALIE_ACTIONS: readonly GoalieAction[] = [
+  GoalieAction.SAVE_PARRY,
+  GoalieAction.GOAL_CONCEDED,
+];
+
+export function isProducibleGoalieAction(type: unknown): boolean {
+  return PRODUCIBLE_GOALIE_ACTIONS.includes(type as GoalieAction);
+}
+
+export function isFrozenGoalieAction(type: unknown): boolean {
+  return FROZEN_GOALIE_ACTIONS.includes(type as GoalieAction);
+}
+
+// ── ETIQUETAS ───────────────────────────────────────────────────────────
+// Única fuente. Ninguna superficie debe tener su propia tabla.
+
+export const GOALIE_ACTION_LABEL: Record<string, string> = {
+  [GoalieAction.SAVE]: "Parada",
+  [GoalieAction.SAVE_CATCH]: "Blocaje",
+  [GoalieAction.SAVE_DEFLECT]: "Despeje",
+  [GoalieAction.EXIT]: "Salida",
+  // Se nombra por lo que realmente se sabe. No se infiere que fuera despeje.
+  [GoalieAction.SAVE_PARRY]: "Parada (subtipo no registrado)",
+  [GoalieAction.GOAL_CONCEDED]: "Gol encajado",
+  // Un disparo rival detenido registrado sin subtipo de intervención.
+  [ActionType.SHOT]: "Parada (sin subtipo registrado)",
+  [ActionType.GOAL]: "Gol encajado",
+};
+
+/**
+ * Etiqueta de usuario para lo declarado sobre un tiro. Nunca devuelve el
+ * código interno.
+ */
+export function formatDeclaredResponse(event: GameEvent): string {
+  const declared = declaredGoalieResponseOf(event);
+  if (declared === null) return "";
+  if (declared === GOALIE_RESPONSE_UNSPECIFIED) return "Sin intervención registrada";
+  return declared === GoalieAction.EXIT ? formatExit(event) : formatGoalieAction(declared);
+}
+
+export function formatGoalieAction(type: unknown): string {
+  return GOALIE_ACTION_LABEL[String(type)] ?? String(type);
+}
+
+// ── RESPUESTA DEL PORTERO DENTRO DE UN TIRO (MODELO C) ─────────────────
+//
+// Una misma jugada —el rival dispara y nuestro portero responde— es UNA
+// ocasión, no dos. Cuando la respuesta se captura en la misma secuencia, se
+// guarda sobre el propio evento de tiro en vez de crear un segundo evento:
+//
+//   SHOT  metadata.goalieResponse      SAVE | SAVE_CATCH | SAVE_DEFLECT | EXIT
+//         metadata.exitOutcome         solo si la respuesta es EXIT
+//         metadata.targetGoalkeeperId  quién respondió, explícito
+//         goalkeeperZone               dónde intervino (opcional)
+//
+// Todo opcional: un tiro sin respuesta se comporta exactamente como antes, y
+// las acciones sueltas del portero (Camino B) siguen siendo eventos propios.
+
+export type GoalieResponse =
+  | GoalieAction.SAVE
+  | GoalieAction.SAVE_CATCH
+  | GoalieAction.SAVE_DEFLECT
+  | GoalieAction.EXIT;
+
+/**
+ * El operador tuvo la ocasión de registrar la respuesta del portero y decidió
+ * continuar sin registrarla.
+ *
+ * NO significa que podamos demostrar que el portero no tocó el balón: pudo
+ * haber poste, bloqueo de un defensa o, sencillamente, dato incompleto. Por
+ * eso no se llama 'none'.
+ *
+ * Es distinto de `undefined`, que marca un evento del modelo ANTERIOR, donde
+ * no existía forma de declarar la respuesta y por tanto sigue aplicando el
+ * fallback histórico.
+ */
+export const GOALIE_RESPONSE_UNSPECIFIED = "UNSPECIFIED" as const;
+
+/** Lo que puede declararse como respuesta, incluida la no-declaración. */
+export type GoalieResponseDeclared =
+  | GoalieResponse
+  | typeof GOALIE_RESPONSE_UNSPECIFIED;
+
+export const GOALIE_RESPONSES: readonly GoalieResponse[] = [
+  GoalieAction.SAVE,
+  GoalieAction.SAVE_CATCH,
+  GoalieAction.SAVE_DEFLECT,
+  GoalieAction.EXIT,
+];
+
+export function isGoalieResponse(raw: unknown): raw is GoalieResponse {
+  return GOALIE_RESPONSES.includes(raw as GoalieResponse);
+}
+
+/**
+ * Valor DECLARADO en el evento: una intervención, la no-declaración explícita
+ * (`UNSPECIFIED`), o null si el evento es del modelo anterior.
+ *
+ * Distinguir null de UNSPECIFIED es el punto central: null habilita el
+ * fallback histórico, UNSPECIFIED lo prohíbe.
+ */
+export function declaredGoalieResponseOf(event: GameEvent): GoalieResponseDeclared | null {
+  if (event.type !== ActionType.SHOT) return null;
+  const raw = event.metadata?.goalieResponse;
+  if (raw === GOALIE_RESPONSE_UNSPECIFIED) return GOALIE_RESPONSE_UNSPECIFIED;
+  return isGoalieResponse(raw) ? raw : null;
+}
+
+/** ¿El operador declaró explícitamente que no registra intervención? */
+export function hasUndeclaredIntervention(event: GameEvent): boolean {
+  return declaredGoalieResponseOf(event) === GOALIE_RESPONSE_UNSPECIFIED;
+}
+
+/**
+ * Respuesta del portero CON intervención, o null. `UNSPECIFIED` devuelve null
+ * a propósito: no es una intervención y no debe clasificarse como tal.
+ */
+export function goalieResponseOf(event: GameEvent): GoalieResponse | null {
+  const declared = declaredGoalieResponseOf(event);
+  return declared !== null && declared !== GOALIE_RESPONSE_UNSPECIFIED ? declared : null;
+}
+
+/**
+ * Acción de portero EFECTIVA de un evento, venga como evento propio o como
+ * respuesta dentro de un tiro. Es el punto único por el que deben pasar todos
+ * los consumidores: así una ocasión se interpreta igual la registre quien la
+ * registre, y nunca se cuenta dos veces.
+ *
+ * Devuelve null para un tiro sin respuesta declarada — ese caso lo sigue
+ * tratando isUnspecifiedSave, como hasta ahora.
+ */
+export function effectiveGoalieAction(event: GameEvent): GoalieAction | null {
+  if (event.type === GoalieAction.SAVE_PARRY) return GoalieAction.SAVE_PARRY;
+  if (PRODUCIBLE_GOALIE_ACTIONS.includes(event.type as GoalieAction)) {
+    return event.type as GoalieAction;
+  }
+  return goalieResponseOf(event);
+}
+
+/**
+ * Portero al que se atribuye la respuesta. Se prefiere el id explícito; si no
+ * está (tiros anteriores a esta fase), se deduce por bando: el portero de
+ * playerIds cuyo equipo es el contrario al del evento.
+ */
+export function targetGoalkeeperIdOf(
+  event: GameEvent,
+  players: Pick<Player, "id" | "role" | "isOpponent">[],
+): string | null {
+  const explicit = event.metadata?.targetGoalkeeperId;
+  if (typeof explicit === "string" && event.playerIds.includes(explicit)) return explicit;
+
+  const eventIsOpponent = !!event.metadata?.isOpponent;
+  const found = event.playerIds.find((id) => {
+    const p = players.find((pp) => pp.id === id);
+    return p?.role === Role.GOALKEEPER && p.isOpponent !== eventIsOpponent;
+  });
+  return found ?? null;
+}
+
+// ── RESULTADO DE LA SALIDA ──────────────────────────────────────────────
+
+export type ExitOutcome = "success" | "fail";
+
+export const EXIT_OUTCOME_LABEL: Record<ExitOutcome, string> = {
+  success: "Éxito",
+  fail: "Fallo",
+};
+
+export function isExitOutcome(raw: unknown): raw is ExitOutcome {
+  return raw === "success" || raw === "fail";
+}
+
+/**
+ * Portero NUESTRO que debe responder a un tiro, o null si no procede.
+ *
+ * El encadenado solo se ofrece para tiros DEL RIVAL contra nuestra portería.
+ * Nuestros propios tiros conservan su flujo de siempre: no se interrumpe la
+ * toma de datos para preguntar por el portero contrario, cuyas paradas no
+ * estamos analizando.
+ *
+ * Devuelve el portero que está EN PISTA en ese momento, así que una
+ * sustitución previa se refleja sola. Si no hay ninguno identificable
+ * devuelve null y el flujo continúa como antes.
+ */
+export function goalieRespondingToShot<
+  P extends Pick<Player, "id" | "role" | "isOpponent" | "isOnPitch">,
+>(type: ActionType | GoalieAction, eventIsOpponent: boolean, players: P[]): P | null {
+  if (type !== ActionType.SHOT) return null;
+  if (!eventIsOpponent) return null; // nuestros tiros no abren respuesta
+  return players.find((p) => p.isOnPitch && p.role === Role.GOALKEEPER && !p.isOpponent) ?? null;
+}
+
+/**
+ * Resultado declarado de una salida, o null si no se registró. Vale tanto
+ * para un evento EXIT propio como para un tiro cuya respuesta fue EXIT.
+ */
+export function exitOutcomeOf(event: GameEvent): ExitOutcome | null {
+  const raw = event.metadata?.exitOutcome;
+  return isExitOutcome(raw) ? raw : null;
+}
+
+/**
+ * `"Salida · Éxito"`, o `"Salida (resultado no registrado)"` si falta. Vale
+ * tanto para un evento EXIT propio como para un tiro con respuesta EXIT.
+ */
+export function formatExit(event: GameEvent): string {
+  const outcome = exitOutcomeOf(event);
+  return outcome
+    ? `${GOALIE_ACTION_LABEL[GoalieAction.EXIT]} · ${EXIT_OUTCOME_LABEL[outcome]}`
+    : "Salida (resultado no registrado)";
+}
+
+// ── PREDICADOS ──────────────────────────────────────────────────────────
+// Cabecera, mapas e informes deben clasificar cada evento con ESTOS. La
+// contradicción "Blocajes 0 · Despejes 0" bajo un mapa lleno de círculos
+// verdes venía de que cada uno usaba su propio criterio.
+
+export function isExit(e: GameEvent): boolean {
+  return effectiveGoalieAction(e) === GoalieAction.EXIT;
+}
+
+/** Gol encajado. Incluye ActionType.GOAL: al marcar el rival, el portero
+ *  afectado queda añadido al evento como participante. */
+export function isConcededGoal(e: GameEvent): boolean {
+  return e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL;
+}
+
+/** Parada con subtipo explícito registrado (los tres tipos vivos). */
+export function isTypedSave(e: GameEvent): boolean {
+  const action = effectiveGoalieAction(e);
+  return action !== null && PRODUCIBLE_SAVE_TYPES.includes(action);
+}
+
+/**
+ * Parada cuyo subtipo NO consta: o bien un SAVE_PARRY histórico, o bien un
+ * disparo rival a puerta detenido y registrado como ActionType.SHOT.
+ */
+export function isUnspecifiedSave(e: GameEvent): boolean {
+  if (e.type === GoalieAction.SAVE_PARRY) return true;
+  if (e.type !== ActionType.SHOT) return false;
+  // Un tiro que YA declara algo -una intervención o su ausencia explícita- no
+  // es una parada sin subtipo. El fallback histórico solo aplica cuando el
+  // evento no declara nada, es decir cuando viene del modelo anterior.
+  if (declaredGoalieResponseOf(e) !== null) return false;
+  return e.destinationGrid?.toUpperCase() !== "OUT";
+}
+
+export function isAnySave(e: GameEvent): boolean {
+  return isTypedSave(e) || isUnspecifiedSave(e);
+}
+
+/** ¿El evento lleva zona de portería, y por tanto el mapa puede dibujarlo? */
+export function hasGoalZone(e: GameEvent): boolean {
+  return !!(e.destinationGrid || e.metadata?.zone);
+}
+
+/** Cualquier acción que cuente como intervención del portero. */
+export function isGoalieIntervention(e: GameEvent): boolean {
+  return isAnySave(e) || isConcededGoal(e) || isExit(e);
+}
+
+// ── PERSPECTIVA DE LOS MAPAS (corrección del problema A) ────────────────
+
+/**
+ * Devuelve el sector de ORIGEN DEL TIRO de un evento, expresado siempre en la
+ * perspectiva del ATACANTE, que es la que responde a "¿desde dónde me tiran?".
+ *
+ * EL PROBLEMA QUE RESUELVE
+ * ------------------------
+ * Los sectores se guardan en la perspectiva del equipo que EJECUTA la acción.
+ * El mapa de origen del portero mezcla dos fuentes:
+ *
+ *   - Tiros del rival  → perspectiva del rival  → Z4 = portería del portero
+ *   - Paradas propias  → perspectiva del portero → Z1 = portería del portero
+ *
+ * Es decir, un mismo lugar físico caía en Z4 por una fuente y en Z1 por la
+ * otra, y el mapa las sumaba. Aquí se espejan los eventos propios del portero
+ * para que ambas fuentes hablen el mismo idioma.
+ *
+ * La corrección es de INTERPRETACIÓN: no se toca ni se migra ningún evento
+ * almacenado.
+ *
+ * Devuelve null si el evento no tiene sector del sistema nuevo — los datos
+ * históricos `A1-C3` no se espejan, porque su perspectiva nunca se registró.
+ */
+export function shotOriginFromAttackerView(
+  event: GameEvent,
+  goalieIsOpponent: boolean,
+): Zone12Id | null {
+  const zone = typeof event.originGrid === "string" ? event.originGrid.toUpperCase() : null;
+  if (!isZone12Id(zone)) return null;
+
+  // ¿El evento lo ejecutó el equipo del propio portero? Entonces está en la
+  // perspectiva contraria a la del atacante y hay que espejarlo.
+  const eventIsOwnTeam = !!event.metadata?.isOpponent === goalieIsOpponent;
+  return eventIsOwnTeam ? mirrorZone12(zone) : zone;
+}
+
+/**
+ * Sector de origen tal cual se guardó, sin espejar. Para datos históricos, que
+ * se siguen mostrando en su rejilla y con su aviso.
+ */
+export function rawOriginZone(event: GameEvent): string | null {
+  const ref = classifyZone(event.originGrid);
+  return ref && ref.kind !== "unknown" ? ref.id : null;
+}
+
+/**
+ * ¿Esta acción admite zona de intervención del portero?
+ *
+ * Las paradas con tipo propio y las salidas. Siempre OPCIONAL: omitirla no
+ * impide registrar la acción.
+ */
+export function acceptsGoalkeeperZone(type: unknown): boolean {
+  return isProducibleGoalieAction(type);
+}
+
+/** ¿Este EVENTO puede llevar zona de intervención? Cubre el tiro enriquecido. */
+export function eventAcceptsGoalkeeperZone(event: GameEvent): boolean {
+  return acceptsGoalkeeperZone(event.type) || goalieResponseOf(event) !== null;
+}
+
+// ── ATRIBUCIÓN A UN PORTERO CONCRETO ────────────────────────────────────
+
+/**
+ * ¿Este evento es atribuible a este portero?
+ *
+ * 1. Si playerIds lo incluye, es suyo sin ambigüedad.
+ * 2. Para un disparo/gol del RIVAL, manda onPitchPlayerIds — el dato real del
+ *    momento del evento, nunca el estado final `isOnPitch`.
+ * 3. Sin onPitchPlayerIds (evento antiguo), solo se atribuye si este portero
+ *    era el único relevante de su equipo. Se prefiere infra-contar a
+ *    mal-atribuir.
+ */
+export function isEventAttributableToGoalie(
+  event: GameEvent,
+  goalie: Pick<Player, "id" | "isOpponent">,
+  isOnlyRelevantGoalkeeper: boolean,
+): boolean {
+  if (event.playerIds.includes(goalie.id)) return true;
+
+  const isRivalEvent = (event.metadata?.isOpponent ?? false) !== goalie.isOpponent;
+  if (!isRivalEvent) return false;
+
+  if (event.onPitchPlayerIds) return event.onPitchPlayerIds.includes(goalie.id);
+  return isOnlyRelevantGoalkeeper;
+}
+
+/**
+ * Portero al que se atribuyó un evento, para poder DESHACERLO sobre el mismo.
+ *
+ * Antes, handleDeleteEvent decidía a quién descontar a partir del rol y del
+ * bando ACTUALES del jugador, no de la identidad con la que se registró. Aquí
+ * se usa la identidad persistida en el propio evento.
+ */
+export function attributedGoalieId(
+  event: GameEvent,
+  players: Pick<Player, "id" | "role" | "isOpponent">[],
+): string | null {
+  const goalieIds = new Set(
+    players.filter((p) => p.role === Role.GOALKEEPER).map((p) => p.id),
+  );
+  const fromEvent = event.playerIds.find((id) => goalieIds.has(id));
+  return fromEvent ?? null;
+}
+
+// ── ESTADÍSTICAS DEL PORTERO ────────────────────────────────────────────
+
+export type GoalieStatDelta = {
+  saves: number;
+  conceded: number;
+  exits: number;
+  exitsSuccess: number;
+};
+
+const NO_DELTA: GoalieStatDelta = { saves: 0, conceded: 0, exits: 0, exitsSuccess: 0 };
+
+/**
+ * Cuánto suma un evento a las estadísticas de UN portero concreto.
+ *
+ * Fuente única para registrar y para deshacer: si una acción suma aquí, al
+ * borrarla se resta exactamente lo mismo. Antes eran dos bloques de código
+ * distintos y podían desalinearse.
+ *
+ * DECIDE POR IDENTIDAD, NO POR ROL ACTUAL
+ * ---------------------------------------
+ * Usa el bando del jugador y el bando registrado EN EL EVENTO. Deshacer no
+ * depende de quién esté en pista ahora ni de qué portero sea el activo.
+ *
+ * CORRIGE UN DOBLE CONTEO REAL
+ * ----------------------------
+ * En la captura anterior, una parada del portero local añadía al portero
+ * RIVAL a `playerIds` (como `targetGoalieId`) y le acreditaba también la
+ * parada. Aquí una parada solo la suma el portero de SU MISMO bando que el
+ * evento; un disparo detenido (ActionType.SHOT) solo lo suma el portero del
+ * bando CONTRARIO, que es quien lo encaró.
+ */
+export function goalieStatsDelta(
+  event: GameEvent,
+  player: Pick<Player, "id" | "role" | "isOpponent">,
+): GoalieStatDelta {
+  if (player.role !== Role.GOALKEEPER) return NO_DELTA;
+  if (!event.playerIds.includes(player.id)) return NO_DELTA;
+
+  const eventIsOpponent = !!event.metadata?.isOpponent;
+  const sameTeam = player.isOpponent === eventIsOpponent;
+
+  // Gol encajado: lo encaja el portero del bando contrario al del evento.
+  if (isConcededGoal(event)) {
+    return sameTeam ? NO_DELTA : { ...NO_DELTA, conceded: 1 };
+  }
+
+  // ── TIRO ENRIQUECIDO (Modelo C) ──────────────────────────────────────
+  // El tiro y la respuesta del portero son UNA ocasión en un solo evento. La
+  // respuesta la firma el portero OBJETIVO, es decir el del bando contrario
+  // al del tiro. Suma exactamente una vez: no hay segundo evento que contar.
+  const response = goalieResponseOf(event);
+  if (response) {
+    if (sameTeam) return NO_DELTA;
+    if (response === GoalieAction.EXIT) {
+      return {
+        ...NO_DELTA,
+        exits: 1,
+        exitsSuccess: exitOutcomeOf(event) === "success" ? 1 : 0,
+      };
+    }
+    return { ...NO_DELTA, saves: 1 };
+  }
+
+  // Parada con tipo propio de portero: la firma el portero de ese bando.
+  if (isTypedSave(event) || event.type === GoalieAction.SAVE_PARRY) {
+    return sameTeam ? { ...NO_DELTA, saves: 1 } : NO_DELTA;
+  }
+
+  // Salida como evento propio.
+  if (isExit(event)) {
+    if (!sameTeam) return NO_DELTA;
+    return {
+      ...NO_DELTA,
+      exits: 1,
+      exitsSuccess: exitOutcomeOf(event) === "success" ? 1 : 0,
+    };
+  }
+
+  // Disparo SIN respuesta declarada, detenido y registrado solo como SHOT: lo
+  // para el portero contrario, y solo si fue entre los tres palos. Es el
+  // comportamiento histórico, que se conserva intacto.
+  if (event.type === ActionType.SHOT) {
+    // Si el operador declaró que no registra intervención, no se le inventa
+    // una parada: solo fue un tiro recibido.
+    if (hasUndeclaredIntervention(event)) return NO_DELTA;
+    const onTarget = event.destinationGrid?.toUpperCase() !== "OUT";
+    return !sameTeam && onTarget ? { ...NO_DELTA, saves: 1 } : NO_DELTA;
+  }
+
+  return NO_DELTA;
+}
+
+/**
+ * ¿Este evento pertenece al informe de ESTE portero?
+ *
+ * No basta con que `playerIds` lo incluya. La captura anterior a Fase 4 metía
+ * también al portero RIVAL en la parada del portero local, de modo que un
+ * partido histórico acredita la misma parada a los dos. Aquí se resuelve por
+ * el bando registrado EN EL EVENTO, igual que goalieStatsDelta:
+ *
+ *   - parada o salida  → la firma el portero de SU MISMO bando
+ *   - disparo o gol    → la encara el portero del bando CONTRARIO
+ *
+ * Es corrección de LECTURA: ningún evento almacenado se modifica.
+ */
+export function isGoalieEventOwnedBy(
+  event: GameEvent,
+  player: Pick<Player, "id" | "role" | "isOpponent">,
+): boolean {
+  if (player.role !== Role.GOALKEEPER) return false;
+  if (!event.playerIds.includes(player.id)) return false;
+
+  const sameTeam = player.isOpponent === !!event.metadata?.isOpponent;
+
+  // Tiro enriquecido (Modelo C): la respuesta la firma el portero OBJETIVO,
+  // que es el del bando CONTRARIO al del tiro. Va antes que la regla de
+  // abajo porque un tiro con respuesta también satisface isTypedSave/isExit.
+  if (goalieResponseOf(event) !== null) return !sameTeam;
+
+  // Acciones propias del portero. El filtro se ciñe al caso que tuvo el bug:
+  // paradas y salidas, donde la captura anterior colaba también al portero
+  // rival. Se exige que el evento sea de su mismo bando.
+  if (isTypedSave(event) || event.type === GoalieAction.SAVE_PARRY || isExit(event)) {
+    return sameTeam;
+  }
+
+  // El resto (disparo encarado, gol encajado, acciones propias como jugador)
+  // nunca sumó a dos porteros: solo se añadía uno a playerIds. Se respeta la
+  // atribución registrada, que es la única fuente fiable para datos antiguos.
+  return true;
+}
+
+/** ¿Este evento debe añadir al portero rival a playerIds como objetivo? */
+export function eventTargetsOpposingGoalie(type: unknown): boolean {
+  // Solo un disparo o un gol tienen "portero objetivo". Una parada la ejecuta
+  // un portero: no crea objetivo en el otro, y añadirlo era justo el origen
+  // del doble conteo.
+  return (
+    type === ActionType.SHOT ||
+    type === ActionType.GOAL ||
+    type === GoalieAction.GOAL_CONCEDED
+  );
+}

@@ -95,6 +95,8 @@ import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/corner
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
+import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
+import { capturePagesToPdf } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
   acceptsGoalkeeperZone,
@@ -108,7 +110,6 @@ import {
   formatExit,
   formatGoalieAction,
   isAnySave,
-  isConcededGoal,
   goalieStatsDelta,
 } from "../utils/goalkeeperActions";
 import { formatGoalZoneLabel } from "../utils/goalZones";
@@ -1830,31 +1831,19 @@ export default function MatchTracker() {
       return;
     }
 
-    // GOALKEEPER PDF — 2 pages
+    // PDF DE PORTEROS — 3 páginas por equipo.
+    //
+    // La captura la hace el helper compartido del servicio de PDF: antes había
+    // aquí una copia del mismo bucle, y una corrección en una no llegaba a la
+    // otra. Las páginas las monta <GoalkeeperPdfPages>, que lee el mismo
+    // informe que la pantalla.
     setReportType(Role.GOALKEEPER);
     try {
       await new Promise(r => setTimeout(r, 600));
-      const captureOpts = { cacheBust: true, pixelRatio: 1.5,
-        quality: 0.82, backgroundColor: '#ffffff', style: { opacity: '1', visibility: 'visible' } };
-      const gkRefs = [pdfGkPage1Ref, pdfGkPage2Ref, pdfGkPage3Ref];
-      const images: string[] = [];
-      for (const ref of gkRefs) {
-        if (!ref.current) continue;
-        const url = await toJpeg(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
-        if (url && url.length > 1000) images.push(url);
-      }
-      if (images.length === 0) throw new Error('No goalkeeper pages generated');
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      for (let i = 0; i < images.length; i++) {
-        if (i > 0) pdf.addPage();
-        const img = new Image();
-        img.src = images[i];
-        await new Promise(r => { img.onload = r; });
-        const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
-        pdf.addImage(images[i], 'JPEG', 0, 0, pdfW, imgH);
-      }
+      const gkNodes = [pdfGkPage1Ref, pdfGkPage2Ref, pdfGkPage3Ref]
+        .map(ref => ref.current)
+        .filter((node): node is HTMLDivElement => node !== null);
+      const pdf = await capturePagesToPdf(gkNodes);
       pdf.save(`porteros_${matchData.teamName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
     } catch (err) {
       console.error('GK PDF failed', err);
@@ -3409,405 +3398,20 @@ export default function MatchTracker() {
         </div>
       )}
 
-      {/* ── GOALKEEPER PDF PAGES — 3 pages by half ─── */}
-      {(() => {
-        const allGkPlayers = matchData.players.filter(p => p.role === Role.GOALKEEPER && !p.isOpponent);
-        const allGkRivalPlayers = matchData.players.filter(p => p.role === Role.GOALKEEPER && p.isOpponent);
-        const allGkTeams = [
-          { players: allGkPlayers, name: matchData.teamName, vsName: matchData.opponentName, accent: '#3b82f6', score: `${goals} — ${opponentGoals}` },
-          { players: allGkRivalPlayers, name: matchData.opponentName, vsName: matchData.teamName, accent: '#ef4444', score: `${opponentGoals} — ${goals}` },
-        ].filter(t => t.players.length > 0);
-
-        if (allGkTeams.length === 0) return null;
-
-        const gkPageStyle: React.CSSProperties = {
-          position: 'absolute', top: 0, left: 0, zIndex: -300,
-          opacity: 0.01, pointerEvents: 'none',
-          width: 794, backgroundColor: '#ffffff',
-          fontFamily: "'Inter', sans-serif", color: '#0f172a', padding: 40,
-        };
-
-        const headerStyle: React.CSSProperties = {
-          background: '#0f172a', color: 'white', padding: '14px 24px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
-        };
-        const slStyle: React.CSSProperties = {
-          fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase',
-          letterSpacing: '0.1em', marginBottom: 10, paddingBottom: 6, borderBottom: '0.5px solid #e2e8f0',
-        };
-        const footerStyle: React.CSSProperties = {
-          marginTop: 20, borderTop: '0.5px solid #e2e8f0', paddingTop: 8,
-          display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#94a3b8',
-        };
-
-        const redGrad = (v: number) => {
-          if (v === 0) return '#1e293b';
-          const g = Math.round(255 - v * 220), b = Math.round(255 - v * 220);
-          return `rgb(255,${g},${b})`;
-        };
-        const textOnRed = (v: number) => v > 0.5 ? '#ffffff' : v > 0 ? '#7f1d1d' : '#475569';
-
-        const renderZoneMap = (events: any[], isGoalGrid: boolean) => {
-          const zones = isGoalGrid
-            ? ['G1','G2','G3','G4','G5','G6','G7','G8','G9']
-            : ['A1','A2','A3','B1','B2','B3','C1','C2','C3'];
-          const counts: Record<string, number> = {};
-          zones.forEach(z => counts[z] = 0);
-          events.forEach(e => {
-            const z = isGoalGrid
-              ? (e.metadata?.zone || e.destinationGrid || '').toUpperCase()
-              : (e.originGrid || e.metadata?.originGrid || '').toUpperCase();
-            if (zones.includes(z)) counts[z] = (counts[z] || 0) + 1;
-          });
-          const maxV = Math.max(...Object.values(counts), 1);
-          const W = 80, H = isGoalGrid ? 54 : 116;
-          const cW = (W - 4) / 3, cH = (H - 4) / 3;
-          return (
-            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}
-              style={{ border: '1.5px solid #334155', borderRadius: 3, background: '#0f172a' }}>
-              {zones.map((z, idx) => {
-                const v = counts[z] || 0;
-                const col = idx % 3, row = Math.floor(idx / 3);
-                const x = 2 + col * cW, y = 2 + row * cH;
-                const intensity = v / maxV;
-                return (
-                  <g key={z}>
-                    <rect x={x} y={y} width={cW - 1} height={cH - 1}
-                      fill={redGrad(v > 0 ? 0.15 + intensity * 0.85 : 0)} />
-                    {v > 0 && (
-                      <text x={x + cW/2 - 0.5} y={y + cH/2} textAnchor="middle"
-                        dominantBaseline="central" fontSize="8"
-                        fill={textOnRed(intensity)} fontWeight="500">{v}</text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          );
-        };
-
-        const gkRow = (p: Player, accent: string, halfEvents: any[]) => {
-          const saves = halfEvents.filter(isAnySave).length;
-          const conceded = halfEvents.filter(isConcededGoal).length;
-          const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0;
-          const recoveries = halfEvents.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
-          const losses = halfEvents.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
-          const shots = halfEvents.filter(e => e.type === ActionType.SHOT).length;
-          const goals_scored = halfEvents.filter(e => e.type === ActionType.GOAL).length;
-          const mins = Math.round(halfEvents.reduce((acc, e) => acc, (p.individualTimeSeconds || 0) / 60));
-          return { saves, conceded, savePct, recoveries, losses, shots, goals_scored, mins: Math.round((p.individualTimeSeconds || 0) / 60) };
-        };
-
-        const GkTable = ({ players, accent, halfLabel, halfFilter }: { players: Player[], accent: string, halfLabel: string, halfFilter: (e: any) => boolean }) => (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                {['Portero','Par.','Enc.','%Par.','Rec.','Pérd.','Tiros','Goles','Min.'].map((h, i) => (
-                  <th key={h} style={{ padding: '4px 5px', textAlign: i === 0 ? 'left' : 'center', fontWeight: 700, fontSize: 9,
-                    color: ['#64748b','#16a34a','#dc2626','#d97706','#9333ea','#ea580c','#2563eb','#16a34a','#0284c7'][i] }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {players.map(p => {
-                // Use SHOT/GOAL events from rival (same as PORTERO tab)
-                const isGkInvolved = (e: any) =>
-                  e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-                const halfEvts = matchData.events.filter(e => halfFilter(e) && isGkInvolved(e));
-                const saves = halfEvts.filter(isAnySave).length;
-                const conceded = halfEvts.filter(isConcededGoal).length;
-                const savePct = saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : saves + conceded === 0 ? null : 0;
-                const recoveries = halfEvts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length;
-                const losses = halfEvts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length;
-                const shots = halfEvts.filter(e => e.type === ActionType.SHOT).length;
-                const goals_scored = halfEvts.filter(e => e.type === ActionType.GOAL).length;
-                const mins = Math.round((p.individualTimeSeconds || 0) / 60);
-                return (
-                  <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
-                    <td style={{ padding: '4px 5px', textAlign: 'left', fontWeight: 600 }}>
-                      <span style={{ color: accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}
-                    </td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#16a34a', fontWeight: saves > 0 ? 700 : 400 }}>{saves}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#dc2626', fontWeight: conceded > 0 ? 700 : 400 }}>{conceded}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#d97706', fontWeight: 700 }}>{savePct !== null ? `${savePct}%` : '—'}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#9333ea' }}>{recoveries}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#ea580c' }}>{losses}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#2563eb' }}>{shots}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center', color: '#16a34a' }}>{goals_scored}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'center' }}>{mins}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        );
-
-        const GkMaps = ({ players, halfFilter, accent }: { players: Player[], halfFilter: (e: any) => boolean, accent: string }) => (
-          <div>
-            {players.map(p => {
-              // Use SHOT/GOAL events from rival (same as PORTERO tab)
-              const isGoalieInvolved = (e: any) =>
-                e.playerIds.includes(p.id) ||
-                // Rival shots/goals when this goalkeeper is local, or local shots/goals when goalkeeper is rival
-                (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-
-              const halfEvts = matchData.events.filter(e => halfFilter(e) && isGoalieInvolved(e));
-
-              // Saves = rival shots that were NOT goals and NOT out (same logic as PORTERO tab)
-              const saveEvts = halfEvts.filter(isAnySave);
-              // Goals conceded = rival goals
-              const goalEvts = halfEvts.filter(e =>
-                e.type === GoalieAction.GOAL_CONCEDED ||
-                e.type === ActionType.GOAL
-              );
-              const totalSaves = saveEvts.length;
-              const totalGoals = goalEvts.length;
-              if (totalSaves === 0 && totalGoals === 0) {
-                return (
-                  <div key={p.id} style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>
-                      <span style={{ color: accent, marginRight: 4 }}>#{p.number}</span>{p.name}
-                    </div>
-                    <div style={{ fontSize: 9, color: '#94a3b8', fontStyle: 'italic' }}>Sin participación en esta parte.</div>
-                  </div>
-                );
-              }
-              return (
-                <div key={p.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '0.5px solid #f1f5f9' }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
-                    <span style={{ color: accent, marginRight: 4 }}>#{p.number}</span>{p.name}
-                  </div>
-                  {totalSaves > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', marginBottom: 6 }}>
-                        Paradas ({totalSaves})
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(saveEvts, false)}
-                        </div>
-                        <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(saveEvts, true)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {totalGoals > 0 && (
-                    <div>
-                      <div style={{ fontSize: 8, fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: 6 }}>
-                        Goles encajados ({totalGoals})
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona lanzamiento</div>
-                          {renderZoneMap(goalEvts, false)}
-                        </div>
-                        <span style={{ fontSize: 14, color: '#94a3b8' }}>→</span>
-                        <div>
-                          <div style={{ fontSize: 7, color: '#94a3b8', textAlign: 'center', marginBottom: 2 }}>Zona portería</div>
-                          {renderZoneMap(goalEvts, true)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 7, color: '#94a3b8' }}>Intensidad:</span>
-                    <div style={{ display: 'flex' }}>
-                      {[0.15, 0.35, 0.55, 0.75, 0.95].map((v, i) => (
-                        <div key={i} style={{ width: 14, height: 8, background: redGrad(v), borderRadius: i === 0 ? '2px 0 0 2px' : i === 4 ? '0 2px 2px 0' : 0 }} />
-                      ))}
-                    </div>
-                    <span style={{ fontSize: 7, color: '#94a3b8' }}>Pocos → Muchos tiros</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-
-        const isFirstHalf = (e: any) => e.period === Period.FIRST || e.period === 0;
-        const isSecondHalf = (e: any) => e.period === Period.SECOND || e.period === 1;
-        const totalPages = allGkTeams.length * 3;
-
-        return (
-          <>
-            {allGkTeams.map((team, ti) => (
-              <React.Fragment key={ti}>
-                {/* Page 1: 1ª Parte */}
-                <div ref={ti === 0 ? pdfGkPage1Ref : undefined} style={gkPageStyle}>
-                  <div style={headerStyle}>
-                    <div>
-                      <div style={{ fontSize: 8, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
-                        Goalkeeper Report · 1ª Parte
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 700 }}>{team.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>vs {team.vsName} · {team.score}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 8, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#1e3a5f', color: '#93c5fd', textTransform: 'uppercase' }}>
-                        1ª PARTE
-                      </div>
-                      <div style={{ fontSize: 8, color: '#64748b', marginTop: 6 }}>
-                        {new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ ...slStyle }}>1. estadísticas — primera parte</div>
-                  <GkTable players={team.players} accent={team.accent} halfLabel="1ª" halfFilter={isFirstHalf} />
-                  <p style={{ fontSize: 8, color: '#94a3b8', marginTop: 6, marginBottom: 16 }}>
-                    % Paradas = Paradas / (Paradas + Goles encajados) × 100
-                  </p>
-                  <div style={{ ...slStyle }}>2. mapas de zona — primera parte</div>
-                  <GkMaps players={team.players} halfFilter={isFirstHalf} accent={team.accent} />
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 1} / {totalPages}</span>
-                  </div>
-                </div>
-
-                {/* Page 2: 2ª Parte */}
-                <div ref={ti === 0 ? pdfGkPage2Ref : undefined} style={gkPageStyle}>
-                  <div style={headerStyle}>
-                    <div>
-                      <div style={{ fontSize: 8, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
-                        Goalkeeper Report · 2ª Parte
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 700 }}>{team.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>vs {team.vsName} · {team.score}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 8, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#1e3a2f', color: '#86efac', textTransform: 'uppercase' }}>
-                        2ª PARTE
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ ...slStyle }}>3. estadísticas — segunda parte</div>
-                  <GkTable players={team.players} accent={team.accent} halfLabel="2ª" halfFilter={isSecondHalf} />
-                  <p style={{ fontSize: 8, color: '#94a3b8', marginTop: 6, marginBottom: 16 }}>
-                    % Paradas = Paradas / (Paradas + Goles encajados) × 100
-                  </p>
-                  <div style={{ ...slStyle }}>4. mapas de zona — segunda parte</div>
-                  <GkMaps players={team.players} halfFilter={isSecondHalf} accent={team.accent} />
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 2} / {totalPages}</span>
-                  </div>
-                </div>
-
-                {/* Page 3: Comparativa */}
-                <div ref={ti === 0 ? pdfGkPage3Ref : undefined} style={gkPageStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
-                      <span style={{ fontSize: 14, fontWeight: 700 }}>{team.name} — Comparativa del partido</span>
-                    </div>
-                    <span style={{ fontSize: 8, color: '#94a3b8' }}>Página {ti * 3 + 3} / {totalPages}</span>
-                  </div>
-
-                  {team.players.map(p => {
-                    const isGkInvolved = (e: any) =>
-                      e.playerIds.includes(p.id) || (p.isOnPitch && e.metadata?.isOpponent !== p.isOpponent);
-                    const ev1 = matchData.events.filter(e => isGkInvolved(e) && isFirstHalf(e));
-                    const ev2 = matchData.events.filter(e => isGkInvolved(e) && isSecondHalf(e));
-                    const evAll = matchData.events.filter(e => isGkInvolved(e));
-
-                    const calcStats = (evts: any[]) => {
-                      const saves = evts.filter(isAnySave).length;
-                      const conceded = evts.filter(isConcededGoal).length;
-                      return {
-                        saves,
-                        conceded,
-                        savePct: saves + conceded > 0 ? Math.round(saves / (saves + conceded) * 100) : 0,
-                        recoveries: evts.filter(e => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
-                        losses: evts.filter(e => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
-                      };
-                    };
-
-                    const s1 = calcStats(ev1);
-                    const s2 = calcStats(ev2);
-                    const sAll = calcStats(evAll);
-
-                    const compareItems = [
-                      { label: 'Paradas', v1: s1.saves, v2: s2.saves },
-                      { label: 'Goles encajados', v1: s1.conceded, v2: s2.conceded },
-                      { label: '% Paradas', v1: s1.savePct, v2: s2.savePct, suffix: '%', maxVal: 100 },
-                      { label: 'Recuperaciones', v1: s1.recoveries, v2: s2.recoveries },
-                      { label: 'Pérdidas', v1: s1.losses, v2: s2.losses },
-                    ];
-
-                    return (
-                      <div key={p.id} style={{ marginBottom: 28 }}>
-                        <div style={{ ...slStyle, color: team.accent }}>
-                          {p.name} (#{p.number}) — comparativa 1ª vs 2ª parte
-                        </div>
-
-                        {/* Compare bars */}
-                        <div style={{ marginBottom: 14 }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
-                            <div />
-                            <div style={{ fontSize: 8, fontWeight: 600, color: '#93c5fd', textAlign: 'center' }}>1ª Parte</div>
-                            <div style={{ fontSize: 8, fontWeight: 600, color: '#86efac', textAlign: 'center' }}>2ª Parte</div>
-                          </div>
-                          {compareItems.map(item => {
-                            const maxV = item.maxVal || Math.max(item.v1, item.v2, 1);
-                            const p1Pct = Math.round((item.v1 / maxV) * 100);
-                            const p2Pct = Math.round((item.v2 / maxV) * 100);
-                            return (
-                              <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                                <div style={{ fontSize: 8, color: '#64748b' }}>{item.label}</div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${p1Pct}%`, height: '100%', background: '#3b82f6', borderRadius: 3 }} />
-                                  </div>
-                                  <span style={{ fontSize: 9, fontWeight: 500, color: '#1e293b', minWidth: 22 }}>{item.v1}{item.suffix || ''}</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${p2Pct}%`, height: '100%', background: '#22c55e', borderRadius: 3 }} />
-                                  </div>
-                                  <span style={{ fontSize: 9, fontWeight: 500, color: '#1e293b', minWidth: 22 }}>{item.v2}{item.suffix || ''}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Totals */}
-                        <div style={{ fontSize: 8, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-                          Totales del partido
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                          {[
-                            { label: 'Total paradas', val: sAll.saves, color: '#16a34a' },
-                            { label: 'Goles encajados', val: sAll.conceded, color: '#dc2626' },
-                            { label: '% Paradas', val: `${sAll.savePct}%`, color: '#d97706' },
-                            { label: 'Minutos', val: Math.round((p.individualTimeSeconds || 0) / 60), color: '#0284c7' },
-                          ].map(t => (
-                            <div key={t.label} style={{ background: '#f8fafc', border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 8, textAlign: 'center' }}>
-                              <div style={{ fontSize: 7, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 3 }}>{t.label}</div>
-                              <div style={{ fontSize: 18, fontWeight: 500, color: t.color }}>{t.val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <div style={footerStyle}>
-                    <span>Futsal Commander Pro · Goalkeeper Report</span>
-                    <span>Página {ti * 3 + 3} / {totalPages}</span>
-                  </div>
-                </div>
-              </React.Fragment>
-            ))}
-          </>
-        );
-      })()}
+      {/* ── PÁGINAS DEL PDF DE PORTEROS (porteros_*.pdf) ───────────────
+          La plantilla vive en components/export/GoalkeeperPdfPages: tenía su
+          propia aritmética (paradas a mano, atribución por "portero en pista",
+          rejilla A1-C3) y por eso el PDF real no enseñaba salidas, subtipos ni
+          zonas de intervención. Ahora consume el mismo informe que la
+          pantalla y pinta la misma ficha que el informe de porteros. */}
+      <GoalkeeperPdfPages
+        matchData={matchData}
+        goals={goals}
+        opponentGoals={opponentGoals}
+        page1Ref={pdfGkPage1Ref}
+        page2Ref={pdfGkPage2Ref}
+        page3Ref={pdfGkPage3Ref}
+      />
 
             <div 
         className="bg-[#0A0B0E] text-slate-100 font-sans selection:bg-blue-600/30 overflow-hidden grid grid-rows-[auto_1fr_auto] lg:grid-rows-[auto_1fr] w-full max-w-full overflow-hidden"

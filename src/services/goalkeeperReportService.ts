@@ -129,6 +129,17 @@ function isRelevantGoalkeeper(p: Player, events: GameEvent[]): boolean {
   return p.individualTimeSeconds > 0 || events.some((e) => e.playerIds.includes(p.id));
 }
 
+/**
+ * Entrada del informe para UN portero concreto, sin filtro de relevancia.
+ *
+ * Existe para que una pantalla pueda pedir la ficha de un portero que todavía
+ * no ha intervenido (suplente en el banquillo) y obtener ceros calculados con
+ * las mismas reglas, en vez de inventarse su propio recuento.
+ */
+export function buildGoalkeeperReport(matchData: MatchData, p: Player): GoalkeeperReportEntry {
+  return buildEntry(matchData, p);
+}
+
 export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEntry[] {
   const goalkeepers = matchData.players.filter(
     (p) => p.role === Role.GOALKEEPER && isRelevantGoalkeeper(p, matchData.events),
@@ -137,7 +148,11 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
   return goalkeepers
     .slice()
     .sort((a, b) => a.number - b.number)
-    .map((p) => {
+    .map((p) => buildEntry(matchData, p));
+}
+
+function buildEntry(matchData: MatchData, p: Player): GoalkeeperReportEntry {
+  {
       // ATRIBUCIÓN COMPARTIDA (corrección de Fase 4).
       //
       // Antes bastaba con que playerIds incluyera al portero. La captura
@@ -258,5 +273,5 @@ export function buildGoalkeeperReports(matchData: MatchData): GoalkeeperReportEn
         events: ownEvents,
         timeline,
       };
-    });
+  }
 }

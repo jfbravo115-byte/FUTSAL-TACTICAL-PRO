@@ -94,6 +94,8 @@ import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
+import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
+import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
   acceptsGoalkeeperZone,
   eventAcceptsGoalkeeperZone,
@@ -108,8 +110,6 @@ import {
   isAnySave,
   isConcededGoal,
   goalieStatsDelta,
-  isExit,
-  isGoalieIntervention,
 } from "../utils/goalkeeperActions";
 import { formatGoalZoneLabel } from "../utils/goalZones";
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
@@ -646,15 +646,25 @@ const StatsExportTemplate = React.forwardRef<
         {players.map((p) => {
           // Eventos del partido donde el portero está involucrado, filtrados por
           // mitad si se especifica (evita acumular 1ª+2ª en la misma tarjeta/mapa)
-          const allGoalieEvents = matchData.events.filter((e) => e.playerIds.includes(p.id));
-          const goalieEvents = periodFilter ? allGoalieEvents.filter(periodFilter) : allGoalieEvents;
-          const saves = goalieEvents.filter(isAnySave).length;
-          const conceded = goalieEvents.filter(isConcededGoal).length;
-          const shotsFaced = saves + conceded;
-          const effectiveness = shotsFaced > 0 ? ((saves / shotsFaced) * 100).toFixed(1) : "0.0";
+          // MISMO informe que la pantalla y que el PDF. Cuando la sección es
+          // de una mitad concreta se le pasa el partido con los eventos de esa
+          // mitad: el cálculo no cambia, solo el conjunto que se le da.
+          const scopedMatch = periodFilter
+            ? { ...matchData, events: matchData.events.filter(periodFilter) }
+            : matchData;
+          const report = buildGoalkeeperReport(scopedMatch, p);
+          const saves = report.totalSaves;
+          const conceded = report.conceded;
+          const shotsFaced = report.shotsAgainst;
+          const effectiveness =
+            report.effectivenessPct === null ? "0.0" : report.effectivenessPct.toFixed(1);
+          const isOnlyRelevantGoalkeeper =
+            matchData.players.filter(
+              (pl) => pl.role === Role.GOALKEEPER && pl.isOpponent === p.isOpponent,
+            ).length === 1;
 
           // No mostrar porteros sin ninguna intervención en esta mitad concreta
-          if (periodFilter && shotsFaced === 0) return null;
+          if (periodFilter && shotsFaced === 0 && report.exits === 0) return null;
 
           return (
             <div
@@ -710,113 +720,28 @@ const StatsExportTemplate = React.forwardRef<
                 </div>
               </div>
 
-              {/* Goal Map and Pitch Map Row */}
-              <div className="grid grid-cols-3 gap-8">
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <MapIcon size={14} /> ORIGEN DE TIRO (PISTA)
-                  </h4>
-                  <div className="flex-1 flex items-center justify-center">
-                    {renderPitchOriginMap(p, isOpponent, periodFilter ? matchData.events.filter(periodFilter) : matchData.events)}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <Shield size={14} /> IMPACTO (PORTERÍA)
-                  </h4>
-                  <div className="aspect-[3/2] bg-slate-900 rounded-[32px] border border-white/5 relative overflow-hidden flex items-center justify-center p-4">
-                    {/* Simplified Goal Representation */}
-                    <div className="absolute inset-x-8 bottom-0 top-6 border-x-4 border-t-4 border-white/40 rounded-t-lg"></div>
-                    <div className="absolute inset-x-8 bottom-0 h-[2px] bg-white/20"></div>
-
-                    {[...Array(9)].map((_, i) => {
-                      const zoneId = `G${i + 1}`;
-                      const zoneEvents = goalieEvents.filter(e => e.metadata?.zone === zoneId || e.destinationGrid === zoneId);
-                      const zoneSaves = zoneEvents.filter(e => e.type !== GoalieAction.GOAL_CONCEDED && e.type !== ActionType.GOAL).length;
-                      const zoneGoals = zoneEvents.filter(e => e.type === GoalieAction.GOAL_CONCEDED || e.type === ActionType.GOAL).length;
-                      
-                      // Zone coordinates (standard 3x3 grid)
-                      const x = (i % 3) * 30 + 20;
-                      const y = Math.floor(i / 3) * 30 + 25;
-
-                      if (zoneSaves === 0 && zoneGoals === 0) return null;
-
-                      return (
-                        <div 
-                          key={zoneId}
-                          className="absolute flex flex-col items-center"
-                          style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
-                        >
-                          <div className="flex gap-1">
-                             {zoneSaves > 0 && (
-                               <div className="w-6 h-6 rounded-full bg-green-600 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
-                                 {zoneSaves}
-                               </div>
-                             )}
-                             {zoneGoals > 0 && (
-                               <div className="w-6 h-6 rounded-full bg-red-600 border-2 border-white flex items-center justify-center text-[10px] font-black text-white shadow-lg">
-                                 {zoneGoals}
-                               </div>
-                             )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {goalieEvents.filter(e => e.metadata?.zone || e.destinationGrid).length === 0 && (
-                      <span className="text-[10px] font-black text-slate-700 uppercase italic">Sin datos de zona</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <Activity size={14} /> ACCIONES REGISTRADAS
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4 h-full">
-                    {(() => {
-                      // Solo eventos donde el portero es el AUTOR (no el destinatario de un
-                      // tiro/gol rival), y ya filtrados por la mitad correspondiente
-                      const ownEvents = goalieEvents.filter(e => e.playerIds[0] === p.id);
-                      const ownGoals = ownEvents.filter(e => e.type === ActionType.GOAL).length;
-                      const ownShots = ownEvents.filter(e => e.type === ActionType.SHOT).length;
-                      const ownSteals = ownEvents.filter(e => e.type === ActionType.STEAL).length;
-                      const ownLosses = ownEvents.filter(e => e.type === ActionType.LOSS).length;
-                      const ownFouls = ownEvents.filter(e => e.type === ActionType.FOUL).length;
-                      const ownAssists = ownEvents.filter(e => e.type === ActionType.ASSIST).length;
-                      return [
-                        { label: 'GOLES', value: ownGoals, color: 'text-green-500' },
-                        { label: 'TIROS', value: ownShots, color: 'text-amber-500' },
-                        { label: 'RECUPER.', value: ownSteals, color: 'text-purple-400' },
-                        { label: 'PÉRDIDAS', value: ownLosses, color: 'text-red-400' },
-                        { label: 'FALTAS', value: ownFouls, color: 'text-orange-400' },
-                        { label: 'ASIST.', value: ownAssists, color: 'text-blue-400' },
-                      ];
-                    })().map((action, i) => (
-                      <div key={i} className="bg-black/30 border border-white/5 p-4 rounded-2xl flex flex-col justify-center">
-                         <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{action.label}</span>
-                         <span className={`text-2xl font-black ${action.color} tabular-nums leading-none`}>{action.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* Tres mapas, tres preguntas distintas: desde dónde tiran,
+                  dónde termina el balón y dónde interviene el portero. Es el
+                  mismo componente que usa la pestaña Porteros. */}
+              <GoalkeeperAnalysisPanel
+                report={report}
+                goalie={p}
+                isOpponent={isOpponent}
+                allEvents={scopedMatch.events}
+                isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper}
+              />
 
               {/* Timeline simple */}
               <div className="flex flex-col gap-3">
                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2 mb-1">Últimas Intervenciones</h4>
                  <div className="grid grid-cols-3 gap-3">
-                    {goalieEvents
-                      .filter(isGoalieIntervention)
+                    {report.timeline
                       .slice(-6)
                       .reverse()
-                      .map((e, idx) => (
+                      .map((t, idx) => (
                         <div key={idx} className="bg-white/5 p-3 rounded-xl border border-white/5 flex items-center gap-3">
-                           <span className="font-mono text-[9px] text-blue-400 font-bold">{formatTime(e.timestamp)}</span>
-                           <span className={`text-[8px] font-black uppercase ${e.type === GoalieAction.GOAL_CONCEDED ? 'text-red-400' : 'text-amber-400'}`}>
-                             {isExit(e) ? formatExit(e) : formatGoalieAction(e.type)}
-                           </span>
+                           <span className="font-mono text-[9px] text-blue-400 font-bold">{t.timeLabel}</span>
+                           <span className="text-[8px] font-black uppercase text-amber-400">{t.type}</span>
                         </div>
                     ))}
                  </div>
@@ -2927,8 +2852,17 @@ export default function MatchTracker() {
   };
 
   const renderGoalieCard = (goalie: Player, isOpponent: boolean) => {
-    const totalShotsAgainst = goalie.stats.saves + goalie.stats.conceded;
-    const saveRate = totalShotsAgainst > 0 ? (goalie.stats.saves / totalShotsAgainst) * 100 : 0;
+    // FUENTE ÚNICA. Antes esta ficha leía goalie.stats.saves/conceded, el
+    // contador acumulado anterior a Fase 4: no distinguía blocaje de despeje,
+    // ignoraba las salidas y no sabía nada de la zona de intervención. Ahora
+    // lee el MISMO informe que el PDF, así que pantalla y exportación cuentan
+    // el partido con el mismo vocabulario.
+    const report = buildGoalkeeperReport(matchData, goalie);
+    const saveRate = report.effectivenessPct ?? 0;
+    const isOnlyRelevantGoalkeeper =
+      matchData.players.filter(
+        (p) => p.role === Role.GOALKEEPER && p.isOpponent === goalie.isOpponent,
+      ).length === 1;
 
     return (
       <div
@@ -2965,99 +2899,14 @@ export default function MatchTracker() {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-1.5">
-          <div className="bg-black/20 p-1.5 rounded-xl flex flex-col items-center">
-            <span className="text-[7px] font-black text-slate-500 uppercase mb-1 text-center truncate w-full">Paradas</span>
-            <span className={`text-lg font-black ${isOpponent ? 'text-rose-400' : 'text-blue-400'}`}>{goalie.stats.saves}</span>
-          </div>
-          <div className="bg-black/20 p-1.5 rounded-xl flex flex-col items-center">
-            <span className="text-[7px] font-black text-slate-500 uppercase mb-1 text-center truncate w-full">G. Enc</span>
-            <span className="text-lg font-black text-red-500">{goalie.stats.conceded}</span>
-          </div>
-          <div className={`${isOpponent ? 'bg-red-600/20 border-red-500/20' : 'bg-blue-600/20 border-blue-500/20'} p-1.5 rounded-xl flex flex-col items-center border`}>
-            <span className={`text-[7px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase mb-1 text-center truncate w-full`}>T. Rec.</span>
-            <span className="text-lg font-black text-white">{totalShotsAgainst}</span>
-          </div>
-          <div className="bg-green-500/10 p-1.5 rounded-xl flex flex-col items-center border border-green-500/10">
-            <span className="text-[7px] font-black text-green-500 uppercase mb-1 text-center truncate w-full">Goles</span>
-            <span className="text-lg font-black text-green-400">{goalie.stats.goals}</span>
-          </div>
-          <div className="bg-amber-500/10 p-1.5 rounded-xl flex flex-col items-center border border-amber-500/10">
-            <span className="text-[7px] font-black text-amber-500 uppercase mb-1 text-center truncate w-full">Tiros</span>
-            <span className="text-lg font-black text-amber-400">{goalie.stats.shots}</span>
-          </div>
-        </div>
-
-        <div className="mt-4 flex gap-2">
-          <div className="flex-1 p-3 bg-black/40 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-[8px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase tracking-widest flex items-center gap-1`}>
-                <MapIcon size={10} /> Origen (Pista)
-              </span>
-            </div>
-            {renderPitchOriginMap(goalie, isOpponent, matchData.events, true)}
-          </div>
-
-          <div className="flex-[1.5] p-3 bg-black/40 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-[8px] font-black ${isOpponent ? 'text-red-400' : 'text-blue-400'} uppercase tracking-widest flex items-center gap-1`}>
-                <Crosshair size={10} /> Impacto (Portería)
-              </span>
-              <span className="text-[7px] font-bold text-slate-500 uppercase">Zonificación</span>
-            </div>
-            <div className="grid grid-cols-3 grid-rows-3 gap-1 aspect-[3/2] w-full max-w-[200px] mx-auto border-t-[4px] border-x-[4px] border-slate-700 rounded-t-xl relative bg-black/80 shadow-2xl overflow-hidden p-1">
-              <div className={`absolute inset-0 bg-gradient-to-b ${isOpponent ? 'from-red-600/5' : 'from-blue-600/5'} to-transparent pointer-events-none`}></div>
-              {Array.from({ length: 9 }).map((_, i) => {
-                const z = `G${i + 1}`;
-                const saves = matchData.events.filter((e) => {
-                  const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && isAnySave(e) && (e.destinationGrid === z || e.metadata?.zone === z);
-                }).length;
-                const goals = matchData.events.filter((e) => {
-                  const isGoalieInvolved = e.playerIds.includes(goalie.id) || (e.metadata?.isOpponent !== goalie.isOpponent && goalie.isOnPitch);
-                  return isGoalieInvolved && isConcededGoal(e) && (e.destinationGrid === z || e.metadata?.zone === z);
-                }).length;
-
-                // Color logic: green=saves only, red=goals only, orange=both, empty=none
-                const hasSaves = saves > 0;
-                const hasGoals = goals > 0;
-                const bgColor = hasSaves && hasGoals
-                  ? 'bg-orange-500/30 border-orange-400/40'
-                  : hasSaves
-                  ? 'bg-green-500/25 border-green-400/30'
-                  : hasGoals
-                  ? 'bg-red-500/30 border-red-400/40'
-                  : 'bg-white/5 border-white/10';
-                const textColor = hasSaves && hasGoals ? 'text-orange-300' : hasSaves ? 'text-green-300' : 'text-red-300';
-                const total = saves + goals;
-
-                return (
-                  <div key={z} title={formatGoalZoneLabel(z) ?? undefined} className={`relative flex items-center justify-center border rounded-sm overflow-hidden ${bgColor}`}>
-                    {total > 0 && (
-                      <div className="flex flex-col items-center justify-center leading-none gap-0.5">
-                        <span className={`text-[11px] font-black ${textColor} drop-shadow-sm`}>{total}</span>
-                        {hasSaves && hasGoals && (
-                          <div className="flex gap-0.5">
-                            <span className="text-[6px] text-green-400 font-black">{saves}P</span>
-                            <span className="text-[6px] text-red-400 font-black">{goals}G</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/* Etiqueta accesible; el codigo interno G1-G9 no se imprime. */}
-                    <span className="sr-only">{formatGoalZoneLabel(z)}</span>
-                  </div>
-                );
-              })}
-            </div>
-            {/* Legend */}
-            <div className="flex gap-3 justify-center mt-1.5">
-              <span className="flex items-center gap-1 text-[7px] font-black text-green-400"><span className="w-2 h-2 rounded-sm bg-green-500/40 inline-block"></span>Paradas</span>
-              <span className="flex items-center gap-1 text-[7px] font-black text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500/40 inline-block"></span>Goles</span>
-              <span className="flex items-center gap-1 text-[7px] font-black text-orange-400"><span className="w-2 h-2 rounded-sm bg-orange-500/40 inline-block"></span>Ambos</span>
-            </div>
-          </div>
-        </div>
+        <GoalkeeperAnalysisPanel
+          report={report}
+          goalie={goalie}
+          isOpponent={isOpponent}
+          allEvents={matchData.events}
+          isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper}
+          compact
+        />
 
         {goalie.isOnPitch && (
           <div className="grid grid-cols-3 gap-2 mt-3">

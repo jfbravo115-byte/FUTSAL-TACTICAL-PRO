@@ -64,6 +64,7 @@ import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
 import { generateTacticalReport } from "../services/tacticalAnalysisService";
+import { buildTacticalProPayload } from "../services/tacticalProPayload";
 import { TacticalReportModal } from "../components/TacticalReportModal";
 import {
   saveMatchSnapshot,
@@ -1468,7 +1469,9 @@ export default function MatchTracker() {
       const res = await fetch('/api/tactical-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: stripLoneSurrogates(JSON.stringify({ matchData: dataToAnalyze })),
+        // Mismo contexto que MatchAnalysis: hasta ahora esta ruta enviaba
+        // solo los eventos crudos y el modelo tenía que reinterpretarlos.
+        body: stripLoneSurrogates(JSON.stringify(buildTacticalProPayload(dataToAnalyze))),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error(`TACTICAL PRO: ${res.status}`);

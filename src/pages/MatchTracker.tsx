@@ -114,6 +114,7 @@ import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterve
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
+import { teamReportPageCount } from "../utils/reportPagination";
 import { capturePagesToPdf } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
@@ -3115,7 +3116,7 @@ export default function MatchTracker() {
         );
 
         // 3 páginas por equipo + mapas de zona + balón parado.
-        const totalPages = allTeamsForPDF.length * 3 + 2;
+        const totalPages = teamReportPageCount(allTeamsForPDF.length);
         let pageCounter = 0;
 
         return (
@@ -3127,7 +3128,7 @@ export default function MatchTracker() {
                 if (!team) return null;
                 return (
                   <>
-                    <Header page={1} total={allTeamsForPDF.length * 3 + 1} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
+                    <Header page={1} total={totalPages} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3147,7 +3148,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={1} total={allTeamsForPDF.length * 3 + 1} />
+                    <Footer page={1} total={totalPages} />
                   </>
                 );
               })()}
@@ -3158,12 +3159,11 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {totalPages}</span>
                     </div>
                     {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
                       <div key={item.label} style={{ marginBottom: 16 }}>
@@ -3174,7 +3174,7 @@ export default function MatchTracker() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
-                    <Footer page={2} total={total} />
+                    <Footer page={2} total={totalPages} />
                   </>
                 );
               })()}
@@ -3185,7 +3185,6 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 const ACT_COLORS: Record<string, string> = {
                   'Goles':   '#16a34a',
                   'Tiros':   '#2563eb',
@@ -3253,7 +3252,7 @@ export default function MatchTracker() {
                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
                         <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil circular + mapas de zona</span>
                       </div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {totalPages}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
                       {Object.entries(ACT_COLORS).map(([k, v]) => (
@@ -3266,7 +3265,7 @@ export default function MatchTracker() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 20 }}>
                       {team.players.map((p: Player) => <DonutChart key={p.id} p={p} accent={team.accent} />)}
                     </div>
-                    <Footer page={3} total={total} />
+                    <Footer page={3} total={totalPages} />
                   </>
                 );
               })()}
@@ -3277,10 +3276,9 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
-                    <Header page={4} total={total} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
+                    <Header page={4} total={totalPages} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3300,7 +3298,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={4} total={total} />
+                    <Footer page={4} total={totalPages} />
                   </>
                 );
               })()}
@@ -3310,12 +3308,11 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {totalPages}</span>
                     </div>
                     {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
                       <div key={item.label} style={{ marginBottom: 16 }}>
@@ -3326,7 +3323,7 @@ export default function MatchTracker() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
-                    <Footer page={5} total={total} />
+                    <Footer page={5} total={totalPages} />
                   </>
                 );
               })()}
@@ -3336,7 +3333,6 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
@@ -3347,7 +3343,7 @@ export default function MatchTracker() {
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {totalPages}</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                       {team.players.map(p => {
@@ -3377,7 +3373,7 @@ export default function MatchTracker() {
                         );
                       })}
                     </div>
-                    <Footer page={6} total={total} />
+                    <Footer page={6} total={totalPages} />
                   </>
                 );
               })()}

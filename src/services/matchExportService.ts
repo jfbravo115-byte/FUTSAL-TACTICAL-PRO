@@ -4,6 +4,7 @@ import { formatDestinationLabel } from "../utils/goalZones";
 import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../utils/goalkeeperActions";
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { formatSetPieceOrigin, formatSetPieceOutcome } from "../utils/setPieceModel";
+import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { generateMatchReport } from "./matchReportService";
 
@@ -36,7 +37,7 @@ function cornerSideLabel(e: { metadata?: Record<string, any>; originGrid?: strin
 export function buildActionsCsv(matchData: MatchData): string {
   // "zona" y "destino" conservan el identificador interno para poder cruzar
   // datos; "zona_texto" y "destino_texto" son los legibles.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde"];
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -50,6 +51,10 @@ export function buildActionsCsv(matchData: MatchData): string {
         md.isOpponent ? matchData.opponentName : matchData.teamName,
         player?.name || "",
         e.type,
+        // Etiqueta humana de la acción, con la misma fuente que el Historial:
+        // "Jugada de falta" en vez de SET_PIECE. La columna técnica se
+        // conserva al lado para poder cruzar datos.
+        formatEventTypeLabel(e).replace(/^[^\p{L}]+/u, ""),
         md.result ?? md.outcome ?? md.subType ?? "",
         md.x ?? md.originX ?? "",
         md.y ?? md.originY ?? "",

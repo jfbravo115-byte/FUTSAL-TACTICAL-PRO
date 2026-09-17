@@ -236,3 +236,85 @@ export function countShotsFromSetPiece(
       setPieceOriginOf(e) === origin,
   ).length;
 }
+
+// ── REANUDACIÓN EJECUTADA (ActionType.SET_PIECE) ────────────────────────
+//
+// Un evento SET_PIECE dice que el equipo EJECUTÓ una reanudación a favor. En
+// Fase 5 solo existe un caso: una falta a favor jugada en corto. El botón que
+// lo captura ya lleva esa información, así que no hay pasos intermedios.
+//
+// Lo que NO es, y por qué importa:
+//   · no es una infracción — eso es FOUL, y pertenece al equipo contrario;
+//   · no es un tiro — eso es SHOT con `setPiece`, y se cuenta allí;
+//   · no es un córner — el córner tiene tipo propio y no se toca.
+//
+// Tampoco se enlaza con el FOUL que la originó: ni por id ni por cercanía
+// temporal. Son dos hechos independientes de dos equipos distintos.
+
+/** Procedencias que puede declarar una reanudación EJECUTADA. */
+export type SetPieceRestartOrigin = "free_kick";
+
+export const SET_PIECE_RESTART_ORIGINS: readonly SetPieceRestartOrigin[] = ["free_kick"];
+
+/** Desenlaces que puede declarar una reanudación EJECUTADA. */
+export type SetPieceRestartOutcome = "play";
+
+export const SET_PIECE_RESTART_OUTCOMES: readonly SetPieceRestartOutcome[] = ["play"];
+
+/** Etiqueta de usuario. Nunca se muestra `SET_PIECE` ni `free_kick`. */
+export const SET_PIECE_RESTART_LABEL = "Jugada de falta";
+export const SET_PIECE_RESTART_LABEL_PLURAL = "Jugadas de falta";
+
+export function isSetPieceRestartOrigin(raw: unknown): raw is SetPieceRestartOrigin {
+  return raw === "free_kick";
+}
+
+export function isSetPieceRestartOutcome(raw: unknown): raw is SetPieceRestartOutcome {
+  return raw === "play";
+}
+
+/**
+ * ¿Es una reanudación ejecutada válida?
+ *
+ * Exige los dos valores: un SET_PIECE con `corner`, con `shot` o sin
+ * declaración no es una reanudación de las que esta fase sabe contar, y se
+ * ignora en vez de colarse en un agregado diciendo algo que no sabemos.
+ */
+export function isSetPieceRestart(event: GameEvent): boolean {
+  return (
+    event.type === ActionType.SET_PIECE &&
+    isSetPieceRestartOrigin(event.metadata?.setPieceOrigin) &&
+    isSetPieceRestartOutcome(event.metadata?.setPieceOutcome)
+  );
+}
+
+/** Metadata de una reanudación nueva. Única vía para producirla. */
+export function newSetPieceRestartMetadata(): {
+  setPieceOrigin: SetPieceRestartOrigin;
+  setPieceOutcome: SetPieceRestartOutcome;
+} {
+  return { setPieceOrigin: "free_kick", setPieceOutcome: "play" };
+}
+
+export type SetPieceRestartSummary = {
+  total: number;
+  /** Con sector registrado. La ubicación es opcional y se declara. */
+  located: number;
+  unlocated: number;
+};
+
+/**
+ * Jugadas de falta de un bando. `opponent` selecciona igual que el resto de
+ * agregados: el bando que EJECUTA la reanudación.
+ */
+export function summarizeSetPieceRestarts(
+  events: GameEvent[],
+  opponent = false,
+  isLocated: (event: GameEvent) => boolean = (e) => typeof e.originGrid === "string" && e.originGrid.length > 0,
+): SetPieceRestartSummary {
+  const propias = events.filter(
+    (e) => isSetPieceRestart(e) && !!e.metadata?.isOpponent === opponent,
+  );
+  const located = propias.filter(isLocated).length;
+  return { total: propias.length, located, unlocated: propias.length - located };
+}

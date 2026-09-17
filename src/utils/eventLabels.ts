@@ -16,6 +16,7 @@
 import { ActionType, GameEvent, GoalieAction } from "../types/futsal";
 import { formatExit, formatGoalieAction } from "./goalkeeperActions";
 import { formatCornerEventLabel } from "./cornerModel";
+import { SET_PIECE_RESTART_LABEL } from "./setPieceModel";
 
 /** Etiquetas de los tipos que no necesitan mirar el metadata. */
 const SIMPLE_LABEL: Partial<Record<string, string>> = {
@@ -65,6 +66,8 @@ export function formatEventTypeLabel(event: GameEvent): string {
   // La falta es la INFRACCIÓN cometida. No lleva desenlace: quién ejecuta
   // después la reanudación es otra acción, de otro equipo.
   if (type === ActionType.FOUL) return "⚠️ Falta";
+  // Reanudación ejecutada. El usuario nunca lee SET_PIECE ni free_kick.
+  if (type === ActionType.SET_PIECE) return `▶️ ${SET_PIECE_RESTART_LABEL}`;
 
   if (type === GoalieAction.EXIT) return `🧤 ${formatExit(event)}`;
   if (SAVE_TYPES.includes(type)) return `🧤 ${formatGoalieAction(type)}`;

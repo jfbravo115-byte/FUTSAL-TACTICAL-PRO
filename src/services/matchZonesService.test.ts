@@ -315,7 +315,7 @@ describe("desglose de balón parado", () => {
     expect(zones.unlocated).toBe(2);
     // Una falta cometida no es "tiro" ni "jugada": el desglose no existe.
     expect((zones.setPieces as any).fouls).toBeUndefined();
-    expect(Object.keys(zones.setPieces)).toEqual(["corners"]);
+    expect(Object.keys(zones.setPieces).filter((k) => /foul|falta/i.test(k))).toEqual([]);
   });
 
   it("NO hay doble conteo: un córner en tiro más un tiro desde córner", () => {
@@ -359,5 +359,59 @@ describe("desglose de balón parado", () => {
     );
     expect(zones.setPieces.corners).toEqual({ total: 1, shot: 0, play: 0, unrecorded: 1 });
     expect(zones.totals.fouls).toBe(1);
+  });
+});
+
+describe("jugadas de falta en el cubo de zonas", () => {
+  const jugada = (zone?: string, opponent = false) =>
+    ev(`sp-${Math.random()}`, ActionType.SET_PIECE, zone, opponent, undefined, {
+      setPieceOrigin: "free_kick",
+      setPieceOutcome: "play",
+    });
+
+  it("se agregan aparte y declaran su ubicación", () => {
+    const zones = buildZoneDashboard(
+      { ...base, events: [jugada("Z2L"), jugada(), jugada("Z3C", true)] },
+      false,
+    );
+    expect(zones.setPieces.freeKickPlays).toEqual({ total: 2, located: 1, unlocated: 1 });
+  });
+
+  it("la perspectiva es la del EJECUTOR, y la rival se espeja como el resto", () => {
+    const zones = buildZoneDashboard({ ...base, events: [jugada("Z2L", true)] }, true);
+    expect(zones.setPieces.freeKickPlays.located).toBe(1);
+    const tally = tallyActionZones(
+      { ...base, events: [jugada("Z2L", true)] },
+      (e) => e.type === ActionType.SET_PIECE,
+      true,
+    );
+    expect(tally.Z2L).toBe(1);
+    // Vista desde el otro banquillo: el mismo sector se lee espejado.
+    expect(mirrorTally(tally).Z3R).toBe(1);
+  });
+
+  it("no suman a tiros, ni a faltas, ni a córners", () => {
+    const zones = buildZoneDashboard(
+      {
+        ...base,
+        events: [
+          jugada("Z2L"),
+          ev("s1", ActionType.SHOT, "Z4C", false, "G2", { setPiece: "free_kick" }),
+          ev("f1", ActionType.FOUL, "Z1C"),
+          ev("c1", ActionType.CORNER, cornerOriginGrid("left"), false, undefined, { cornerSide: "left" }),
+        ],
+      },
+      false,
+    );
+    expect(zones.totals.attempts).toBe(1);
+    expect(zones.totals.fouls).toBe(1);
+    expect(zones.totals.corners).toBe(1);
+    expect(zones.setPieces.freeKickPlays.total).toBe(1);
+  });
+
+  it("una jugada sin ubicación se declara, no se ignora", () => {
+    const zones = buildZoneDashboard({ ...base, events: [jugada()] }, false);
+    expect(zones.unlocated).toBe(1);
+    expect(zones.setPieces.freeKickPlays.unlocated).toBe(1);
   });
 });

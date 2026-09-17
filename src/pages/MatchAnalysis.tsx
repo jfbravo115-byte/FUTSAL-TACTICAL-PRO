@@ -345,12 +345,22 @@ export default function MatchAnalysis() {
               {/* Desglose por ejecución. Va DEBAJO del lado y de los mapas:
                   añade una dimensión, no sustituye ninguna. Solo córners: una
                   falta cometida es una infracción, no una reanudación. */}
-              {describeSetPieceOutcomes(zones.setPieces.corners) && (
+              {(describeSetPieceOutcomes(zones.setPieces.corners) ||
+                zones.setPieces.freeKickPlays.total > 0) && (
                 <div className="mt-2 text-[9px] text-slate-400 leading-relaxed">
                   <div className="font-black text-slate-300 uppercase tracking-widest text-[8px]">
-                    Córners · ejecución
+                    Balón parado
                   </div>
-                  <div>{describeSetPieceOutcomes(zones.setPieces.corners)}</div>
+                  {describeSetPieceOutcomes(zones.setPieces.corners) && (
+                    <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
+                  )}
+                  {zones.setPieces.freeKickPlays.total > 0 && (
+                    <div>
+                      Jugadas de falta: {zones.setPieces.freeKickPlays.total} —{" "}
+                      {zones.setPieces.freeKickPlays.located} con ubicación ·{" "}
+                      {zones.setPieces.freeKickPlays.unlocated} sin ubicación
+                    </div>
+                  )}
                 </div>
               )}
               {zones.unlocated > 0 && (

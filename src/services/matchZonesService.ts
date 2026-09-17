@@ -34,7 +34,13 @@ import {
 } from "../utils/legacyZoneMap";
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
-import { SetPieceOutcomeSummary, summarizeCornerOutcomes } from "../utils/setPieceModel";
+import {
+  SetPieceOutcomeSummary,
+  SetPieceRestartSummary,
+  isSetPieceRestart,
+  summarizeCornerOutcomes,
+  summarizeSetPieceRestarts,
+} from "../utils/setPieceModel";
 
 export { GOAL_ZONE_IDS } from "../utils/goalZones";
 
@@ -90,6 +96,8 @@ export type ZoneDashboard = {
    */
   setPieces: {
     corners: SetPieceOutcomeSummary;
+    /** Faltas a favor puestas en juego. No son tiros ni faltas cometidas. */
+    freeKickPlays: SetPieceRestartSummary;
   };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
@@ -124,13 +132,15 @@ const isLoss = (e: GameEvent) =>
 
 const isFoul = (e: GameEvent) => e.type === ActionType.FOUL;
 const isCorner = (e: GameEvent) => e.type === ActionType.CORNER;
+/** Jugada de falta: reanudación a favor puesta en juego. No es un tiro. */
+const isFreeKickPlay = (e: GameEvent) => isSetPieceRestart(e);
 
 /**
  * Acciones con capacidad de llevar ubicación. Se usa para contar cuántas se
  * quedaron sin ella — dato que se declara en vez de esconderse.
  */
 const isLocatable = (e: GameEvent) =>
-  isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e);
+  isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e);
 
 export function scopedEvents(
   matchData: MatchData,
@@ -304,7 +314,16 @@ export function buildZoneDashboard(
   const corners = summarizeCorners(periodEvents, opponent);
   // Mismo conjunto acotado por período que los córners: el desglose debe
   // cuadrar con el total que se muestra al lado.
-  const setPieces = { corners: summarizeCornerOutcomes(periodEvents, opponent) };
+  const setPieces = {
+    corners: summarizeCornerOutcomes(periodEvents, opponent),
+    // "Ubicada" con el mismo criterio que el resto del cubo: un sector que el
+    // sistema reconoce, no simplemente una cadena presente.
+    freeKickPlays: summarizeSetPieceRestarts(
+      periodEvents,
+      opponent,
+      (e) => classifyZone(e.originGrid) !== null,
+    ),
+  };
 
   return {
     zone12,

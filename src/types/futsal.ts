@@ -37,6 +37,16 @@ export enum ActionType {
   YELLOW_CARD = 'YELLOW_CARD',
   RED_CARD = 'RED_CARD',
   CORNER = 'CORNER',
+  /**
+   * Reanudación a favor ejecutada. En Fase 5 significa exactamente una cosa:
+   * una falta a favor jugada en corto (`setPieceOrigin: 'free_kick'`,
+   * `setPieceOutcome: 'play'`).
+   *
+   * No es una infracción —eso es FOUL—, no es un tiro —eso es SHOT con
+   * `setPiece`— y no es un córner, que tiene tipo propio. Ver
+   * utils/setPieceModel.
+   */
+  SET_PIECE = 'SET_PIECE',
   SUBSTITUTION = 'SUBSTITUTION',
   TIMEOUT = 'TIMEOUT',
   FORMATION_CHANGE = 'FORMATION_CHANGE',

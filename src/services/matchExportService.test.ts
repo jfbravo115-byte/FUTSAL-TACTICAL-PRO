@@ -132,3 +132,38 @@ describe("CSV de acciones · balón parado", () => {
     expect(parsed.events[3].metadata.setPiece).toBe("corner");
   });
 });
+
+describe("CSV · jugada de falta", () => {
+  const conJugada: MatchData = {
+    ...match,
+    events: [
+      {
+        id: "sp1", timestamp: 95000, wallClock: 6, period: Period.FIRST, playerIds: ["p1"],
+        type: ActionType.SET_PIECE, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z2L",
+        metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" },
+      },
+    ],
+  };
+
+  it("la identifica con su nombre humano y conserva la zona", () => {
+    const fila = buildActionsCsv(conJugada).split("\n")[1];
+    expect(fila).toContain('"Jugada de falta"');
+    expect(fila).toContain('"Z2L"');
+    expect(fila).toContain('"Zona 2 · izquierda"');
+  });
+
+  it("no la exporta como desenlace de balón parado ni como procedencia de tiro", () => {
+    const fila = buildActionsCsv(conJugada).split("\n")[1];
+    expect(fila).not.toContain('"free_kick"');
+    // Las columnas de córner y de procedencia del tiro quedan vacías.
+    expect(fila.split(",").slice(-3)).toEqual(['""', '""', '""']);
+  });
+
+  it("el respaldo JSON conserva el evento entero", () => {
+    const parsed = JSON.parse(buildMatchJson(conJugada));
+    expect(parsed.events[0].type).toBe("SET_PIECE");
+    expect(parsed.events[0].metadata.setPieceOrigin).toBe("free_kick");
+    expect(parsed.events[0].metadata.setPieceOutcome).toBe("play");
+    expect(parsed.events[0].originGrid).toBe("Z2L");
+  });
+});

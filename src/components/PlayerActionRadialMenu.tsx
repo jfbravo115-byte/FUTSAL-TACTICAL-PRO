@@ -1,10 +1,11 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Trophy, Target, AlertTriangle, Zap, RefreshCw, Handshake, RotateCcw, X
+  Trophy, Target, AlertTriangle, Zap, RefreshCw, Handshake, RotateCcw, X, PlayCircle
 } from 'lucide-react';
 import { ActionType, GoalieAction, Player, Role } from '../types/futsal';
 import { ExitOutcome, EXIT_OUTCOME_LABEL } from '../utils/goalkeeperActions';
+import { newSetPieceRestartMetadata } from '../utils/setPieceModel';
 
 /** Botón que abre el selector de subtipo de parada. No es un tipo de evento. */
 const SAVE_TYPE_PICKER = 'SAVE_TYPE_PICKER' as const;
@@ -59,11 +60,17 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     { type: ActionType.SHOT,        label: 'TIRO',   icon: <Target size={14} />,         color: 'bg-rose-500',   count: player.stats.shots },
     { type: ActionType.ASSIST,      label: 'ASIST',  icon: <Handshake size={14} />,      color: 'bg-yellow-500', count: player.stats.assists },
     { type: ActionType.FOUL,        label: 'FALTA',  icon: <AlertTriangle size={14} />,  color: 'bg-orange-500', count: player.stats.fouls },
+    { type: ActionType.SET_PIECE,   label: 'J.FALTA', icon: <PlayCircle size={14} />,    color: 'bg-emerald-600', count: undefined },
     { type: ActionType.STEAL,       label: 'RECUP.', icon: <Zap size={14} />,            color: 'bg-purple-600', count: player.stats.steals },
     { type: ActionType.LOSS,        label: 'PÉRD.',  icon: <RefreshCw size={14} />,      color: 'bg-red-500',    count: player.stats.losses },
     { type: 'SWAP',                 label: 'CAMBIO', icon: <RotateCcw size={14} />,      color: 'bg-amber-500',  count: undefined },
   ];
 
+  // El anillo del portero NO lleva "jugada de falta": ya tiene diez botones y
+  // Fase 4 fijó ese número tras corregir un solapamiento. Una jugada de falta
+  // ejecutada por el portero se registra desde el control de equipo, sin
+  // ejecutor. Ampliar este anillo sería cambiar su arquitectura, y eso no
+  // entra en esta fase.
   const goalkeeperActions = [
     // Taxonomía de Fase 4. SAVE_PARRY queda congelado y NO se emite nunca:
     // sus eventos históricos se capturaron bajo este mismo rótulo "PARADA",
@@ -123,6 +130,11 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
       setPendingActionType(actionType);
       setSelectionStep('shot');
       setSelectingZone(true);
+    } else if (actionType === ActionType.SET_PIECE) {
+      // Jugada de falta: el botón ya dice qué es, así que se registra de un
+      // toque. La ubicación la pide después MatchTracker y es omitible.
+      onAction(actionType, player.id, { metadata: newSetPieceRestartMetadata() });
+      onClose();
     } else if (actionType === ActionType.STEAL) {
       setSelectingSubtype('steal');
     } else if (actionType === ActionType.LOSS) {

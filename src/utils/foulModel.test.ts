@@ -196,3 +196,28 @@ describe("un tiro procedente de falta no altera la contabilidad de faltas", () =
     expect(isFoulEvent(tiroDeFalta)).toBe(false);
   });
 });
+
+// ── LA JUGADA DE FALTA NO TOCA LA CONTABILIDAD DE FALTAS ────────────────
+
+describe("una jugada de falta no es una falta", () => {
+  const jugada = foul({
+    id: "sp1",
+    type: ActionType.SET_PIECE,
+    playerIds: ["p1"],
+    metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" },
+  });
+
+  it("no la reconoce como falta", () => {
+    expect(isFoulEvent(jugada)).toBe(false);
+  });
+
+  it("no mueve el contador reglamentario, ni al registrar ni al borrar", () => {
+    expect(applyFoulToCounters({ team: 2, opponent: 1 }, jugada, 1)).toEqual({ team: 2, opponent: 1 });
+    expect(applyFoulToCounters({ team: 2, opponent: 1 }, jugada, -1)).toEqual({ team: 2, opponent: 1 });
+  });
+
+  it("no mueve la falta individual del ejecutor", () => {
+    expect(foulStatDelta(jugada, { id: "p1" }, 1)).toBe(0);
+    expect(foulStatDelta(jugada, { id: "p1" }, -1)).toBe(0);
+  });
+});

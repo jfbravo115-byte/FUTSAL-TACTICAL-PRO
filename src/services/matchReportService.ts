@@ -14,9 +14,11 @@ import {
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import {
   SetPieceOutcomeSummary,
+  SetPieceRestartSummary,
   countShotsFromSetPiece,
   describeSetPieceOutcomes,
   summarizeCornerOutcomes,
+  summarizeSetPieceRestarts,
 } from "../utils/setPieceModel";
 
 export type MatchReportPlayerLine = {
@@ -71,6 +73,11 @@ export type MatchReportRelevantEvent = {
  */
 export type MatchReportSetPieces = {
   corners: { team: SetPieceOutcomeSummary; opponent: SetPieceOutcomeSummary };
+  /**
+   * Faltas a favor puestas en juego. Se cuentan aparte a propósito: no son
+   * faltas cometidas —esas son del rival— ni tiros.
+   */
+  freeKickPlays: { team: SetPieceRestartSummary; opponent: SetPieceRestartSummary };
 };
 
 export type MatchReport = {
@@ -374,6 +381,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
         team: summarizeCornerOutcomes(matchData.events, false),
         opponent: summarizeCornerOutcomes(matchData.events, true),
       },
+      freeKickPlays: {
+        team: summarizeSetPieceRestarts(matchData.events, false),
+        opponent: summarizeSetPieceRestarts(matchData.events, true),
+      },
     },
     teamTotals,
     highlights: {
@@ -419,6 +430,16 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
     );
     lines.push(
       "«Subtipo no registrado» significa que no consta cómo se ejecutó el córner; no es una estimación.",
+    );
+  }
+  // Tercera lectura, separada de las otras dos: la falta a favor que se puso
+  // en juego en vez de rematarse. Ni es una infracción ni es un tiro.
+  if (r.setPieces.freeKickPlays.team.total > 0 || r.setPieces.freeKickPlays.opponent.total > 0) {
+    const jf = r.setPieces.freeKickPlays.team;
+    lines.push(
+      `Jugadas de falta — propias **${jf.total}** (${jf.located} con ubicación · ` +
+        `${jf.unlocated} sin ubicación) · del rival **${r.setPieces.freeKickPlays.opponent.total}**. ` +
+        `No son faltas cometidas ni tiros.`,
     );
   }
   if (r.teamTotals.shotsFromFreeKick > 0 || r.teamTotals.shotsFromCorner > 0) {

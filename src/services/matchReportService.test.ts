@@ -268,7 +268,9 @@ describe("balón parado en el informe", () => {
   it("las faltas NO se desglosan por ejecución: son infracciones", () => {
     const r = generateMatchReport(conBalonParado());
     expect((r.setPieces as any).fouls).toBeUndefined();
-    expect(Object.keys(r.setPieces)).toEqual(["corners"]);
+    // Ninguna clave del desglose habla de faltas: las que hay son el córner y
+    // la jugada de falta, que es una reanudación a favor, no una infracción.
+    expect(Object.keys(r.setPieces).filter((k) => /foul|falta/i.test(k))).toEqual([]);
   });
 
   it("el tiro de falta se cuenta en el TIRO, no en la falta cometida", () => {
@@ -325,5 +327,41 @@ describe("balón parado en el informe", () => {
     const r = generateMatchReport(md);
     expect(r.fouls.team).toBe(md.fouls.team);
     expect(r.teamTotals.fouls).toBe(md.fouls.team);
+  });
+});
+
+describe("jugadas de falta en el resumen determinista", () => {
+  const conJugadas = () =>
+    matchData({
+      players: [player()],
+      events: [
+        event({ type: ActionType.SET_PIECE, playerIds: ["p1"], originGrid: "Z2L", metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+        event({ type: ActionType.SET_PIECE, metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+        event({ type: ActionType.SET_PIECE, metadata: { isOpponent: true, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], metadata: { isOpponent: false } }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G1", metadata: { isOpponent: false, setPiece: "free_kick" } }),
+      ],
+    });
+
+  it("las separa de las faltas cometidas y de los tiros", () => {
+    const r = generateMatchReport(conJugadas());
+    expect(r.setPieces.freeKickPlays.team).toEqual({ total: 2, located: 1, unlocated: 1 });
+    expect(r.setPieces.freeKickPlays.opponent.total).toBe(1);
+    expect(r.teamTotals.fouls).toBe(conJugadas().fouls.team);
+    expect(r.teamTotals.shotsFromFreeKick).toBe(1);
+  });
+
+  it("Tactical Pro recibe las tres lecturas por separado", () => {
+    const md = formatMatchReportAsMarkdown(generateMatchReport(conJugadas()));
+    expect(md).toContain("**Faltas:**");
+    expect(md).toContain("Jugadas de falta");
+    expect(md).toContain("Tiros procedentes de balón parado");
+    expect(md).toContain("No son faltas cometidas ni tiros.");
+    expect(md).not.toMatch(/SET_PIECE|free_kick/);
+  });
+
+  it("una jugada de falta no cuenta como tiro", () => {
+    const r = generateMatchReport(conJugadas());
+    expect(r.teamTotals.shots).toBe(1);
   });
 });

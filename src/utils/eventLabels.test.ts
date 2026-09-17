@@ -91,3 +91,25 @@ describe("balón parado en el Historial", () => {
     expect(formatEventTypeLabel(event({ type: ActionType.CORNER, metadata: {} }))).toBe("🚩 Córner");
   });
 });
+
+describe("jugada de falta en el Historial", () => {
+  const jugada = (metadata: Record<string, any> = {}) =>
+    event({
+      type: ActionType.SET_PIECE,
+      metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play", ...metadata },
+    });
+
+  it("se lee como Jugada de falta", () => {
+    expect(formatEventTypeLabel(jugada())).toBe("▶️ Jugada de falta");
+  });
+
+  it("nunca muestra SET_PIECE ni free_kick", () => {
+    const label = formatEventTypeLabel(jugada());
+    expect(label).not.toMatch(/SET_PIECE|free_kick|play/);
+  });
+
+  it("no se confunde con la falta cometida", () => {
+    expect(formatEventTypeLabel(event({ type: ActionType.FOUL, metadata: {} }))).toBe("⚠️ Falta");
+    expect(formatEventTypeLabel(jugada())).not.toBe("⚠️ Falta");
+  });
+});

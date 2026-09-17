@@ -60,6 +60,14 @@ const corner = (side: "left" | "right", outcome?: "shot" | "play", opponent = fa
 const foul = (zone?: string, opponent = false) =>
   ev({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: zone, metadata: { isOpponent: opponent } });
 
+const jugadaDeFalta = (zone?: string, opponent = false) =>
+  ev({
+    type: ActionType.SET_PIECE,
+    playerIds: opponent ? [] : ["p1"],
+    originGrid: zone,
+    metadata: { isOpponent: opponent, setPieceOrigin: "free_kick", setPieceOutcome: "play" },
+  });
+
 const shot = (origin?: string, opponent = false) =>
   ev({
     type: ActionType.SHOT,
@@ -98,6 +106,9 @@ function partidoCompleto(overrides: Partial<MatchData> = {}): MatchData {
       shot("free_kick"),
       shot("corner"),
       shot(),
+      jugadaDeFalta("Z2L"),
+      jugadaDeFalta(),
+      jugadaDeFalta("Z3C", true),
     ],
     overrides,
   );
@@ -323,5 +334,39 @@ describe("la página llega al documento por el generador real", () => {
       partidoCompleto({ matchClock: 754000, isClockRunning: true }),
     );
     expect(parado).toBe(enJuego);
+  });
+});
+
+// ── JUGADAS DE FALTA EN LA PÁGINA 8 ─────────────────────────────────────
+
+describe("jugadas de falta en el informe", () => {
+  it("se cuentan aparte, con su ubicación declarada", () => {
+    const host = render(partidoCompleto());
+    // Equipo · Total · Con ubicación · Sin ubicación
+    expect(fila(host, "data-free-kick-play-row", "Equipo Local")).toEqual([
+      "Equipo Local", "2", "1", "1",
+    ]);
+    expect(fila(host, "data-free-kick-play-row", "Equipo Visitante")).toEqual([
+      "Equipo Visitante", "1", "1", "0",
+    ]);
+  });
+
+  it("no engordan las faltas cometidas ni los tiros", () => {
+    const host = render(partidoCompleto());
+    expect(fila(host, "data-foul-row", "Equipo Local")[1]).toBe("2");
+    expect(fila(host, "data-shot-origin-row", "Equipo Local")).toEqual(["Equipo Local", "1", "1"]);
+  });
+
+  it("llegan al documento por el generador real", async () => {
+    const texto = await exportarPagina(partidoCompleto());
+    expect(texto).toContain("Jugadas de falta");
+    expect(texto).not.toMatch(/SET_PIECE|free_kick/);
+  });
+
+  it("un partido sin jugadas de falta deja la tabla a cero, sin inventar", () => {
+    const host = render(match([corner("left", "shot"), foul("Z2C")]));
+    expect(fila(host, "data-free-kick-play-row", "Equipo Local")).toEqual([
+      "Equipo Local", "0", "0", "0",
+    ]);
   });
 });

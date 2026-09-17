@@ -27,9 +27,12 @@ import React from "react";
 import { ActionType, GameEvent, MatchData } from "../../types/futsal";
 import { CornerSummary, summarizeCorners } from "../../utils/cornerModel";
 import {
+  SET_PIECE_RESTART_LABEL_PLURAL,
   SetPieceOutcomeSummary,
+  SetPieceRestartSummary,
   countShotsFromSetPiece,
   summarizeCornerOutcomes,
+  summarizeSetPieceRestarts,
 } from "../../utils/setPieceModel";
 import { classifyZone } from "../../utils/legacyZoneMap";
 
@@ -37,6 +40,8 @@ export type SetPieceSummary = {
   corners: { side: CornerSummary; outcome: SetPieceOutcomeSummary };
   fouls: { total: number; located: number; unlocated: number };
   shotsFrom: { freeKick: number; corner: number };
+  /** Faltas a favor puestas en juego. Ni faltas cometidas ni tiros. */
+  freeKickPlays: SetPieceRestartSummary;
 };
 
 /** Resumen de balón parado de UN bando. Función pura, reutilizable en tests. */
@@ -59,6 +64,11 @@ export function buildSetPieceSummary(
       freeKick: countShotsFromSetPiece(events, "free_kick", opponent),
       corner: countShotsFromSetPiece(events, "corner", opponent),
     },
+    freeKickPlays: summarizeSetPieceRestarts(
+      events,
+      opponent,
+      (e) => classifyZone(e.originGrid) !== null,
+    ),
   };
 }
 
@@ -163,6 +173,33 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
         <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
           Una falta es la infracción cometida. Las recibidas son las que comete el rival. Quién
           ejecuta después la reanudación se cuenta abajo, en el propio tiro.
+        </p>
+      </Section>
+
+      <Section title={SET_PIECE_RESTART_LABEL_PLURAL}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+              <th style={{ ...head, textAlign: "left" }}>Equipo</th>
+              <th style={head}>Total</th>
+              <th style={head}>Con ubicación</th>
+              <th style={head}>Sin ubicación</th>
+            </tr>
+          </thead>
+          <tbody>
+            {columnas.map(({ label, data }) => (
+              <tr key={label} data-free-kick-play-row={label} style={{ borderBottom: "0.5px solid #f1f5f9" }}>
+                <td style={rowLabel}>{label}</td>
+                <td style={{ ...cell, fontWeight: 700 }}>{data.freeKickPlays.total}</td>
+                <td style={cell}>{data.freeKickPlays.located}</td>
+                <td style={cell}>{data.freeKickPlays.unlocated}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
+          Una falta a favor puesta en juego en vez de rematada. No suma a las faltas cometidas
+          —esas son del rival— ni a los tiros.
         </p>
       </Section>
 

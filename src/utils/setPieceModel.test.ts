@@ -232,3 +232,96 @@ describe("tiros procedentes de balón parado", () => {
     expect(countShotsFromSetPiece(eventos, "free_kick", true)).toBe(1);
   });
 });
+
+// ── REANUDACIÓN EJECUTADA: LA JUGADA DE FALTA ───────────────────────────
+//
+// Un SET_PIECE dice que el equipo puso en juego una falta a favor. No es la
+// infracción —esa es del rival— ni un tiro. En Fase 5 solo admite un caso.
+
+import {
+  SET_PIECE_RESTART_LABEL,
+  isSetPieceRestart,
+  newSetPieceRestartMetadata,
+  summarizeSetPieceRestarts,
+} from "./setPieceModel";
+
+const jugadaDeFalta = (overrides: Partial<GameEvent> = {}, opponent = false): GameEvent =>
+  event({
+    type: ActionType.SET_PIECE,
+    playerIds: [],
+    metadata: { isOpponent: opponent, ...newSetPieceRestartMetadata() },
+    ...overrides,
+  });
+
+describe("jugada de falta", () => {
+  it("solo admite falta a favor puesta en juego", () => {
+    expect(newSetPieceRestartMetadata()).toEqual({
+      setPieceOrigin: "free_kick",
+      setPieceOutcome: "play",
+    });
+    expect(isSetPieceRestart(jugadaDeFalta())).toBe(true);
+  });
+
+  it("NUNCA admite córner: el córner tiene su propio tipo", () => {
+    const conCorner = jugadaDeFalta({
+      metadata: { isOpponent: false, setPieceOrigin: "corner", setPieceOutcome: "play" },
+    });
+    expect(isSetPieceRestart(conCorner)).toBe(false);
+    expect(summarizeSetPieceRestarts([conCorner]).total).toBe(0);
+  });
+
+  it("NUNCA admite tiro: el tiro se registra como tiro", () => {
+    const conTiro = jugadaDeFalta({
+      metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "shot" },
+    });
+    expect(isSetPieceRestart(conTiro)).toBe(false);
+    expect(summarizeSetPieceRestarts([conTiro]).total).toBe(0);
+  });
+
+  it("un SET_PIECE sin declaración no se cuenta, en vez de suponerla", () => {
+    expect(isSetPieceRestart(event({ type: ActionType.SET_PIECE, metadata: {} }))).toBe(false);
+  });
+
+  it("ningún otro tipo pasa por reanudación", () => {
+    for (const t of [ActionType.CORNER, ActionType.FOUL, ActionType.SHOT]) {
+      expect(isSetPieceRestart(jugadaDeFalta({ type: t }))).toBe(false);
+    }
+  });
+
+  it("con ejecutor y sin ejecutor: las dos son válidas", () => {
+    expect(isSetPieceRestart(jugadaDeFalta({ playerIds: ["p7"] }))).toBe(true);
+    expect(isSetPieceRestart(jugadaDeFalta({ playerIds: [] }))).toBe(true);
+  });
+
+  it("declara cuántas tienen ubicación, sin repartir las que no", () => {
+    const eventos = [
+      jugadaDeFalta({ originGrid: "Z2C" as any }),
+      jugadaDeFalta({ originGrid: "Z3L" as any }),
+      jugadaDeFalta(),
+      jugadaDeFalta({}, true),
+    ];
+    expect(summarizeSetPieceRestarts(eventos, false)).toEqual({ total: 3, located: 2, unlocated: 1 });
+    expect(summarizeSetPieceRestarts(eventos, true)).toEqual({ total: 1, located: 0, unlocated: 1 });
+  });
+
+  it("nunca se nombra con su código interno", () => {
+    expect(SET_PIECE_RESTART_LABEL).toBe("Jugada de falta");
+    expect(SET_PIECE_RESTART_LABEL).not.toMatch(/SET_PIECE|free_kick|play/);
+  });
+
+  it("no cuenta como tiro procedente de balón parado", () => {
+    const eventos = [
+      jugadaDeFalta(),
+      event({ type: ActionType.SHOT, metadata: { isOpponent: false, setPiece: "free_kick" } }),
+    ];
+    // Una jugada de falta y un tiro de falta: nunca dos tiros.
+    expect(countShotsFromSetPiece(eventos, "free_kick", false)).toBe(1);
+    expect(summarizeSetPieceRestarts(eventos, false).total).toBe(1);
+  });
+
+  it("no se mezcla con el desglose del córner", () => {
+    const eventos = [jugadaDeFalta(), corner("shot")];
+    expect(summarizeCornerOutcomes(eventos, false).total).toBe(1);
+    expect(summarizeSetPieceRestarts(eventos, false).total).toBe(1);
+  });
+});

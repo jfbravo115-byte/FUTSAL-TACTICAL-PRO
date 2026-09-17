@@ -44,6 +44,7 @@ import {
   Pencil,
   Loader2,
   Flag,
+  PlayCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toJpeg } from "html-to-image";
@@ -101,6 +102,8 @@ import {
 } from "../utils/foulModel";
 import {
   SET_PIECE_ORIGINS,
+  SET_PIECE_RESTART_LABEL,
+  newSetPieceRestartMetadata,
   SET_PIECE_ORIGIN_LABEL,
   SET_PIECE_OUTCOMES,
   SET_PIECE_OUTCOME_DESCRIPTION,
@@ -1380,6 +1383,9 @@ export default function MatchTracker() {
   /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
   // El córner se captura en dos pasos: esquina y, después, cómo se ejecutó.
   // El segundo es omitible y su ausencia es un dato válido.
+  // Ubicación OPCIONAL de una jugada de falta ya registrada. Mismo patrón que
+  // la falta: el evento existe antes de este paso y omitirlo no lo deshace.
+  const [pendingRestartLocation, setPendingRestartLocation] = useState<{ eventId: string } | null>(null);
   const [pendingCorner, setPendingCorner] = useState<{
     isOpponent: boolean;
     side?: CornerSide;
@@ -2349,6 +2355,40 @@ export default function MatchTracker() {
     if (eventAcceptsGoalkeeperZone(newEvent) && !metadata?.goalkeeperZone) {
       setPendingInterventionLocation({ eventId: newEvent.id });
     }
+    // Lo mismo para la jugada de falta: la reanudación ya está registrada y la
+    // zona llega después, omitible.
+    if (newEvent.type === ActionType.SET_PIECE && !metadata?.originGrid) {
+      setPendingRestartLocation({ eventId: newEvent.id });
+    }
+  };
+
+  /**
+   * Jugada de falta: una falta a FAVOR que el equipo pone en juego en corto.
+   *
+   * No es la infracción —esa es del rival y se registra con FALTA— ni un tiro
+   * —ese se registra como tiro y declara su procedencia—. No crea ninguno de
+   * los dos ni se enlaza con ellos: el botón ya dice qué ocurrió, así que no
+   * hay pasos intermedios y la captura es de un solo toque.
+   *
+   * `playerId` es el ejecutor cuando se registra desde un jugador; desde el
+   * control de equipo se queda sin ejecutor, que es un dato válido.
+   */
+  const handleFreeKickPlay = (isOpponent: boolean, playerId?: string) => {
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+    handleAction(ActionType.SET_PIECE, playerId, {
+      metadata: { isOpponent, ...newSetPieceRestartMetadata() },
+    });
+  };
+
+  /** Añade la ubicación a una jugada de falta ya registrada. */
+  const assignRestartLocation = (zoneId: string) => {
+    const pending = pendingRestartLocation;
+    setPendingRestartLocation(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: withEventLocation(prev.events, pending.eventId, zoneId),
+    }));
   };
 
   const handleDeleteEvent = (event: GameEvent) => {
@@ -5962,6 +6002,14 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => handleFreeKickPlay(pitchView === 'opponent')}
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-600/30 text-slate-200 hover:text-emerald-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                >
+                  <PlayCircle size={16} />
+                  <span className="text-[7px] uppercase">J. Falta</span>
+                </button>
+
+                <button
                   onClick={() => setPendingCorner({ isOpponent: pitchView === 'opponent' })}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-violet-600/30 text-slate-200 hover:text-violet-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
@@ -6356,6 +6404,28 @@ export default function MatchTracker() {
               <PitchZones onSelect={assignFoulLocation} />
               <button
                 onClick={() => setPendingFoulLocation(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Omitir ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── JUGADA DE FALTA: ubicación OPCIONAL. La reanudación ya está
+            registrada; omitirla no la deshace. ─────────────────────────── */}
+        {pendingRestartLocation && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">{SET_PIECE_RESTART_LABEL}</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ¿Desde dónde se pone en juego? Es opcional: puedes omitirlo y la jugada se mantiene.
+                </p>
+              </div>
+              <PitchZones onSelect={assignRestartLocation} />
+              <button
+                onClick={() => setPendingRestartLocation(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
               >
                 Omitir ubicación

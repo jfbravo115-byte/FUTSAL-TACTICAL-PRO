@@ -8,6 +8,10 @@ interface TacticalReportModalProps {
   onClose: () => void;
   report: string | null;
   isLoading: boolean;
+  /** Ya hay texto de la IA y sigue llegando: "Escribiendo…" en vez de "Analizando…". */
+  isStreaming?: boolean;
+  /** El informe se cortó a mitad. Se enseña, pero nunca como terminado. */
+  isPartial?: boolean;
   errorMessage?: string | null;
   onRetry?: () => void;
 }
@@ -17,6 +21,8 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
   onClose,
   report,
   isLoading,
+  isStreaming = false,
+  isPartial = false,
   errorMessage,
   onRetry,
 }) => {
@@ -70,11 +76,28 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
               {isLoading && (
                 <div className="mb-4 flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-4 py-3">
                   <Loader2 className="animate-spin text-blue-400" size={18} />
-                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">TACTICAL PRO está interpretando el informe…</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">
+                    {isStreaming ? "Escribiendo…" : "Analizando…"}
+                  </p>
+                </div>
+              )}
+              {/* Un informe a medias no puede parecerse a uno terminado: lleva
+                  etiqueta propia y se atenúa. Tampoco se guarda (ver MatchTracker). */}
+              {isPartial && !isLoading && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                  <AlertCircle className="text-amber-400" size={14} />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-300">
+                    Informe incompleto · no se ha guardado
+                  </span>
                 </div>
               )}
               {report ? (
-                <div className="prose prose-invert prose-sm max-w-none prose-headings:text-blue-400 prose-headings:uppercase prose-headings:italic prose-headings:font-black prose-strong:text-blue-300">
+                <div
+                  data-tactical-partial={isPartial && !isLoading ? "true" : undefined}
+                  className={`prose prose-invert prose-sm max-w-none prose-headings:text-blue-400 prose-headings:uppercase prose-headings:italic prose-headings:font-black prose-strong:text-blue-300${
+                    isPartial && !isLoading ? " opacity-60" : ""
+                  }`}
+                >
                   <Markdown>{report}</Markdown>
                 </div>
               ) : (
@@ -87,8 +110,9 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
 
             <div className="p-4 border-t border-white/5 bg-white/5 flex gap-3">
               <button
+                disabled={!report || isLoading || isPartial}
                 onClick={() => {
-                   if (!report) return;
+                   if (!report || isLoading || isPartial) return;
                    const blob = new Blob([report], { type: 'text/markdown' });
                    const url = URL.createObjectURL(blob);
                    const a = document.createElement('a');
@@ -96,7 +120,7 @@ export const TacticalReportModal: React.FC<TacticalReportModalProps> = ({
                    a.download = `Informe_Tactico_${Date.now()}.md`;
                    a.click();
                 }}
-                className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95"
+                className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95"
               >
                 <Download size={14} /> Guardar Informe
               </button>

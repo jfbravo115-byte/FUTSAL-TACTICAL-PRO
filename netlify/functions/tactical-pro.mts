@@ -66,6 +66,101 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+/** Tipo de contenido del protocolo incremental. */
+export const NDJSON_CONTENT_TYPE = "application/x-ndjson";
+
+/**
+ * Una línea del protocolo incremental.
+ *
+ *   {"t":"fragmento"}   texto que se añade al final del informe
+ *   {"done":true}       la generación terminó ENTERA y bien
+ *   {"error":"…"}       se rompió; puede haber `t` anteriores, nunca habrá `done`
+ *
+ * Por qué no texto plano: un error de Anthropic puede llegar DESPUÉS de que la
+ * respuesta HTTP haya salido con un 200 —`overloaded_error` a mitad de stream
+ * está documentado—, y entonces el socket se cierra igual que si todo hubiera
+ * ido bien. Sin un `done` explícito, el cliente no puede distinguir un informe
+ * completo de uno truncado, y guardaría medio análisis dentro del partido.
+ *
+ * Por qué no SSE: haría lo mismo con `event:`/`data:` y dobles saltos de línea.
+ * Su única ventaja real es `EventSource`, que no admite POST.
+ */
+export type TacticalProChunk =
+  | { t: string }
+  | { done: true }
+  | { error: string };
+
+/** Serializa una línea del protocolo. El `\n` es el separador, no adorno. */
+export function ndjsonLine(chunk: TacticalProChunk): string {
+  return JSON.stringify(chunk) + "\n";
+}
+
+/**
+ * ¿El cliente pide el protocolo incremental?
+ *
+ * Se mira la cabecera `Accept` y nada más. Un cliente que no la mande —como
+ * TacticalBoard, que hace `await res.json()`— sigue por la rama de siempre.
+ */
+export function wantsNdjson(req: { headers: { get(name: string): string | null } }): boolean {
+  return (req.headers.get("accept") || "").toLowerCase().includes(NDJSON_CONTENT_TYPE);
+}
+
+/** Mensaje legible de un fallo del SDK, con el mismo criterio que la rama JSON. */
+function errorMessageOf(error: any): string {
+  return (
+    error?.error?.error?.message ||
+    error?.message ||
+    "Unknown error occurred"
+  );
+}
+
+/**
+ * Convierte el stream del SDK en líneas NDJSON.
+ *
+ * Solo emite texto: de todos los eventos que manda Anthropic —`message_start`,
+ * `content_block_start`, `ping`, `thinking_delta`, `signature_delta`,
+ * `message_delta`, `message_stop`— únicamente `content_block_delta` con
+ * `delta.type === "text_delta"` lleva Markdown del informe. El resto se ignora
+ * en silencio: no son texto y colarlos rompería el documento.
+ */
+export function ndjsonStreamFrom(stream: {
+  [Symbol.asyncIterator](): AsyncIterator<any>;
+  abort: () => void;
+}): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const push = (chunk: TacticalProChunk) =>
+        controller.enqueue(encoder.encode(ndjsonLine(chunk)));
+      try {
+        for await (const event of stream) {
+          if (
+            event?.type === "content_block_delta" &&
+            event?.delta?.type === "text_delta" &&
+            typeof event.delta.text === "string" &&
+            event.delta.text.length > 0
+          ) {
+            push({ t: event.delta.text });
+          }
+        }
+        // Única señal de que el informe está entero. Va después del bucle a
+        // propósito: si el bucle lanza, no se llega aquí.
+        push({ done: true });
+      } catch (error: any) {
+        console.error("tactical-pro stream error:", error);
+        push({ error: errorMessageOf(error) });
+      } finally {
+        controller.close();
+      }
+    },
+    cancel() {
+      // El usuario cerró el modal o abortó. Sin esto la generación seguiría
+      // hasta el final contra la cuenta de Anthropic sin que nadie la lea.
+      stream.abort();
+    },
+  });
+}
+
 export default async (req: Request, _context: Context) => {
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" });
@@ -113,19 +208,43 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  try {
-    const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-5",
-      max_tokens: 4096,
-      system: SYSTEM_INSTRUCTION,
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(matchDataStr, deterministicReportStr, tacticalContextStr),
-        },
-      ],
+  // UNA sola definición de qué se le pide al modelo. Las dos ramas la comparten
+  // entera —modelo, system, prompt, límite— y difieren únicamente en cómo se
+  // consume la respuesta. Si esto se duplicara, volveríamos a tener dos
+  // generadores divergentes, que es el problema que arrastramos desde Fase 4.
+  const requestParams = {
+    model: "claude-sonnet-5",
+    max_tokens: 4096,
+    system: SYSTEM_INSTRUCTION,
+    messages: [
+      {
+        role: "user" as const,
+        content: buildPrompt(matchDataStr, deterministicReportStr, tacticalContextStr),
+      },
+    ],
+  };
+
+  const anthropic = new Anthropic({ apiKey });
+
+  // Negociación de contenido: quien no pida NDJSON recibe exactamente la misma
+  // respuesta que antes de este cambio. TacticalBoard depende de ello y no se
+  // toca; la compatibilidad es por construcción, no un parche.
+  if (wantsNdjson(req)) {
+    const stream = anthropic.messages.stream(requestParams);
+    return new Response(ndjsonStreamFrom(stream as any), {
+      status: 200,
+      headers: {
+        "Content-Type": NDJSON_CONTENT_TYPE,
+        // Sin esto algún intermediario podría acumular la respuesta y anular
+        // la razón de ser del streaming.
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+      },
     });
+  }
+
+  try {
+    const response = await anthropic.messages.create(requestParams);
 
     const analysis = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")

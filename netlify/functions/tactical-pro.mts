@@ -96,12 +96,15 @@ export default async (req: Request, _context: Context) => {
   let deterministicReportStr: string;
   let tacticalContextStr: string;
   try {
-    matchDataStr = JSON.stringify(matchData, null, 2);
+    // JSON compacto, no indentado. La sangría de `null, 2` era el 41% del
+    // prompt —16.000 tokens de espacios en un partido normal— sin aportar un
+    // solo dato: el modelo lee igual de bien el JSON en una línea.
+    matchDataStr = JSON.stringify(matchData);
     deterministicReportStr = deterministicReport
-      ? JSON.stringify(deterministicReport, null, 2)
+      ? JSON.stringify(deterministicReport)
       : "No se recibió resumen determinista; trabaja solo con los datos crudos y explicita cualquier limitación.";
     tacticalContextStr = tacticalContext
-      ? JSON.stringify(tacticalContext, null, 2)
+      ? JSON.stringify(tacticalContext)
       : "No se recibió contexto táctico; no dispones de datos de portería ni espaciales ya calculados, y debes decirlo en vez de deducirlos de los eventos.";
     if (!matchDataStr) throw new Error("matchData se serializó como vacío");
   } catch (e: any) {

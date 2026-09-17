@@ -22,7 +22,13 @@ import {
 import { generateMatchReport } from "./matchReportService";
 import { buildGoalkeeperReports } from "./goalkeeperReportService";
 import { buildZoneDashboard } from "./matchZonesService";
-import { TACTICAL_PRO_GLOSSARY, buildTacticalProPayload } from "./tacticalProPayload";
+import {
+  TACTICAL_PRO_GLOSSARY,
+  buildTacticalProPayload,
+  projectGoalkeepersForAI,
+  projectMatchDataForAI,
+  projectReportForAI,
+} from "./tacticalProPayload";
 
 function player(overrides: Partial<Player> = {}): Player {
   return {
@@ -130,19 +136,30 @@ describe("payload compartido", () => {
   });
 
   it("no recalcula: cada bloque es exactamente el de su helper autoritativo", () => {
+    // El payload solo PROYECTA: quita campos, nunca recompone un número. Por
+    // eso se compara contra el helper pasado por la misma proyección, no
+    // contra una copia escrita a mano de lo que debería salir.
     const md = partido();
     const payload = buildTacticalProPayload(md);
     const { generatedAt: _a, ...informe } = payload.deterministicReport as any;
-    const { generatedAt: _b, ...esperado } = generateMatchReport(md) as any;
+    const { generatedAt: _b, ...esperado } = projectReportForAI(generateMatchReport(md)) as any;
     expect(informe).toEqual(esperado);
-    expect(payload.tacticalContext.goalkeepers).toEqual(buildGoalkeeperReports(md));
+    expect(payload.tacticalContext.goalkeepers).toEqual(
+      projectGoalkeepersForAI(buildGoalkeeperReports(md)),
+    );
     expect(payload.tacticalContext.zones.team).toEqual(buildZoneDashboard(md, false));
     expect(payload.tacticalContext.zones.opponent).toEqual(buildZoneDashboard(md, true));
   });
 
-  it("conserva matchData como contexto", () => {
+  it("conserva matchData como contexto, sin lo que no es texto analizable", () => {
     const md = partido();
-    expect(buildTacticalProPayload(md).matchData).toBe(md);
+    const enviado = buildTacticalProPayload(md).matchData as any;
+    // Ya no es el mismo objeto: es una copia podada. Todo lo demás se mantiene.
+    expect(enviado).not.toBe(md);
+    expect(enviado.events).toBe(md.events);
+    expect(enviado.players).toBe(md.players);
+    expect(enviado.teamName).toBe(md.teamName);
+    expect(enviado.fouls).toEqual(md.fouls);
   });
 
   it("viaja entero a través de JSON, que es como se envía", () => {
@@ -255,5 +272,268 @@ describe("glosario", () => {
   it("fija que ausencia no es cero", () => {
     expect(texto()).toContain("no se registró");
     expect(texto()).toContain("ceros observados");
+  });
+});
+
+// ── SANEADO DEL PAYLOAD ────────────────────────────────────────────────
+//
+// Un partido como los que provocaron el timeout: con logos subidos desde el
+// móvil, con el informe de IA de un intento anterior ya guardado dentro del
+// propio partido, y con eventos suficientes para que los porteros arrastren
+// su copia de GameEvent.
+
+const LOGO = "data:image/png;base64," + "R0lGODlhAQAB".repeat(4000); // ~48 KB
+const INFORME_PREVIO =
+  "## 1. Lectura objetiva del partido\nRespuesta de la petición anterior. ".repeat(120);
+
+function partidoGrande(): MatchData {
+  const base = partido();
+  const extra: GameEvent[] = [];
+  for (let i = 0; i < 120; i++) {
+    extra.push(
+      ev({
+        type: ActionType.SHOT,
+        playerIds: ["r2", "tp1"],
+        originGrid: "Z4C",
+        destinationGrid: "G5",
+        goalkeeperZone: (["GK1", "GK2", "GK3", "GK4", "GK5"] as const)[i % 5] as any,
+        timestamp: i * 9000,
+        metadata: {
+          isOpponent: true,
+          goalieResponse: i % 2 ? GoalieAction.SAVE_CATCH : GoalieAction.SAVE_DEFLECT,
+          targetGoalkeeperId: "tp1",
+        },
+      }),
+    );
+  }
+  return {
+    ...base,
+    teamLogo: LOGO,
+    opponentLogo: LOGO,
+    tacticalAnalysis: INFORME_PREVIO,
+    events: [...base.events, ...extra],
+  };
+}
+
+describe("objetivo 1 · los logos no viajan a la IA", () => {
+  it("el MatchData original conserva sus logos intactos", () => {
+    const md = partidoGrande();
+    buildTacticalProPayload(md);
+    expect(md.teamLogo).toBe(LOGO);
+    expect(md.opponentLogo).toBe(LOGO);
+  });
+
+  it("el payload no lleva los campos de logo", () => {
+    const enviado = buildTacticalProPayload(partidoGrande()).matchData as any;
+    expect("teamLogo" in enviado).toBe(false);
+    expect("opponentLogo" in enviado).toBe(false);
+  });
+
+  it("el payload serializado no contiene ninguna imagen en base64", () => {
+    const json = JSON.stringify(buildTacticalProPayload(partidoGrande()));
+    expect(json).not.toContain("data:image");
+    expect(json).not.toContain("base64");
+  });
+});
+
+describe("objetivo 2 · el análisis anterior no se realimenta", () => {
+  it("REINTENTAR no reenvía la respuesta IA previa", () => {
+    const md = partidoGrande();
+    const json = JSON.stringify(buildTacticalProPayload(md));
+    expect(json).not.toContain(INFORME_PREVIO);
+    expect(json).not.toContain("Respuesta de la petición anterior");
+    // Y el partido la sigue teniendo: se guarda y se muestra como siempre.
+    expect(md.tacticalAnalysis).toBe(INFORME_PREVIO);
+  });
+
+  it("el campo ni siquiera está presente en el objeto enviado", () => {
+    const enviado = buildTacticalProPayload(partidoGrande()).matchData as any;
+    expect("tacticalAnalysis" in enviado).toBe(false);
+  });
+});
+
+describe("objetivo 3 · porteros sin eventos duplicados", () => {
+  const porteroIA = () =>
+    buildTacticalProPayload(partidoGrande()).tacticalContext.goalkeepers.find(
+      (g) => g.id === "tp1",
+    )! as any;
+
+  it("no lleva los GameEvent ni la timeline", () => {
+    const g = porteroIA();
+    expect("events" in g).toBe(false);
+    expect("timeline" in g).toBe(false);
+  });
+
+  it("la proyección es el helper autoritativo menos esos dos campos, nada más", () => {
+    const md = partidoGrande();
+    const autoritativo = buildGoalkeeperReports(md);
+    const proyectado = buildTacticalProPayload(md).tacticalContext.goalkeepers;
+    expect(proyectado).toEqual(
+      autoritativo.map(({ events, timeline, ...resto }) => resto),
+    );
+    // Y el helper sigue devolviéndolos: la pantalla los necesita para el mapa.
+    expect(autoritativo[0].events).toBeDefined();
+  });
+
+  it("conserva todos los agregados de Fase 4", () => {
+    const g = porteroIA();
+    for (const campo of [
+      "name", "number", "totalSaves", "saveCatch", "saveDeflect", "saveGeneric",
+      "saveUnspecified", "conceded", "shotsFaced", "shotsAgainst", "shotsUndeclared",
+      "exits", "exitsSuccess", "exitsFail", "exitsUnknown",
+      "interventionZones", "interventionZonesByAction", "interventionsUnlocated",
+      "exitZones", "effectivenessPct",
+    ]) {
+      expect(g[campo]).toBeDefined();
+    }
+    // Subtipos y ubicación siguen cuadrando con los eventos del fixture.
+    expect(g.saveCatch + g.saveDeflect).toBeGreaterThan(0);
+    expect(Object.values(g.interventionZones as Record<string, number>).reduce(
+      (a, b) => a + b, 0,
+    )).toBeGreaterThan(0);
+    // La ausencia se declara, no se rellena.
+    expect(g.interventionsUnlocated).toBe(0);
+  });
+});
+
+describe("objetivo 4 · una sola verdad sobre el portero", () => {
+  it("el resumen enviado no lleva el bloque de portería legacy", () => {
+    const payload = buildTacticalProPayload(partidoGrande());
+    expect("goalkeeper" in (payload.deterministicReport as any)).toBe(false);
+    // El informe determinista original sigue teniéndolo: PDFs y UI intactos.
+    expect(generateMatchReport(partidoGrande()).goalkeeper).not.toBeNull();
+  });
+
+  it("con player.stats.saves = 77 y Fase 4 real, gana Fase 4", () => {
+    const md = partidoGrande();
+    // El fixture pone 77 a propósito en todos los jugadores.
+    expect(md.players.find((p) => p.id === "tp1")!.stats.saves).toBe(77);
+
+    const payload = buildTacticalProPayload(md);
+    const gk = payload.tacticalContext.goalkeepers.find((g) => g.id === "tp1")!;
+
+    // El valor real de Fase 4, contado desde los eventos, sí está.
+    expect(gk.totalSaves).toBe(121);
+    expect(gk.totalSaves).not.toBe(77);
+    expect(gk.conceded).toBe(0);
+
+    // Y 77 ya no aparece en NINGÚN bloque factual: ni en el resumen
+    // determinista ni en el contexto táctico.
+    expect(JSON.stringify(payload.deterministicReport)).not.toContain("77");
+    expect(JSON.stringify(payload.tacticalContext)).not.toContain(":77");
+  });
+
+  it("el glosario declara cuál es la única fuente de portería", () => {
+    const texto = TACTICAL_PRO_GLOSSARY.join("\n");
+    expect(texto).toContain("tacticalContext.goalkeepers");
+    expect(texto).toMatch(/ÚNICA fuente de datos de portero/);
+    expect(texto).toMatch(/resumen determinista no trae datos de portero/);
+  });
+});
+
+describe("objetivo 6 · las tres cifras de faltas, declaradas", () => {
+  const texto = () => TACTICAL_PRO_GLOSSARY.join("\n");
+
+  it("nombra el contador reglamentario y dice que se reinicia", () => {
+    expect(texto()).toContain("matchData.fouls");
+    expect(texto()).toContain("deterministicReport.teamTotals.fouls");
+    expect(texto()).toContain("PERIODO ACTUAL");
+    expect(texto()).toMatch(/reinician en el descanso/);
+  });
+
+  it("prohíbe leerlo como total del partido", () => {
+    expect(texto()).toMatch(/NO son el total del partido/);
+  });
+
+  it("dice dónde está el total del partido", () => {
+    expect(texto()).toContain("periodStats[].fouls");
+    expect(texto()).toMatch(/eventos FOUL registrados/);
+  });
+
+  it("explica el 0 con faltas registradas sin llamarlo contradicción", () => {
+    expect(texto()).toMatch(/valga 0 mientras hay eventos FOUL no es una contradicción/);
+  });
+
+  it("no introduce un cuarto cálculo de faltas", () => {
+    // El glosario es texto. Ningún campo nuevo de faltas en el payload.
+    const payload = buildTacticalProPayload(partidoGrande()) as any;
+    expect(payload.deterministicReport.foulsMatch).toBeUndefined();
+    expect(payload.tacticalContext.fouls).toBeUndefined();
+    expect(payload.deterministicReport.fouls).toEqual(partidoGrande().fouls);
+  });
+});
+
+describe("objetivo 7 · el payload adelgaza sin perder hechos", () => {
+  /** El payload tal y como era antes de podar, con los mismos helpers. */
+  function payloadSinPodar(md: MatchData) {
+    return {
+      matchData: md,
+      deterministicReport: generateMatchReport(md),
+      tacticalContext: {
+        goalkeepers: buildGoalkeeperReports(md),
+        zones: { team: buildZoneDashboard(md, false), opponent: buildZoneDashboard(md, true) },
+        glossary: TACTICAL_PRO_GLOSSARY,
+      },
+    };
+  }
+
+  it("se reduce de forma sustancial en un partido realista", () => {
+    const md = partidoGrande();
+    const antes = JSON.stringify(payloadSinPodar(md)).length;
+    const despues = JSON.stringify(buildTacticalProPayload(md)).length;
+    // Umbral deliberadamente holgado: lo que se fija es el orden de magnitud,
+    // no un recuento de bytes que se rompa al tocar una etiqueta.
+    expect(despues).toBeLessThan(antes * 0.4);
+    expect(antes).toBeGreaterThan(100_000);
+  });
+
+  it("lo que se va es ruido y duplicado, no hechos", () => {
+    const md = partidoGrande();
+    const antes: any = payloadSinPodar(md);
+    const despues: any = buildTacticalProPayload(md);
+
+    const claves = (o: any) => Object.keys(o).sort();
+    // Del partido solo desaparecen los tres campos declarados.
+    expect(claves(antes.matchData).filter((k) => !claves(despues.matchData).includes(k)))
+      .toEqual(["opponentLogo", "tacticalAnalysis", "teamLogo"]);
+    // Del resumen, solo la portería legacy.
+    expect(claves(antes.deterministicReport).filter(
+      (k) => !claves(despues.deterministicReport).includes(k),
+    )).toEqual(["goalkeeper"]);
+    // De cada portero, solo los dos campos pesados.
+    expect(claves(antes.tacticalContext.goalkeepers[0]).filter(
+      (k) => !claves(despues.tacticalContext.goalkeepers[0]).includes(k),
+    )).toEqual(["events", "timeline"]);
+    // Las zonas no se tocan en absoluto.
+    expect(despues.tacticalContext.zones).toEqual(antes.tacticalContext.zones);
+  });
+
+  it("los agregados sobreviven idénticos a la poda", () => {
+    const md = partidoGrande();
+    const antes: any = payloadSinPodar(md);
+    const despues: any = buildTacticalProPayload(md);
+    expect(despues.deterministicReport.teamTotals).toEqual(antes.deterministicReport.teamTotals);
+    expect(despues.deterministicReport.setPieces).toEqual(antes.deterministicReport.setPieces);
+    expect(despues.deterministicReport.periodStats).toEqual(antes.deterministicReport.periodStats);
+    expect(despues.deterministicReport.playersUsed).toEqual(antes.deterministicReport.playersUsed);
+    const gkAntes = antes.tacticalContext.goalkeepers.find((g: any) => g.id === "tp1");
+    const gkDespues = despues.tacticalContext.goalkeepers.find((g: any) => g.id === "tp1");
+    expect(gkDespues.totalSaves).toBe(gkAntes.totalSaves);
+    expect(gkDespues.interventionZones).toEqual(gkAntes.interventionZones);
+    expect(gkDespues.interventionZonesByAction).toEqual(gkAntes.interventionZonesByAction);
+  });
+
+  it("las proyecciones no mutan lo que reciben", () => {
+    const md = partidoGrande();
+    const informe = generateMatchReport(md);
+    const porteros = buildGoalkeeperReports(md);
+    projectMatchDataForAI(md);
+    projectReportForAI(informe);
+    projectGoalkeepersForAI(porteros);
+    expect(md.teamLogo).toBe(LOGO);
+    expect(md.tacticalAnalysis).toBe(INFORME_PREVIO);
+    expect(informe.goalkeeper).not.toBeNull();
+    expect(porteros[0].events).toBeDefined();
+    expect(porteros[0].timeline).toBeDefined();
   });
 });

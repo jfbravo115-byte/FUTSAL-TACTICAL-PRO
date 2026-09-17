@@ -43,3 +43,127 @@ describe("Exportación simple", () => {
     expect(html).toContain("Conversión");
   });
 });
+
+// ── BALÓN PARADO EN EL CSV Y EN EL RESPALDO ─────────────────────────────
+
+const setPieceMatch: MatchData = {
+  ...match,
+  events: [
+    {
+      id: "c1", timestamp: 60000, wallClock: 2, period: Period.FIRST, playerIds: [],
+      type: ActionType.CORNER, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z4L",
+      metadata: { isOpponent: false, cornerSide: "left", setPieceOutcome: "shot" },
+    },
+    {
+      id: "c2", timestamp: 70000, wallClock: 3, period: Period.FIRST, playerIds: [],
+      type: ActionType.CORNER, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z4R",
+      metadata: { isOpponent: false, cornerSide: "right" },
+    },
+    {
+      id: "f1", timestamp: 80000, wallClock: 4, period: Period.FIRST, playerIds: ["p1"],
+      type: ActionType.FOUL, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z2C",
+      metadata: { isOpponent: false },
+    },
+    {
+      id: "s1", timestamp: 90000, wallClock: 5, period: Period.FIRST, playerIds: ["p1"],
+      type: ActionType.SHOT, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z4C", destinationGrid: "G2",
+      metadata: { isOpponent: false, setPiece: "corner" },
+    },
+  ],
+};
+
+describe("CSV de acciones · balón parado", () => {
+  const filas = () => buildActionsCsv(setPieceMatch).split("\n");
+
+  it("expone las tres columnas nuevas con etiquetas estables", () => {
+    const header = filas()[0];
+    expect(header).toContain('"lado_corner"');
+    expect(header).toContain('"desenlace_balon_parado"');
+    expect(header).toContain('"accion_desde"');
+  });
+
+  it("traduce lado y desenlace del córner, sin códigos internos", () => {
+    const fila = filas().find((f) => f.includes('"CORNER"') && f.includes("01:00"))!;
+    expect(fila).toContain('"izquierda"');
+    expect(fila).toContain('"Tiro directo"');
+    expect(fila).not.toContain('"shot"');
+  });
+
+  it("un córner sin desenlace deja la celda vacía, no inventa nada", () => {
+    const fila = filas().find((f) => f.includes("01:10"))!;
+    expect(fila).toContain('"derecha"');
+    expect(fila).not.toContain('"Tiro"');
+    expect(fila).not.toContain('"Jugada"');
+  });
+
+  it("la falta no lleva desenlace ni lado de córner: es una infracción", () => {
+    const fila = filas().find((f) => f.includes('"FOUL"'))!;
+    expect(fila).toContain('"Z2C"');     // su ubicación sí
+    expect(fila).not.toContain('"Tiro"');
+    expect(fila).not.toContain('"Jugada"');
+  });
+
+  it("una falta que trajera el campo tampoco lo exporta", () => {
+    const conCampo = {
+      ...setPieceMatch,
+      events: [{
+        id: "f9", timestamp: 80000, wallClock: 9, period: Period.FIRST, playerIds: ["p1"],
+        type: ActionType.FOUL, gameState: GameState.FOUR_VS_FOUR,
+        metadata: { isOpponent: false, setPieceOutcome: "shot" },
+      }],
+    } as MatchData;
+    const fila = buildActionsCsv(conCampo).split("\n")[1];
+    expect(fila).not.toContain('"Tiro"');
+    expect(fila).not.toContain('"shot"');
+  });
+
+  it("el tiro declara su procedencia y no un desenlace de balón parado", () => {
+    const fila = filas().find((f) => f.includes('"SHOT"'))!;
+    expect(fila).toContain('"Córner"');
+    expect(fila).not.toContain('"corner"');
+  });
+
+  it("el respaldo JSON conserva los campos nuevos sin tocar nada", () => {
+    const parsed = JSON.parse(buildMatchJson(setPieceMatch));
+    expect(parsed.events[0].metadata.setPieceOutcome).toBe("shot");
+    expect(parsed.events[0].metadata.cornerSide).toBe("left");
+    expect(parsed.events[1].metadata.setPieceOutcome).toBeUndefined();
+    expect(parsed.events[2].metadata.setPieceOutcome).toBeUndefined(); // la falta
+    expect(parsed.events[3].metadata.setPiece).toBe("corner");
+  });
+});
+
+describe("CSV · jugada de falta", () => {
+  const conJugada: MatchData = {
+    ...match,
+    events: [
+      {
+        id: "sp1", timestamp: 95000, wallClock: 6, period: Period.FIRST, playerIds: ["p1"],
+        type: ActionType.SET_PIECE, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z2L",
+        metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" },
+      },
+    ],
+  };
+
+  it("la identifica con su nombre humano y conserva la zona", () => {
+    const fila = buildActionsCsv(conJugada).split("\n")[1];
+    expect(fila).toContain('"Jugada de falta"');
+    expect(fila).toContain('"Z2L"');
+    expect(fila).toContain('"Zona 2 · izquierda"');
+  });
+
+  it("no la exporta como desenlace de balón parado ni como procedencia de tiro", () => {
+    const fila = buildActionsCsv(conJugada).split("\n")[1];
+    expect(fila).not.toContain('"free_kick"');
+    // Las columnas de córner y de procedencia del tiro quedan vacías.
+    expect(fila.split(",").slice(-3)).toEqual(['""', '""', '""']);
+  });
+
+  it("el respaldo JSON conserva el evento entero", () => {
+    const parsed = JSON.parse(buildMatchJson(conJugada));
+    expect(parsed.events[0].type).toBe("SET_PIECE");
+    expect(parsed.events[0].metadata.setPieceOrigin).toBe("free_kick");
+    expect(parsed.events[0].metadata.setPieceOutcome).toBe("play");
+    expect(parsed.events[0].originGrid).toBe("Z2L");
+  });
+});

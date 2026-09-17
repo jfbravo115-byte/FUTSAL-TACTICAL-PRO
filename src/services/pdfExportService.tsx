@@ -44,6 +44,7 @@ import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
 import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
+import { countShotsFromSetPiece, describeSetPieceOutcomes } from "../utils/setPieceModel";
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { safeImageSrc } from "../utils/safeImageSrc";
@@ -135,6 +136,9 @@ function SummaryKpis({ report }: { report: MatchReport }) {
 
 function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
   const bucket = primaryBucket(zones);
+  // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
+  const shotsFromFreeKick = countShotsFromSetPiece(matchData.events || [], "free_kick", false);
+  const shotsFromCorner = countShotsFromSetPiece(matchData.events || [], "corner", false);
   const isLegacy = bucket?.system === "legacy3x3";
   const hasOrigin = (bucket?.total ?? 0) > 0 || zones.corners.total > 0;
   const hasGoal = zones.goal.some((z) => z.attempts > 0) || zones.out > 0;
@@ -235,6 +239,32 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
       {describeCorners(zones.corners) && (
         <div style={{ fontSize: 10, color: "#374151", marginTop: 4, fontWeight: 700 }}>
           {describeCorners(zones.corners)}
+        </div>
+      )}
+
+      {/* El desglose completo de balón parado vive en su propio bloque, el
+          MISMO que usa el informe de MatchTracker (SetPieceSummaryBoard).
+          Aquí solo queda la lectura rápida de ejecución del córner, que
+          acompaña al lado. */}
+      {describeSetPieceOutcomes(zones.setPieces.corners) && (
+        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700 }}>Córners · ejecución</div>
+          <div>{describeSetPieceOutcomes(zones.setPieces.corners)}</div>
+        </div>
+      )}
+
+      {/* Tiros que el PROPIO tiro declara procedentes de balón parado. No son
+          las faltas cometidas: esas son infracciones y se cuentan arriba. */}
+      {shotsFromFreeKick + shotsFromCorner > 0 && (
+        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700 }}>Tiros procedentes de balón parado</div>
+          <div>
+            Desde falta {shotsFromFreeKick} · desde córner {shotsFromCorner}
+          </div>
+          <div style={{ fontSize: 8, color: "#6b7280" }}>
+            Distinto de los tiros directos de córner, que cuentan córners ejecutados hacia
+            portería. Registros independientes.
+          </div>
         </div>
       )}
 

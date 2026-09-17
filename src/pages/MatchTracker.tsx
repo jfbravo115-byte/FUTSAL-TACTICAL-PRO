@@ -44,6 +44,7 @@ import {
   Pencil,
   Loader2,
   Flag,
+  PlayCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toJpeg } from "html-to-image";
@@ -92,10 +93,31 @@ import {
 } from "../utils/fieldZones";
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
+import { formatEventTypeLabel } from "../utils/eventLabels";
+import {
+  applyFoulToCounters,
+  applyFoulToPlayerStat,
+  foulStatDelta,
+  withEventLocation,
+} from "../utils/foulModel";
+import {
+  SET_PIECE_ORIGINS,
+  SET_PIECE_RESTART_LABEL,
+  newSetPieceRestartMetadata,
+  SET_PIECE_ORIGIN_LABEL,
+  SET_PIECE_OUTCOMES,
+  SET_PIECE_OUTCOME_DESCRIPTION,
+  SET_PIECE_OUTCOME_LABEL,
+  SetPieceOrigin,
+  SetPieceOutcome,
+  formatSetPieceOrigin,
+} from "../utils/setPieceModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
+import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
+import { teamReportPageCount } from "../utils/reportPagination";
 import { capturePagesToPdf } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
@@ -121,6 +143,15 @@ import { SimpleExportModal } from "../components/SimpleExportModal";
 import Markdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
 import { savePartido, getPartido } from "../services/partidosService";
+
+/** Iconos del selector "¿acción desde?". Solo presentación. */
+const SET_PIECE_ORIGIN_ICON: Record<SetPieceOrigin, string> = {
+  normal: "⚽",
+  free_kick: "🎯",
+  corner: "🚩",
+  penalty: "🥅",
+  double_penalty: "🔴",
+};
 
 
 
@@ -1350,7 +1381,15 @@ export default function MatchTracker() {
     isOpponent: boolean;
   } | null>(null);
   /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
-  const [pendingCorner, setPendingCorner] = useState<{ isOpponent: boolean } | null>(null);
+  // El córner se captura en dos pasos: esquina y, después, cómo se ejecutó.
+  // El segundo es omitible y su ausencia es un dato válido.
+  // Ubicación OPCIONAL de una jugada de falta ya registrada. Mismo patrón que
+  // la falta: el evento existe antes de este paso y omitirlo no lo deshace.
+  const [pendingRestartLocation, setPendingRestartLocation] = useState<{ eventId: string } | null>(null);
+  const [pendingCorner, setPendingCorner] = useState<{
+    isOpponent: boolean;
+    side?: CornerSide;
+  } | null>(null);
   /** Portero que va a registrar una salida, a la espera del resultado. */
   const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
   /** Salida ya registrada a la espera de ubicación OPCIONAL. */
@@ -1365,7 +1404,7 @@ export default function MatchTracker() {
     isOpponent: boolean;
     originGrid?: string;
     destinationGrid?: string;
-    setPiece?: "normal" | "penalty" | "double_penalty" | "free_kick";
+    setPiece?: SetPieceOrigin;
     subType?: string;
     /** Modelo C: respuesta del portero declarada dentro del mismo tiro. */
     goalieResponse?: GoalieResponseDeclared;
@@ -1381,6 +1420,8 @@ export default function MatchTracker() {
   const pdfPage5Ref = useRef<HTMLDivElement>(null);
   const pdfPage6Ref = useRef<HTMLDivElement>(null);
   const pdfPage7Ref = useRef<HTMLDivElement>(null);
+  // Página de balón parado: córners, faltas y tiros procedentes de una u otro.
+  const pdfPage8Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1793,7 +1834,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -1957,48 +1998,42 @@ export default function MatchTracker() {
     }
 
     setMatchData((prev) => {
-      const nextPlayers = prev.players.map((p) => {
-        if (p.id === playerId) {
-          return {
-            ...p,
-            stats: { ...p.stats, fouls: p.stats.fouls + 1 },
-          };
-        }
-        return p;
-      });
+      const foulEvent: GameEvent = {
+        id: foulEventId,
+        timestamp: prev.matchClock,
+        wallClock: Date.now(),
+        period: prev.period,
+        playerIds: playerId ? [playerId] : [],
+        // Sin esto una falta no puede atribuirse a quién estaba realmente en
+        // pista, a diferencia del resto de eventos.
+        onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
+        type: ActionType.FOUL,
+        gameState,
+        // La zona se guarda desde la perspectiva del equipo que COMETE la
+        // falta. Una falta recibida se obtiene espejando en presentación,
+        // nunca guardando una segunda zona.
+        attackDirection:
+          attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
+        metadata: { isOpponent: !isTeam },
+        scoreAtEvent: {
+          team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
+          opponent: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length,
+        },
+      };
 
+      // Las dos dimensiones reglamentarias, con las mismas funciones que usa
+      // el borrado (utils/foulModel): equipo e individual.
       return {
         ...prev,
-        fouls: {
-          ...prev.fouls,
-          [isTeam ? "team" : "opponent"]: newCount,
-        },
-        events: [
-          {
-            id: foulEventId,
-            timestamp: prev.matchClock,
-            wallClock: Date.now(),
-            period: prev.period,
-            playerIds: playerId ? [playerId] : [],
-            // Faltaba: sin esto una falta no puede atribuirse a quién estaba
-            // realmente en pista, a diferencia del resto de eventos.
-            onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
-            type: ActionType.FOUL,
-            gameState,
-            // La zona se guarda desde la perspectiva del equipo que COMETE la
-            // falta. Una falta recibida se obtiene espejando en presentación,
-            // nunca guardando una segunda zona.
-            attackDirection:
-              attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
-            metadata: { isOpponent: !isTeam },
-            scoreAtEvent: {
-              team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
-              opponent: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length,
-            },
+        fouls: applyFoulToCounters(prev.fouls, foulEvent, 1),
+        events: [foulEvent, ...prev.events],
+        players: prev.players.map((p) => ({
+          ...p,
+          stats: {
+            ...p.stats,
+            fouls: applyFoulToPlayerStat(p.stats.fouls, foulStatDelta(foulEvent, p, 1)),
           },
-          ...prev.events,
-        ],
-        players: nextPlayers,
+        })),
       };
     });
 
@@ -2017,9 +2052,7 @@ export default function MatchTracker() {
     if (!pending) return;
     setMatchData((prev) => ({
       ...prev,
-      events: prev.events.map((e) =>
-        e.id === pending.eventId ? { ...e, originGrid: zoneId } : e,
-      ),
+      events: withEventLocation(prev.events, pending.eventId, zoneId),
     }));
   };
 
@@ -2072,14 +2105,35 @@ export default function MatchTracker() {
     }));
   };
 
-  const handleCorner = (isOpponent: boolean, side: CornerSide) => {
+  /**
+   * Registro de córner. `cornerSide` sigue siendo el dato autoritativo y
+   * `originGrid` el enlace con las 12 zonas.
+   *
+   * `outcome` es OPCIONAL y su ausencia es un dato en sí: significa que no se
+   * registró cómo se ejecutó, igual que en cualquier córner anterior a Fase
+   * 5. No se guarda ningún marcador de "desconocido" — eso obligaría a migrar.
+   *
+   * Un córner ejecutado en tiro NO crea un SHOT: si el operador quiere
+   * registrar además el tiro, lo hace como acción propia y lo declara con
+   * `setPiece: 'corner'`. Son dos declaraciones independientes.
+   */
+  const handleCorner = (
+    isOpponent: boolean,
+    side: CornerSide,
+    outcome?: SetPieceOutcome,
+  ) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
     setPendingCorner(null);
     handleAction(ActionType.CORNER, undefined, {
       originGrid: cornerOriginGrid(side),
-      metadata: { isOpponent, cornerSide: side },
+      metadata: {
+        isOpponent,
+        cornerSide: side,
+        ...(outcome ? { setPieceOutcome: outcome } : {}),
+      },
     });
   };
+
 
   const handleAction = (
     type: ActionType | GoalieAction,
@@ -2301,6 +2355,40 @@ export default function MatchTracker() {
     if (eventAcceptsGoalkeeperZone(newEvent) && !metadata?.goalkeeperZone) {
       setPendingInterventionLocation({ eventId: newEvent.id });
     }
+    // Lo mismo para la jugada de falta: la reanudación ya está registrada y la
+    // zona llega después, omitible.
+    if (newEvent.type === ActionType.SET_PIECE && !metadata?.originGrid) {
+      setPendingRestartLocation({ eventId: newEvent.id });
+    }
+  };
+
+  /**
+   * Jugada de falta: una falta a FAVOR que el equipo pone en juego en corto.
+   *
+   * No es la infracción —esa es del rival y se registra con FALTA— ni un tiro
+   * —ese se registra como tiro y declara su procedencia—. No crea ninguno de
+   * los dos ni se enlaza con ellos: el botón ya dice qué ocurrió, así que no
+   * hay pasos intermedios y la captura es de un solo toque.
+   *
+   * `playerId` es el ejecutor cuando se registra desde un jugador; desde el
+   * control de equipo se queda sin ejecutor, que es un dato válido.
+   */
+  const handleFreeKickPlay = (isOpponent: boolean, playerId?: string) => {
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+    handleAction(ActionType.SET_PIECE, playerId, {
+      metadata: { isOpponent, ...newSetPieceRestartMetadata() },
+    });
+  };
+
+  /** Añade la ubicación a una jugada de falta ya registrada. */
+  const assignRestartLocation = (zoneId: string) => {
+    const pending = pendingRestartLocation;
+    setPendingRestartLocation(null);
+    if (!pending) return;
+    setMatchData((prev) => ({
+      ...prev,
+      events: withEventLocation(prev.events, pending.eventId, zoneId),
+    }));
   };
 
   const handleDeleteEvent = (event: GameEvent) => {
@@ -2366,6 +2454,12 @@ export default function MatchTracker() {
           }
           if (event.type === ActionType.RED_CARD)
             stats.redCards = Math.max(0, stats.redCards - 1);
+          // Registrar una falta suma en stats.fouls del jugador (ver
+          // handleFoul), pero borrarla solo devolvía el contador del equipo:
+          // la falta individual únicamente podía crecer. Registro y borrado
+          // usan ahora la MISMA función con el signo cambiado, y nunca deja
+          // el contador por debajo de cero.
+          stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
           
           // Las acciones de portero ya se han deshecho arriba con
           // goalieStatsDelta; no se duplican aqui.
@@ -2380,16 +2474,8 @@ export default function MatchTracker() {
         return { ...p, stats, plusMinus: pm };
       });
 
-      // Special case: team fouls
-      let nextFouls = { ...prev.fouls };
-      if (event.type === ActionType.FOUL) {
-        const isOpponent = event.metadata?.isOpponent ?? false;
-        if (isOpponent) {
-          nextFouls.opponent = Math.max(0, nextFouls.opponent - 1);
-        } else {
-          nextFouls.team = Math.max(0, nextFouls.team - 1);
-        }
-      }
+      // Contador reglamentario del equipo.
+      const nextFouls = applyFoulToCounters(prev.fouls, event, -1);
 
       let nextTimeouts = { ...prev.timeoutsUsed };
       if (event.type === ActionType.TIMEOUT) {
@@ -3069,7 +3155,8 @@ export default function MatchTracker() {
           </div>
         );
 
-        const totalPages = allTeamsForPDF.length * 3 + 1;
+        // 3 páginas por equipo + mapas de zona + balón parado.
+        const totalPages = teamReportPageCount(allTeamsForPDF.length);
         let pageCounter = 0;
 
         return (
@@ -3081,7 +3168,7 @@ export default function MatchTracker() {
                 if (!team) return null;
                 return (
                   <>
-                    <Header page={1} total={allTeamsForPDF.length * 3 + 1} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
+                    <Header page={1} total={totalPages} mainTeam={matchData.teamName} vsTeam={matchData.opponentName} accent="#3b82f6" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3101,7 +3188,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={1} total={allTeamsForPDF.length * 3 + 1} />
+                    <Footer page={1} total={totalPages} />
                   </>
                 );
               })()}
@@ -3112,12 +3199,11 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {totalPages}</span>
                     </div>
                     {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
                       <div key={item.label} style={{ marginBottom: 16 }}>
@@ -3128,7 +3214,7 @@ export default function MatchTracker() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
-                    <Footer page={2} total={total} />
+                    <Footer page={2} total={totalPages} />
                   </>
                 );
               })()}
@@ -3139,7 +3225,6 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[0];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 const ACT_COLORS: Record<string, string> = {
                   'Goles':   '#16a34a',
                   'Tiros':   '#2563eb',
@@ -3207,7 +3292,7 @@ export default function MatchTracker() {
                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} />
                         <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil circular + mapas de zona</span>
                       </div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 3 / {totalPages}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
                       {Object.entries(ACT_COLORS).map(([k, v]) => (
@@ -3220,7 +3305,7 @@ export default function MatchTracker() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 20 }}>
                       {team.players.map((p: Player) => <DonutChart key={p.id} p={p} accent={team.accent} />)}
                     </div>
-                    <Footer page={3} total={total} />
+                    <Footer page={3} total={totalPages} />
                   </>
                 );
               })()}
@@ -3231,10 +3316,9 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
-                    <Header page={4} total={total} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
+                    <Header page={4} total={totalPages} mainTeam={matchData.opponentName} vsTeam={matchData.teamName} accent="#ef4444" />
                     <div style={{ marginBottom: 8, ...sectionLabelStyle }}>1. estadísticas por posición — {team.name.toLowerCase()}</div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                       <thead>
@@ -3254,7 +3338,7 @@ export default function MatchTracker() {
                         );})}
                       </tbody>
                     </table>
-                    <Footer page={4} total={total} />
+                    <Footer page={4} total={totalPages} />
                   </>
                 );
               })()}
@@ -3264,12 +3348,11 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {totalPages}</span>
                     </div>
                     {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
                       <div key={item.label} style={{ marginBottom: 16 }}>
@@ -3280,7 +3363,7 @@ export default function MatchTracker() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
-                    <Footer page={5} total={total} />
+                    <Footer page={5} total={totalPages} />
                   </>
                 );
               })()}
@@ -3290,7 +3373,6 @@ export default function MatchTracker() {
               {(() => {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
-                const total = allTeamsForPDF.length * 3 + 1;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
@@ -3301,7 +3383,7 @@ export default function MatchTracker() {
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
-                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {total}</span>
+                      <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {totalPages}</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                       {team.players.map(p => {
@@ -3331,7 +3413,7 @@ export default function MatchTracker() {
                         );
                       })}
                     </div>
-                    <Footer page={6} total={total} />
+                    <Footer page={6} total={totalPages} />
                   </>
                 );
               })()}
@@ -3349,7 +3431,7 @@ export default function MatchTracker() {
               style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
             >
               <Header
-                page={totalPages}
+                page={totalPages - 1}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3358,6 +3440,30 @@ export default function MatchTracker() {
               <div style={{ flex: 1 }}>
                 <ZoneMapBoard events={matchData.events} />
               </div>
+              <Footer page={totalPages - 1} total={totalPages} />
+            </div>
+
+            {/* ── BALÓN PARADO ─────────────────────────────────────────
+                Página propia porque la de mapas ya agota su presupuesto de
+                alto (ver ZONE_MAP_PAGE): añadir aquí habría comprimido las
+                seis pistas al insertarlas con addImage.
+
+                El bloque es el MISMO componente que usa el informe del
+                servicio de exportación. Este informe tenía su propia
+                plantilla y por eso los córners y las faltas de Fase 5 no
+                llegaban al PDF que genera el botón. */}
+            <div ref={pdfPage8Ref} style={pageStyle}>
+              <Header
+                page={totalPages}
+                total={totalPages}
+                mainTeam={matchData.teamName}
+                vsTeam={matchData.opponentName}
+                accent="#3b82f6"
+              />
+              <div style={{ marginBottom: 12, ...sectionLabelStyle }}>
+                balón parado — córners, faltas y tiros procedentes
+              </div>
+              <SetPieceSummaryBoard matchData={matchData} />
               <Footer page={totalPages} total={totalPages} />
             </div>
           </>
@@ -4173,22 +4279,11 @@ export default function MatchTracker() {
                                     </div>
                                     <div className="flex flex-col">
                                       <span className="text-[9px] font-black uppercase truncate text-white">
-                                        {e.type === ActionType.GOAL ? "⚽ Gol"
-                                          : e.type === ActionType.SHOT ? "🎯 Tiro"
-                                          : e.type === ActionType.STEAL ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
-                                          : e.type === ActionType.INTERCEPTION ? (e.metadata?.subType === 'clearance' ? "↗️ Despeje" : "✅ Recuperación")
-                                          : e.type === ActionType.LOSS ? (
-                                              e.metadata?.subType === 'bad_pass' ? "🎯 Error pase"
-                                              : e.metadata?.subType === 'bad_dribble' ? "🏃 Error regate"
-                                              : e.metadata?.subType === 'bad_control' ? "🤲 Error control"
-                                              : "❌ Pérdida")
-                                          : e.type === ActionType.UNFORCED_ERROR ? "❌ Pérdida"
-                                          : e.type === ActionType.ASSIST ? "👟 Asistencia"
-                                          : e.type === ActionType.FOUL ? "⚠️ Falta"
-                                          : e.type === GoalieAction.GOAL_CONCEDED ? "🔴 Gol encajado"
-                                          : e.type === GoalieAction.EXIT ? `🧤 ${formatExit(e)}`
-                                          : (e.type === GoalieAction.SAVE || e.type === GoalieAction.SAVE_PARRY || e.type === GoalieAction.SAVE_CATCH || e.type === GoalieAction.SAVE_DEFLECT) ? `🧤 ${formatGoalieAction(e.type)}`
-                                          : e.type.replace(/_/g, " ")}
+                                        {/* Fuente única (utils/eventLabels): aquí se
+                                            imprimía el código interno para cualquier
+                                            tipo sin rama propia, y por eso el córner
+                                            salía como CORNER. */}
+                                        {formatEventTypeLabel(e)}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
                                         {matchData.players.find(
@@ -4196,15 +4291,14 @@ export default function MatchTracker() {
                                         )?.name || "Equipo"}
                                       </span>
                                     </div>
-                                    {e.metadata?.setPiece && e.metadata.setPiece !== "normal" && (
-                                      <span className={`text-[6px] font-black px-1 rounded-sm border shrink-0 ${
-                                        e.metadata.setPiece === "penalty" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                                        : e.metadata.setPiece === "free_kick" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                    {formatSetPieceOrigin(e) && (
+                                      <span className={`text-[6px] font-black px-1 rounded-sm border shrink-0 uppercase ${
+                                        e.metadata?.setPiece === "penalty" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                        : e.metadata?.setPiece === "free_kick" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                        : e.metadata?.setPiece === "corner" ? "bg-violet-500/20 text-violet-400 border-violet-500/30"
                                         : "bg-red-500/20 text-red-400 border-red-500/30"
                                       }`}>
-                                        {e.metadata.setPiece === "penalty" ? "PENALTI"
-                                          : e.metadata.setPiece === "free_kick" ? "FALTA"
-                                          : "DOBLE P."}
+                                        {formatSetPieceOrigin(e)}
                                       </span>
                                     )}
                                   </div>
@@ -5908,6 +6002,14 @@ export default function MatchTracker() {
                 </button>
 
                 <button
+                  onClick={() => handleFreeKickPlay(pitchView === 'opponent')}
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-600/30 text-slate-200 hover:text-emerald-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                >
+                  <PlayCircle size={16} />
+                  <span className="text-[7px] uppercase">J. Falta</span>
+                </button>
+
+                <button
                   onClick={() => setPendingCorner({ isOpponent: pitchView === 'opponent' })}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-violet-600/30 text-slate-200 hover:text-violet-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
@@ -6217,24 +6319,68 @@ export default function MatchTracker() {
                   {pendingCorner.isOpponent ? matchData.opponentName : matchData.teamName} · ¿desde qué esquina?
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {(["left", "right"] as CornerSide[]).map((side) => (
+              {!pendingCorner.side ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["left", "right"] as CornerSide[]).map((side) => (
+                      <button
+                        key={side}
+                        onClick={() =>
+                          setPendingCorner({ isOpponent: pendingCorner.isOpponent, side })
+                        }
+                        className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
+                      >
+                        <Flag size={22} className="text-violet-300" />
+                        <span className="text-[11px] font-black uppercase text-white">
+                          {formatCornerLabel(side)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                    Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
+                    en cualquiera de las dos partes.
+                  </p>
+                </>
+              ) : (
+                /* Segundo paso: cómo se ejecutó. Omitirlo deja un córner
+                   perfectamente válido, sin desenlace registrado. */
+                <>
+                  <p className="text-[10px] text-slate-300 text-center font-black uppercase">
+                    {formatCornerLabel(pendingCorner.side)} · ¿cómo se ejecuta?
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {SET_PIECE_OUTCOMES.map((outcome) => (
+                      <button
+                        key={outcome}
+                        data-set-piece-outcome={outcome}
+                        onClick={() =>
+                          handleCorner(pendingCorner.isOpponent, pendingCorner.side!, outcome)
+                        }
+                        className="py-5 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-1"
+                      >
+                        <span className="text-[11px] font-black uppercase text-white">
+                          {SET_PIECE_OUTCOME_LABEL[outcome]}
+                        </span>
+                        <span className="text-[8px] text-slate-400 text-center px-2 leading-tight">
+                          {SET_PIECE_OUTCOME_DESCRIPTION[outcome]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                   <button
-                    key={side}
-                    onClick={() => handleCorner(pendingCorner.isOpponent, side)}
-                    className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
+                    data-set-piece-outcome="none"
+                    onClick={() => handleCorner(pendingCorner.isOpponent, pendingCorner.side!)}
+                    className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-300"
                   >
-                    <Flag size={22} className="text-violet-300" />
-                    <span className="text-[11px] font-black uppercase text-white">
-                      {formatCornerLabel(side)}
-                    </span>
+                    Sin especificar
                   </button>
-                ))}
-              </div>
-              <p className="text-[9px] text-slate-500 text-center leading-relaxed">
-                Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
-                en cualquiera de las dos partes.
-              </p>
+                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                    El córner se registra igual. «Sin especificar» no inventa nada: queda
+                    como subtipo no registrado.
+                  </p>
+                </>
+              )}
               <button
                 onClick={() => setPendingCorner(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
@@ -6258,6 +6404,28 @@ export default function MatchTracker() {
               <PitchZones onSelect={assignFoulLocation} />
               <button
                 onClick={() => setPendingFoulLocation(null)}
+                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+              >
+                Omitir ubicación
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── JUGADA DE FALTA: ubicación OPCIONAL. La reanudación ya está
+            registrada; omitirla no la deshace. ─────────────────────────── */}
+        {pendingRestartLocation && (
+          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+              <div className="text-center">
+                <h3 className="text-white font-black uppercase text-sm">{SET_PIECE_RESTART_LABEL}</h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ¿Desde dónde se pone en juego? Es opcional: puedes omitirlo y la jugada se mantiene.
+                </p>
+              </div>
+              <PitchZones onSelect={assignRestartLocation} />
+              <button
+                onClick={() => setPendingRestartLocation(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
               >
                 Omitir ubicación
@@ -6387,12 +6555,14 @@ export default function MatchTracker() {
                     ¿Acción desde?
                   </span>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {[
-                      { id: "normal",         label: "Jugada",     icon: "⚽" },
-                      { id: "free_kick",      label: "Falta",      icon: "🎯" },
-                      { id: "penalty",        label: "Penalti",    icon: "🥅" },
-                      { id: "double_penalty", label: "Doble P.",   icon: "🔴" },
-                    ].map((opt) => {
+                    {/* Catálogo único (utils/setPieceModel). Declarar aquí que
+                        el tiro viene de un córner NO crea ningún evento
+                        CORNER: es una declaración sobre este tiro. */}
+                    {SET_PIECE_ORIGINS.map((id) => ({
+                      id,
+                      label: SET_PIECE_ORIGIN_LABEL[id],
+                      icon: SET_PIECE_ORIGIN_ICON[id],
+                    })).map((opt) => {
                       const isSel = (pendingAction.setPiece || "normal") === opt.id;
                       return (
                         <button

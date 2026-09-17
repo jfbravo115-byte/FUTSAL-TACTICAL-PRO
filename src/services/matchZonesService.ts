@@ -34,6 +34,13 @@ import {
 } from "../utils/legacyZoneMap";
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
+import {
+  SetPieceOutcomeSummary,
+  SetPieceRestartSummary,
+  isSetPieceRestart,
+  summarizeCornerOutcomes,
+  summarizeSetPieceRestarts,
+} from "../utils/setPieceModel";
 
 export { GOAL_ZONE_IDS } from "../utils/goalZones";
 
@@ -78,6 +85,20 @@ export type ZoneDashboard = {
   goal: GoalZoneStats[];
   out: number;
   corners: CornerSummary;
+  /**
+   * Desglose del CÓRNER por desenlace. NO sustituye a la dimensión espacial:
+   * `corners` sigue dando el lado y los sectores siguen dando la ubicación.
+   * Esto responde a otra pregunta: cómo se ejecutó.
+   *
+   * No hay desglose de faltas: un FOUL es la infracción cometida, no la
+   * reanudación que ejecuta el rival. Los tiros de falta se cuentan en el
+   * propio tiro (`setPiece === 'free_kick'`).
+   */
+  setPieces: {
+    corners: SetPieceOutcomeSummary;
+    /** Faltas a favor puestas en juego. No son tiros ni faltas cometidas. */
+    freeKickPlays: SetPieceRestartSummary;
+  };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
   totals: {
@@ -111,13 +132,15 @@ const isLoss = (e: GameEvent) =>
 
 const isFoul = (e: GameEvent) => e.type === ActionType.FOUL;
 const isCorner = (e: GameEvent) => e.type === ActionType.CORNER;
+/** Jugada de falta: reanudación a favor puesta en juego. No es un tiro. */
+const isFreeKickPlay = (e: GameEvent) => isSetPieceRestart(e);
 
 /**
  * Acciones con capacidad de llevar ubicación. Se usa para contar cuántas se
  * quedaron sin ella — dato que se declara en vez de esconderse.
  */
 const isLocatable = (e: GameEvent) =>
-  isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e);
+  isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e);
 
 export function scopedEvents(
   matchData: MatchData,
@@ -289,6 +312,18 @@ export function buildZoneDashboard(
     (e) => period === undefined || e.period === period,
   );
   const corners = summarizeCorners(periodEvents, opponent);
+  // Mismo conjunto acotado por período que los córners: el desglose debe
+  // cuadrar con el total que se muestra al lado.
+  const setPieces = {
+    corners: summarizeCornerOutcomes(periodEvents, opponent),
+    // "Ubicada" con el mismo criterio que el resto del cubo: un sector que el
+    // sistema reconoce, no simplemente una cadena presente.
+    freeKickPlays: summarizeSetPieceRestarts(
+      periodEvents,
+      opponent,
+      (e) => classifyZone(e.originGrid) !== null,
+    ),
+  };
 
   return {
     zone12,
@@ -296,6 +331,7 @@ export function buildZoneDashboard(
     goal,
     out,
     corners,
+    setPieces,
     unlocated,
     totals: {
       zonedActions: (zone12?.total ?? 0) + (legacy?.total ?? 0),

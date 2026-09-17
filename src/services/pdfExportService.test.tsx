@@ -1024,3 +1024,69 @@ describe("PDF de porteros · bloque ZONAS DE INTERVENCIÓN", () => {
     expect(text).toContain("Zonas de intervención");
   });
 });
+
+// ── BALÓN PARADO EN EL PDF REAL DEL INFORME ─────────────────────────────
+
+function cornerEvent(outcome?: "shot" | "play", side: "left" | "right" = "left"): GameEvent {
+  return event({
+    type: ActionType.CORNER,
+    originGrid: side === "left" ? "Z4L" : "Z4R",
+    metadata: { isOpponent: false, cornerSide: side, ...(outcome ? { setPieceOutcome: outcome } : {}) },
+  });
+}
+
+describe("PDF del informe · balón parado", () => {
+  const partido = () =>
+    matchData({
+      players: [player()],
+      events: [
+        cornerEvent("shot"),
+        cornerEvent("shot", "right"),
+        cornerEvent("play"),
+        cornerEvent(),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C", metadata: { isOpponent: false } }),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C", metadata: { isOpponent: false } }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], originGrid: "Z4C", destinationGrid: "G2", metadata: { isOpponent: false, setPiece: "corner" } }),
+      ],
+    });
+
+  const paginaZonas = async () => {
+    await exportMatchReportPdf(partido());
+    return toJpegMock.mock.calls
+      .map((c) => ((c[0] as HTMLElement).textContent || "").replace(/\s+/g, " "))
+      .find((t) => t.includes("Córners · ejecución")) ?? "";
+  };
+
+  it("imprime el desglose de ejecución de los córners", async () => {
+    const texto = await paginaZonas();
+    expect(texto).toContain("Córners · ejecución");
+    expect(texto).toContain("4 · tiros directos 2 · jugadas 1 · sin registrar 1");
+  });
+
+  it("NO clasifica las faltas cometidas como tiro o jugada", async () => {
+    const texto = await paginaZonas();
+    expect(texto).not.toMatch(/Faltas cometidas: \d+ — .*(tiro|jugada)/);
+    expect(texto).toMatch(/[Ff]alta/); // su recuento y ubicación siguen ahí
+  });
+
+  it("conserva la dimensión espacial: el lado del córner sigue estando", async () => {
+    const texto = await paginaZonas();
+    expect(texto).toMatch(/[Cc]órners: 4/);
+    expect(texto).toContain("izquierda");
+    expect(texto).toContain("derecha");
+  });
+
+  it("no imprime ningún código interno del nuevo modelo", async () => {
+    const texto = await paginaZonas();
+    for (const codigo of ["setPieceOutcome", "setPiece", "shot", "play", "free_kick", "CORNER", "FOUL"]) {
+      expect(texto).not.toContain(codigo);
+    }
+  });
+
+  it("un tiro declarado desde córner no añade un córner más", async () => {
+    const texto = await paginaZonas();
+    // 4 córners registrados; el SHOT con setPiece 'corner' no crea ninguno.
+    expect(texto).toContain("Córners: 4");
+    expect(texto).not.toContain("Córners: 5");
+  });
+});

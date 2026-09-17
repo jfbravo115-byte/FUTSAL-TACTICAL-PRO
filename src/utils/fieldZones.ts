@@ -128,6 +128,9 @@ export const ORIGIN_ONLY_ACTIONS: readonly (ActionType | GoalieAction)[] = [
   ActionType.UNFORCED_ERROR,
   ActionType.FOUL,
   ActionType.CORNER,
+  // La jugada de falta se ubica desde la perspectiva de quien EJECUTA, igual
+  // que el resto: el sector dice desde dónde se puso el balón en juego.
+  ActionType.SET_PIECE,
 ];
 
 /** Acciones que registran origen en pista Y destino en portería. */
@@ -174,7 +177,10 @@ export function acceptsTarget(type: ActionType | GoalieAction): boolean {
  * puede descartarse sin afectar a la falta ya contabilizada.
  */
 export function originIsOptional(type: ActionType | GoalieAction): boolean {
-  return type === ActionType.FOUL;
+  // La falta, porque su contador reglamentario no puede esperar a ningún paso
+  // adicional. La jugada de falta, porque el botón ya dice todo lo que la
+  // define: la zona es información extra y omitirla no la invalida.
+  return type === ActionType.FOUL || type === ActionType.SET_PIECE;
 }
 
 // ── LECTURA TEXTUAL AGREGADA ────────────────────────────────────────────
@@ -218,6 +224,7 @@ export const ACTION_NOUN: Partial<Record<ActionType | GoalieAction, ActionNoun>>
   [ActionType.INTERCEPTION]: { one: "intercepción", many: "intercepciones" },
   [ActionType.FOUL]: { one: "falta", many: "faltas" },
   [ActionType.CORNER]: { one: "córner", many: "córners" },
+  [ActionType.SET_PIECE]: { one: "jugada de falta", many: "jugadas de falta" },
 };
 
 function plural(count: number, noun: ActionNoun): string {

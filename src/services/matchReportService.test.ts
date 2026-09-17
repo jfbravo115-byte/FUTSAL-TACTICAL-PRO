@@ -259,25 +259,60 @@ describe("balón parado en el informe", () => {
       ],
     });
 
-  it("desglosa córners y faltas propias, y separa al rival", () => {
+  it("desglosa los córners propios y separa al rival", () => {
     const r = generateMatchReport(conBalonParado());
     expect(r.setPieces.corners.team).toEqual({ total: 4, shot: 2, play: 1, unrecorded: 1 });
     expect(r.setPieces.corners.opponent).toEqual({ total: 1, shot: 0, play: 1, unrecorded: 0 });
-    expect(r.setPieces.fouls.team).toEqual({ total: 2, shot: 1, play: 0, unrecorded: 1 });
+  });
+
+  it("las faltas NO se desglosan por ejecución: son infracciones", () => {
+    const r = generateMatchReport(conBalonParado());
+    expect((r.setPieces as any).fouls).toBeUndefined();
+    expect(Object.keys(r.setPieces)).toEqual(["corners"]);
+  });
+
+  it("el tiro de falta se cuenta en el TIRO, no en la falta cometida", () => {
+    const md = matchData({
+      players: [player()],
+      events: [
+        event({ type: ActionType.FOUL, playerIds: ["p1"], metadata: { isOpponent: false } }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G1", metadata: { isOpponent: false, setPiece: "free_kick" } }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G2", metadata: { isOpponent: false, setPiece: "corner" } }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.teamTotals.shotsFromFreeKick).toBe(1);
+    expect(r.teamTotals.shotsFromCorner).toBe(1);
+    // La falta cometida sigue siendo una infracción y no se mueve.
+    expect(r.teamTotals.fouls).toBe(md.fouls.team);
   });
 
   it("el markdown que recibe Tactical Pro ya menciona los córners", () => {
     const md = formatMatchReportAsMarkdown(generateMatchReport(conBalonParado()));
-    expect(md).toContain("Balón parado");
-    expect(md).toContain("córners");
+    expect(md).toContain("Córners");
     expect(md).toContain("2 tiro");
     expect(md).toContain("subtipo no registrado");
     expect(md).not.toMatch(/setPieceOutcome|CORNER|'shot'/);
   });
 
-  it("un partido sin balón parado no redacta la línea", () => {
+  it("el markdown distingue faltas cometidas de tiros procedentes de falta", () => {
+    const partido = matchData({
+      players: [player()],
+      events: [
+        event({ type: ActionType.FOUL, playerIds: ["p1"], metadata: { isOpponent: false } }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G1", metadata: { isOpponent: false, setPiece: "free_kick" } }),
+      ],
+    });
+    const md = formatMatchReportAsMarkdown(generateMatchReport(partido));
+    expect(md).toContain("**Faltas:**");           // infracciones
+    expect(md).toContain("Tiros procedentes de balón parado"); // ejecución propia
+    expect(md).not.toMatch(/[Ff]altas.*(tiro|jugada).*subtipo/);
+  });
+
+  it("un partido sin balón parado no redacta ninguna de las dos líneas", () => {
     const md = formatMatchReportAsMarkdown(generateMatchReport(matchData({ players: [player()], events: [] })));
-    expect(md).not.toContain("Balón parado");
+    expect(md).not.toContain("Córners");
+    expect(md).not.toContain("Tiros procedentes de balón parado");
   });
 
   it("un partido histórico declara sus córners como subtipo no registrado", () => {

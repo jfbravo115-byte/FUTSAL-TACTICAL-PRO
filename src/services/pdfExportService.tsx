@@ -239,19 +239,14 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         </div>
       )}
 
-      {/* Balón parado: cómo se ejecutó. Es OTRA dimensión, no sustituye al
-          lado del córner ni a la ubicación de la falta — va debajo, con su
-          propio total, y lo no registrado se declara en vez de repartirse. */}
-      {(describeSetPieceOutcomes(zones.setPieces.corners) ||
-        describeSetPieceOutcomes(zones.setPieces.fouls)) && (
+      {/* Cómo se ejecutó el córner. Es OTRA dimensión: no sustituye al lado
+          ni a la ubicación, y lo no registrado se declara en vez de
+          repartirse. Las faltas no se desglosan así — el evento es la
+          infracción cometida, no la reanudación del rival. */}
+      {describeSetPieceOutcomes(zones.setPieces.corners) && (
         <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
-          <div style={{ fontWeight: 700 }}>Balón parado · ejecución</div>
-          {describeSetPieceOutcomes(zones.setPieces.corners) && (
-            <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
-          )}
-          {describeSetPieceOutcomes(zones.setPieces.fouls) && (
-            <div>Faltas cometidas: {describeSetPieceOutcomes(zones.setPieces.fouls)}</div>
-          )}
+          <div style={{ fontWeight: 700 }}>Córners · ejecución</div>
+          <div>{describeSetPieceOutcomes(zones.setPieces.corners)}</div>
         </div>
       )}
 

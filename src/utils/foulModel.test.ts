@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ActionType, GameEvent, Period } from "../types/futsal";
+import * as foulModel from "./foulModel";
 import {
   applyFoulToCounters,
   applyFoulToPlayerStat,
@@ -97,12 +98,12 @@ describe("falta individual", () => {
   });
 });
 
-// ── LOS PASOS OPCIONALES NO DESHACEN NADA ───────────────────────────────
+// ── LA UBICACIÓN NO DESHACE NADA, Y ES EL ÚNICO PASO POSTERIOR ──────────
 
-import { withEventLocation, withSetPieceOutcome } from "./foulModel";
+import { withEventLocation } from "./foulModel";
 import { setPieceOutcomeOf } from "./setPieceModel";
 
-describe("ubicación y desenlace son pasos posteriores y omitibles", () => {
+describe("la ubicación es un paso posterior y omitible", () => {
   const registrada = () => {
     const evento = foul({ id: "f1" });
     return {
@@ -121,39 +122,77 @@ describe("ubicación y desenlace son pasos posteriores y omitibles", () => {
     expect(despues).toHaveLength(events.length);
   });
 
-  it("añadir el desenlace tampoco, y conserva el resto del metadata", () => {
-    const { events, counters } = registrada();
-    const despues = withSetPieceOutcome(events, "f1", "shot");
-    expect(setPieceOutcomeOf(despues[0])).toBe("shot");
-    expect(despues[0].metadata?.isOpponent).toBe(false);
-    expect(counters).toEqual({ team: 1, opponent: 0 });
-  });
-
   it("omitir la ubicación deja la falta registrada y sin ubicar", () => {
     const { events, counters } = registrada();
-    // Omitir = simplemente no llamar a withEventLocation.
     expect(events[0].originGrid).toBeUndefined();
     expect(counters.team).toBe(1);
   });
 
-  it("omitir el desenlace deja la falta registrada y sin subtipo", () => {
-    const { events, counters } = registrada();
-    expect(setPieceOutcomeOf(events[0])).toBeNull();
-    expect(counters.team).toBe(1);
-  });
-
-  it("los dos pasos son independientes: se puede tener uno y no el otro", () => {
-    const { events } = registrada();
-    const soloZona = withEventLocation(events, "f1", "Z3R");
-    expect(setPieceOutcomeOf(soloZona[0])).toBeNull();
-    const soloDesenlace = withSetPieceOutcome(events, "f1", "play");
-    expect(soloDesenlace[0].originGrid).toBeUndefined();
-  });
-
   it("solo se parchea el evento indicado", () => {
     const { events } = registrada();
-    const despues = withSetPieceOutcome(withEventLocation(events, "f1", "Z1L"), "f1", "shot");
+    const despues = withEventLocation(events, "f1", "Z1L");
     expect(despues[1]).toBe(events[1]);
-    expect(setPieceOutcomeOf(despues[1])).toBeNull();
+    expect(despues[1].originGrid).toBeUndefined();
+  });
+
+  it("una falta NO tiene desenlace: no hay más pasos después de la ubicación", () => {
+    // FOUL identifica al infractor. Quién ejecuta la reanudación es otra
+    // acción, de otro equipo, y se registra como SHOT con setPiece.
+    const { events } = registrada();
+    const ubicada = withEventLocation(events, "f1", "Z2C");
+    expect(setPieceOutcomeOf(ubicada[0])).toBeNull();
+    expect(Object.keys(foulModel).filter((n) => /outcome|desenlace/i.test(n))).toEqual([]);
+  });
+});
+
+// ── LAS DOS VÍAS DE CAPTURA SIGNIFICAN LO MISMO ─────────────────────────
+//
+// Radial del jugador y botón exterior registran ambos una FALTA COMETIDA.
+// La única diferencia es si hay infractor identificado.
+
+describe("falta desde el radial y desde el botón exterior", () => {
+  it("desde el radial: falta cometida por ESE jugador", () => {
+    const desdeRadial = foul({ playerIds: ["p1"] });
+    expect(applyFoulToCounters({ team: 0, opponent: 0 }, desdeRadial, 1)).toEqual({ team: 1, opponent: 0 });
+    expect(foulStatDelta(desdeRadial, { id: "p1" }, 1)).toBe(1);
+    expect(foulStatDelta(desdeRadial, { id: "p2" }, 1)).toBe(0);
+  });
+
+  it("desde el botón exterior: falta del equipo, sin infractor identificado", () => {
+    const deEquipo = foul({ playerIds: [] });
+    expect(applyFoulToCounters({ team: 0, opponent: 0 }, deEquipo, 1)).toEqual({ team: 1, opponent: 0 });
+    expect(foulStatDelta(deEquipo, { id: "p1" }, 1)).toBe(0);
+  });
+
+  it("las dos suman igual al contador reglamentario", () => {
+    const c0 = { team: 0, opponent: 0 };
+    const c1 = applyFoulToCounters(c0, foul({ playerIds: ["p1"] }), 1);
+    const c2 = applyFoulToCounters(c1, foul({ playerIds: [] }), 1);
+    expect(c2).toEqual({ team: 2, opponent: 0 });
+  });
+});
+
+// ── EL TIRO DE FALTA NO TOCA NADA DE LA FALTA ───────────────────────────
+
+describe("un tiro procedente de falta no altera la contabilidad de faltas", () => {
+  const tiroDeFalta = foul({
+    id: "s1",
+    type: ActionType.SHOT,
+    playerIds: ["p1"],
+    metadata: { isOpponent: false, setPiece: "free_kick" },
+  });
+
+  it("no mueve el contador reglamentario", () => {
+    expect(applyFoulToCounters({ team: 2, opponent: 1 }, tiroDeFalta, 1)).toEqual({ team: 2, opponent: 1 });
+    expect(applyFoulToCounters({ team: 2, opponent: 1 }, tiroDeFalta, -1)).toEqual({ team: 2, opponent: 1 });
+  });
+
+  it("no mueve la falta individual de nadie, ni del infractor", () => {
+    expect(foulStatDelta(tiroDeFalta, { id: "p1" }, 1)).toBe(0);
+    expect(foulStatDelta(tiroDeFalta, { id: "p1" }, -1)).toBe(0);
+  });
+
+  it("no es una falta", () => {
+    expect(isFoulEvent(tiroDeFalta)).toBe(false);
   });
 });

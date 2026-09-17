@@ -61,8 +61,8 @@ const setPieceMatch: MatchData = {
     },
     {
       id: "f1", timestamp: 80000, wallClock: 4, period: Period.FIRST, playerIds: ["p1"],
-      type: ActionType.FOUL, gameState: GameState.FOUR_VS_FOUR,
-      metadata: { isOpponent: false, setPieceOutcome: "play" },
+      type: ActionType.FOUL, gameState: GameState.FOUR_VS_FOUR, originGrid: "Z2C",
+      metadata: { isOpponent: false },
     },
     {
       id: "s1", timestamp: 90000, wallClock: 5, period: Period.FIRST, playerIds: ["p1"],
@@ -96,10 +96,25 @@ describe("CSV de acciones · balón parado", () => {
     expect(fila).not.toContain('"Jugada"');
   });
 
-  it("la falta lleva su desenlace y ningún lado de córner", () => {
+  it("la falta no lleva desenlace ni lado de córner: es una infracción", () => {
     const fila = filas().find((f) => f.includes('"FOUL"'))!;
-    expect(fila).toContain('"Jugada"');
-    expect(fila).toContain(',"",'); // sin lado_corner
+    expect(fila).toContain('"Z2C"');     // su ubicación sí
+    expect(fila).not.toContain('"Tiro"');
+    expect(fila).not.toContain('"Jugada"');
+  });
+
+  it("una falta que trajera el campo tampoco lo exporta", () => {
+    const conCampo = {
+      ...setPieceMatch,
+      events: [{
+        id: "f9", timestamp: 80000, wallClock: 9, period: Period.FIRST, playerIds: ["p1"],
+        type: ActionType.FOUL, gameState: GameState.FOUR_VS_FOUR,
+        metadata: { isOpponent: false, setPieceOutcome: "shot" },
+      }],
+    } as MatchData;
+    const fila = buildActionsCsv(conCampo).split("\n")[1];
+    expect(fila).not.toContain('"Tiro"');
+    expect(fila).not.toContain('"shot"');
   });
 
   it("el tiro declara su procedencia y no un desenlace de balón parado", () => {
@@ -113,6 +128,7 @@ describe("CSV de acciones · balón parado", () => {
     expect(parsed.events[0].metadata.setPieceOutcome).toBe("shot");
     expect(parsed.events[0].metadata.cornerSide).toBe("left");
     expect(parsed.events[1].metadata.setPieceOutcome).toBeUndefined();
+    expect(parsed.events[2].metadata.setPieceOutcome).toBeUndefined(); // la falta
     expect(parsed.events[3].metadata.setPiece).toBe("corner");
   });
 });

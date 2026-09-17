@@ -16,7 +16,6 @@
 import { ActionType, GameEvent, GoalieAction } from "../types/futsal";
 import { formatExit, formatGoalieAction } from "./goalkeeperActions";
 import { formatCornerEventLabel } from "./cornerModel";
-import { formatSetPieceOutcome } from "./setPieceModel";
 
 /** Etiquetas de los tipos que no necesitan mirar el metadata. */
 const SIMPLE_LABEL: Partial<Record<string, string>> = {
@@ -61,11 +60,11 @@ export function formatEventTypeLabel(event: GameEvent): string {
     return LOSS_SUBTYPE[String(event.metadata?.subType)] ?? "❌ Pérdida";
   }
 
-  // Balón parado: el desenlace se añade solo si consta. Nunca se inventa.
+  // El córner añade lado y desenlace solo si constan; nunca se inventan.
   if (type === ActionType.CORNER) return `🚩 ${formatCornerEventLabel(event)}`;
-  if (type === ActionType.FOUL) {
-    return `⚠️ ${["Falta", formatSetPieceOutcome(event)].filter(Boolean).join(" · ")}`;
-  }
+  // La falta es la INFRACCIÓN cometida. No lleva desenlace: quién ejecuta
+  // después la reanudación es otra acción, de otro equipo.
+  if (type === ActionType.FOUL) return "⚠️ Falta";
 
   if (type === GoalieAction.EXIT) return `🧤 ${formatExit(event)}`;
   if (SAVE_TYPES.includes(type)) return `🧤 ${formatGoalieAction(type)}`;

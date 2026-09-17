@@ -343,19 +343,14 @@ export default function MatchAnalysis() {
                 <div className="mt-2 text-[10px] text-violet-300 font-black">{describeCorners(zones.corners)}</div>
               )}
               {/* Desglose por ejecución. Va DEBAJO del lado y de los mapas:
-                  añade una dimensión, no sustituye ninguna. */}
-              {(describeSetPieceOutcomes(zones.setPieces.corners) ||
-                describeSetPieceOutcomes(zones.setPieces.fouls)) && (
+                  añade una dimensión, no sustituye ninguna. Solo córners: una
+                  falta cometida es una infracción, no una reanudación. */}
+              {describeSetPieceOutcomes(zones.setPieces.corners) && (
                 <div className="mt-2 text-[9px] text-slate-400 leading-relaxed">
                   <div className="font-black text-slate-300 uppercase tracking-widest text-[8px]">
-                    Balón parado · ejecución
+                    Córners · ejecución
                   </div>
-                  {describeSetPieceOutcomes(zones.setPieces.corners) && (
-                    <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
-                  )}
-                  {describeSetPieceOutcomes(zones.setPieces.fouls) && (
-                    <div>Faltas cometidas: {describeSetPieceOutcomes(zones.setPieces.fouls)}</div>
-                  )}
+                  <div>{describeSetPieceOutcomes(zones.setPieces.corners)}</div>
                 </div>
               )}
               {zones.unlocated > 0 && (

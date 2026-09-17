@@ -67,12 +67,16 @@ export function applyFoulToPlayerStat(current: number, delta: number): number {
   return Math.max(0, current + delta);
 }
 
-// ── PASOS OPCIONALES ────────────────────────────────────────────────────
+// ── PASO OPCIONAL ───────────────────────────────────────────────────────
 //
-// Ubicación y desenlace llegan DESPUÉS de que la falta ya esté contabilizada.
-// Estas funciones solo parchean el evento indicado: no tocan contadores, no
-// tocan jugadores y no crean ni borran eventos. Es lo que garantiza que
-// cancelar cualquiera de los dos pasos no deshaga nada.
+// La ubicación llega DESPUÉS de que la falta ya esté contabilizada, y es el
+// ÚNICO paso posterior que tiene una falta. Solo parchea el evento indicado:
+// no toca contadores, no toca jugadores y no crea ni borra eventos. Es lo que
+// garantiza que omitirla no deshaga nada.
+//
+// Una falta no tiene "desenlace": el evento FOUL es la infracción cometida, y
+// quién ejecuta después la reanudación es otra acción, de otro equipo y de
+// otro jugador. Ver utils/setPieceModel.
 
 /** Añade la ubicación a un evento ya registrado. */
 export function withEventLocation(
@@ -81,15 +85,4 @@ export function withEventLocation(
   originGrid: string,
 ): GameEvent[] {
   return events.map((e) => (e.id === eventId ? { ...e, originGrid } : e));
-}
-
-/** Añade el desenlace de balón parado a un evento ya registrado. */
-export function withSetPieceOutcome(
-  events: GameEvent[],
-  eventId: string,
-  setPieceOutcome: "shot" | "play",
-): GameEvent[] {
-  return events.map((e) =>
-    e.id === eventId ? { ...e, metadata: { ...e.metadata, setPieceOutcome } } : e,
-  );
 }

@@ -69,13 +69,17 @@ describe("balón parado en el Historial", () => {
     expect(formatEventTypeLabel(corner({ cornerSide: "left" }))).not.toMatch(/Tiro|Jugada/);
   });
 
-  it("la falta muestra su desenlace solo si se registró", () => {
-    const base = { type: ActionType.FOUL, metadata: { isOpponent: false } };
-    expect(formatEventTypeLabel(event(base as any))).toBe("⚠️ Falta");
-    expect(formatEventTypeLabel(event({ type: ActionType.FOUL, metadata: { setPieceOutcome: "shot" } })))
-      .toBe("⚠️ Falta · Tiro");
-    expect(formatEventTypeLabel(event({ type: ActionType.FOUL, metadata: { setPieceOutcome: "play" } })))
-      .toBe("⚠️ Falta · Jugada");
+  it("la falta se lee SOLO como falta: es la infracción, no la reanudación", () => {
+    expect(formatEventTypeLabel(event({ type: ActionType.FOUL, metadata: { isOpponent: false } })))
+      .toBe("⚠️ Falta");
+    // Aunque un evento de desarrollo trajera el campo, nunca se muestra.
+    for (const outcome of ["shot", "play"]) {
+      const label = formatEventTypeLabel(
+        event({ type: ActionType.FOUL, metadata: { setPieceOutcome: outcome } }),
+      );
+      expect(label).toBe("⚠️ Falta");
+      expect(label).not.toMatch(/Tiro|Jugada/);
+    }
   });
 
   it("recupera el lado desde el sector si falta el metadata", () => {

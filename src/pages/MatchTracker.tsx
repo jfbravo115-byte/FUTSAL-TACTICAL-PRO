@@ -98,7 +98,6 @@ import {
   applyFoulToPlayerStat,
   foulStatDelta,
   withEventLocation,
-  withSetPieceOutcome,
 } from "../utils/foulModel";
 import {
   SET_PIECE_ORIGINS,
@@ -109,7 +108,6 @@ import {
   SetPieceOrigin,
   SetPieceOutcome,
   formatSetPieceOrigin,
-  formatSetPieceOutcome,
 } from "../utils/setPieceModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
@@ -1384,9 +1382,6 @@ export default function MatchTracker() {
     isOpponent: boolean;
     side?: CornerSide;
   } | null>(null);
-  // Desenlace de una falta YA registrada. Igual que la ubicación: llega
-  // después y cancelarlo no deshace nada.
-  const [pendingFoulOutcome, setPendingFoulOutcome] = useState<{ eventId: string } | null>(null);
   /** Portero que va a registrar una salida, a la espera del resultado. */
   const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
   /** Salida ya registrada a la espera de ubicación OPCIONAL. */
@@ -2049,14 +2044,6 @@ export default function MatchTracker() {
       ...prev,
       events: withEventLocation(prev.events, pending.eventId, zoneId),
     }));
-    setPendingFoulOutcome({ eventId: pending.eventId });
-  };
-
-  /** Omitir la ubicación no salta el desenlace: son dos preguntas distintas. */
-  const skipFoulLocation = () => {
-    const pending = pendingFoulLocation;
-    setPendingFoulLocation(null);
-    if (pending) setPendingFoulOutcome({ eventId: pending.eventId });
   };
 
   /**
@@ -2137,19 +2124,6 @@ export default function MatchTracker() {
     });
   };
 
-  /**
-   * Añade el desenlace a una falta YA registrada y contabilizada. No crea
-   * ningún evento, no toca el contador reglamentario y puede omitirse.
-   */
-  const assignFoulOutcome = (outcome: SetPieceOutcome) => {
-    const pending = pendingFoulOutcome;
-    setPendingFoulOutcome(null);
-    if (!pending) return;
-    setMatchData((prev) => ({
-      ...prev,
-      events: withSetPieceOutcome(prev.events, pending.eventId, outcome),
-    }));
-  };
 
   const handleAction = (
     type: ActionType | GoalieAction,
@@ -6357,49 +6331,10 @@ export default function MatchTracker() {
               </div>
               <PitchZones onSelect={assignFoulLocation} />
               <button
-                onClick={skipFoulLocation}
+                onClick={() => setPendingFoulLocation(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
               >
                 Omitir ubicación
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── FALTA: desenlace OPCIONAL. La falta y su contador reglamentario
-            ya están registrados; esto solo completa el evento. ────────── */}
-        {pendingFoulOutcome && (
-          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
-              <div className="text-center">
-                <h3 className="text-white font-black uppercase text-sm">Falta registrada</h3>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  ¿Cómo se ejecuta? Es opcional: la falta y su contador ya están registrados.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {SET_PIECE_OUTCOMES.map((outcome) => (
-                  <button
-                    key={outcome}
-                    data-set-piece-outcome={outcome}
-                    onClick={() => assignFoulOutcome(outcome)}
-                    className="py-5 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-orange-500/25 hover:border-orange-400 transition-all flex flex-col items-center gap-1"
-                  >
-                    <span className="text-[11px] font-black uppercase text-white">
-                      {SET_PIECE_OUTCOME_LABEL[outcome]}
-                    </span>
-                    <span className="text-[8px] text-slate-400 text-center px-2 leading-tight">
-                      {SET_PIECE_OUTCOME_DESCRIPTION[outcome]}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <button
-                data-set-piece-outcome="none"
-                onClick={() => setPendingFoulOutcome(null)}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-300"
-              >
-                Sin especificar
               </button>
             </div>
           </div>

@@ -14,8 +14,9 @@ import {
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import {
   SetPieceOutcomeSummary,
+  countShotsFromSetPiece,
   describeSetPieceOutcomes,
-  summarizeSetPieceOutcomes,
+  summarizeCornerOutcomes,
 } from "../utils/setPieceModel";
 
 export type MatchReportPlayerLine = {
@@ -61,13 +62,15 @@ export type MatchReportRelevantEvent = {
 };
 
 /**
- * Balón parado del equipo propio y del rival. El total no cambia de
- * significado: el desglose solo dice cómo se ejecutó cada uno, y lo que no
- * se registró se declara como tal en vez de repartirse.
+ * Córners del equipo propio y del rival, desglosados por ejecución. El total
+ * no cambia de significado y lo que no se registró se declara como tal en vez
+ * de repartirse.
+ *
+ * Las faltas NO se desglosan así: el evento FOUL es la infracción cometida.
+ * Los tiros procedentes de falta se leen del propio tiro.
  */
 export type MatchReportSetPieces = {
   corners: { team: SetPieceOutcomeSummary; opponent: SetPieceOutcomeSummary };
-  fouls: { team: SetPieceOutcomeSummary; opponent: SetPieceOutcomeSummary };
 };
 
 export type MatchReport = {
@@ -105,7 +108,12 @@ export type MatchReport = {
     errors: number;
     lossesAndErrors: number;
     recoveryLossBalance: number;
+    /** Faltas COMETIDAS por el equipo. Infracciones, no reanudaciones. */
     fouls: number;
+    /** Tiros propios que declaran proceder de una falta a favor. */
+    shotsFromFreeKick: number;
+    /** Tiros propios que declaran proceder de un córner. */
+    shotsFromCorner: number;
     yellowCards: number;
     redCards: number;
   };
@@ -261,6 +269,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     lossesAndErrors,
     recoveryLossBalance: recoveries - lossesAndErrors,
     fouls: matchData.fouls.team,
+    // Tiros que el PROPIO tiro declara procedentes de balón parado. No tienen
+    // nada que ver con las faltas cometidas: esas son infracciones nuestras.
+    shotsFromFreeKick: countShotsFromSetPiece(matchData.events, "free_kick", false),
+    shotsFromCorner: countShotsFromSetPiece(matchData.events, "corner", false),
     yellowCards: sumStat("yellowCards"),
     redCards: sumStat("redCards"),
   };
@@ -359,12 +371,8 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     },
     setPieces: {
       corners: {
-        team: summarizeSetPieceOutcomes(matchData.events, ActionType.CORNER, false),
-        opponent: summarizeSetPieceOutcomes(matchData.events, ActionType.CORNER, true),
-      },
-      fouls: {
-        team: summarizeSetPieceOutcomes(matchData.events, ActionType.FOUL, false),
-        opponent: summarizeSetPieceOutcomes(matchData.events, ActionType.FOUL, true),
+        team: summarizeCornerOutcomes(matchData.events, false),
+        opponent: summarizeCornerOutcomes(matchData.events, true),
       },
     },
     teamTotals,
@@ -397,18 +405,27 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   lines.push(
     `Recuperaciones **${r.teamTotals.recoveries}** · pérdidas + errores **${r.teamTotals.lossesAndErrors}** · balance **${r.teamTotals.recoveryLossBalance >= 0 ? "+" : ""}${r.teamTotals.recoveryLossBalance}**`,
   );
+  // Dos lecturas distintas y deliberadamente separadas: los córners por cómo
+  // se ejecutaron, y los tiros que el propio tiro declara procedentes de una
+  // falta. Las faltas cometidas/recibidas se informan aparte, arriba: son
+  // infracciones, no reanudaciones.
   const cornersTxt = describeSetPieceOutcomes(r.setPieces.corners.team);
-  const foulsTxt = describeSetPieceOutcomes(r.setPieces.fouls.team);
-  if (cornersTxt || foulsTxt) {
+  if (cornersTxt) {
     lines.push(
-      `Balón parado — córners **${cornersTxt ?? 0}**` +
-        (foulsTxt ? ` · faltas cometidas **${foulsTxt}**` : "") +
+      `Córners **${cornersTxt}**` +
         (r.setPieces.corners.opponent.total > 0
-          ? ` · córners del rival **${describeSetPieceOutcomes(r.setPieces.corners.opponent)}**`
+          ? ` · del rival **${describeSetPieceOutcomes(r.setPieces.corners.opponent)}**`
           : ""),
     );
     lines.push(
-      "«Subtipo no registrado» significa que no consta cómo se ejecutó; no es una estimación.",
+      "«Subtipo no registrado» significa que no consta cómo se ejecutó el córner; no es una estimación.",
+    );
+  }
+  if (r.teamTotals.shotsFromFreeKick > 0 || r.teamTotals.shotsFromCorner > 0) {
+    lines.push(
+      `Tiros procedentes de balón parado — falta **${r.teamTotals.shotsFromFreeKick}** · ` +
+        `córner **${r.teamTotals.shotsFromCorner}**. Son tiros propios: no son las faltas ` +
+        `cometidas, que se cuentan aparte.`,
     );
   }
   lines.push("");

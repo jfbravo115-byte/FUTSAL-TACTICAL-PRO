@@ -1044,7 +1044,7 @@ describe("PDF del informe · balón parado", () => {
         cornerEvent("shot", "right"),
         cornerEvent("play"),
         cornerEvent(),
-        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C", metadata: { isOpponent: false, setPieceOutcome: "shot" } }),
+        event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C", metadata: { isOpponent: false } }),
         event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z2C", metadata: { isOpponent: false } }),
         event({ type: ActionType.SHOT, playerIds: ["p1"], originGrid: "Z4C", destinationGrid: "G2", metadata: { isOpponent: false, setPiece: "corner" } }),
       ],
@@ -1054,14 +1054,19 @@ describe("PDF del informe · balón parado", () => {
     await exportMatchReportPdf(partido());
     return toJpegMock.mock.calls
       .map((c) => ((c[0] as HTMLElement).textContent || "").replace(/\s+/g, " "))
-      .find((t) => t.includes("Balón parado")) ?? "";
+      .find((t) => t.includes("Córners · ejecución")) ?? "";
   };
 
-  it("imprime el desglose por ejecución junto al de los córners", async () => {
+  it("imprime el desglose de ejecución de los córners", async () => {
     const texto = await paginaZonas();
-    expect(texto).toContain("Balón parado · ejecución");
-    expect(texto).toContain("Córners: 4 — 2 tiro · 1 jugada · 1 subtipo no registrado");
-    expect(texto).toContain("Faltas cometidas: 2 — 1 tiro · 1 subtipo no registrado");
+    expect(texto).toContain("Córners · ejecución");
+    expect(texto).toContain("4 — 2 tiro · 1 jugada · 1 subtipo no registrado");
+  });
+
+  it("NO clasifica las faltas cometidas como tiro o jugada", async () => {
+    const texto = await paginaZonas();
+    expect(texto).not.toMatch(/Faltas cometidas: \d+ — .*(tiro|jugada)/);
+    expect(texto).toMatch(/[Ff]alta/); // su recuento y ubicación siguen ahí
   });
 
   it("conserva la dimensión espacial: el lado del córner sigue estando", async () => {

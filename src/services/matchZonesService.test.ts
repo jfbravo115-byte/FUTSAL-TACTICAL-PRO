@@ -302,18 +302,20 @@ describe("desglose de balón parado", () => {
     expect(zones.totals.corners).toBe(3);
   });
 
-  it("desglosa las faltas cometidas y respeta las que no tienen ubicación", () => {
+  it("las faltas conservan recuento y ubicación, y NO se desglosan por ejecución", () => {
     const zones = buildZoneDashboard(
       partido([
-        ev("f1", ActionType.FOUL, "Z2C", false, undefined, { setPieceOutcome: "shot" }),
-        ev("f2", ActionType.FOUL, undefined, false, undefined, { setPieceOutcome: "play" }),
+        ev("f1", ActionType.FOUL, "Z2C"),
+        ev("f2", ActionType.FOUL, undefined),
         ev("f3", ActionType.FOUL, undefined),
       ]),
       false,
     );
-    expect(zones.setPieces.fouls).toEqual({ total: 3, shot: 1, play: 1, unrecorded: 1 });
     expect(zones.totals.fouls).toBe(3);
     expect(zones.unlocated).toBe(2);
+    // Una falta cometida no es "tiro" ni "jugada": el desglose no existe.
+    expect((zones.setPieces as any).fouls).toBeUndefined();
+    expect(Object.keys(zones.setPieces)).toEqual(["corners"]);
   });
 
   it("NO hay doble conteo: un córner en tiro más un tiro desde córner", () => {
@@ -331,20 +333,20 @@ describe("desglose de balón parado", () => {
     expect(zones.setPieces.corners.shot).toBe(1);
   });
 
-  it("NO hay doble conteo: una falta en tiro más un tiro de falta", () => {
-    const zones = buildZoneDashboard(
-      partido([
-        ev("f1", ActionType.FOUL, "Z2C", true, undefined, { setPieceOutcome: "shot" }),
-        ev("s1", ActionType.SHOT, "Z4C", false, "G5", { setPiece: "free_kick" }),
-      ]),
-      false,
-    );
-    expect(zones.totals.attempts).toBe(1);
-    expect(zones.totals.fouls).toBe(0); // la falta es del rival
-    expect(buildZoneDashboard(partido([
-      ev("f1", ActionType.FOUL, "Z2C", true, undefined, { setPieceOutcome: "shot" }),
+  it("falta del rival y tiro propio de falta son dos acciones distintas", () => {
+    // El rival comete la infracción; nosotros ejecutamos. Ni se relacionan ni
+    // se cuentan dos veces.
+    const eventos = [
+      ev("f1", ActionType.FOUL, "Z2C", true),
       ev("s1", ActionType.SHOT, "Z4C", false, "G5", { setPiece: "free_kick" }),
-    ]), true).setPieces.fouls).toEqual({ total: 1, shot: 1, play: 0, unrecorded: 0 });
+    ];
+    const propio = buildZoneDashboard(partido(eventos), false);
+    expect(propio.totals.attempts).toBe(1);
+    expect(propio.totals.fouls).toBe(0); // la falta es del rival
+
+    const rival = buildZoneDashboard(partido(eventos), true);
+    expect(rival.totals.fouls).toBe(1);
+    expect(rival.totals.attempts).toBe(0);
   });
 
   it("un partido histórico sin el campo no pierde ni un córner ni una falta", () => {
@@ -356,6 +358,6 @@ describe("desglose de balón parado", () => {
       false,
     );
     expect(zones.setPieces.corners).toEqual({ total: 1, shot: 0, play: 0, unrecorded: 1 });
-    expect(zones.setPieces.fouls).toEqual({ total: 1, shot: 0, play: 0, unrecorded: 1 });
+    expect(zones.totals.fouls).toBe(1);
   });
 });

@@ -3,12 +3,25 @@
  *
  * Balón parado. Función pura, sin React y sin DOM.
  *
+ * FOUL ES UNA INFRACCIÓN, NO UNA EJECUCIÓN
+ * ----------------------------------------
+ * Un evento `FOUL` dice quién COMETE la falta. Quién ejecuta después la
+ * reanudación es otro jugador, del otro equipo, en otra acción — así que
+ * preguntar "¿esa falta fue tiro o jugada?" sobre el evento del infractor
+ * mezcla dos cosas que no son la misma. Por eso `setPieceOutcome` solo
+ * pertenece al CÓRNER, donde el evento SÍ representa el balón parado que se
+ * ejecuta y no una infracción atribuida a un rival.
+ *
+ * El tiro de falta se identifica por el otro extremo, en el propio tiro:
+ * `SHOT.metadata.setPiece === 'free_kick'`. Y no se relaciona con ningún
+ * `FOUL` concreto: ni por id ni por cercanía temporal.
+ *
  * DOS PREGUNTAS DISTINTAS, DOS CAMPOS DISTINTOS
  * ---------------------------------------------
  * No son la misma cosa y no deben mezclarse ni sumarse:
  *
- *   metadata.setPieceOutcome   ¿cómo se EJECUTÓ este córner / esta falta?
- *       'shot' | 'play'        Vive en el evento CORNER o FOUL.
+ *   metadata.setPieceOutcome   ¿cómo se EJECUTÓ este córner?
+ *       'shot' | 'play'        Vive SOLO en el evento CORNER.
  *       ausente = no registrado.
  *
  *   metadata.setPiece          ¿de dónde PROCEDE este tiro?
@@ -59,13 +72,23 @@ export function isSetPieceOutcome(raw: unknown): raw is SetPieceOutcome {
   return raw === "shot" || raw === "play";
 }
 
-/** Acciones que admiten "¿cómo se ejecutó?". Solo el balón parado propio. */
+/**
+ * Acciones que admiten "¿cómo se ejecutó?". Solo el córner: una falta es la
+ * infracción del rival, no la reanudación que ejecuta el equipo beneficiado.
+ */
 export function acceptsSetPieceOutcome(type: ActionType | GoalieAction): boolean {
-  return type === ActionType.CORNER || type === ActionType.FOUL;
+  return type === ActionType.CORNER;
 }
 
-/** Desenlace declarado, o null si no se registró. */
+/**
+ * Desenlace declarado, o null si no se registró.
+ *
+ * Un evento que no admite desenlace devuelve null AUNQUE traiga el campo: así
+ * cualquier `FOUL` que lo tuviera —solo pudo escribirse durante el desarrollo
+ * de esta fase— queda inerte en toda la app sin necesidad de migrar nada.
+ */
 export function setPieceOutcomeOf(event: GameEvent): SetPieceOutcome | null {
+  if (!acceptsSetPieceOutcome(event.type)) return null;
   const raw = event.metadata?.setPieceOutcome;
   return isSetPieceOutcome(raw) ? raw : null;
 }
@@ -153,16 +176,18 @@ export function emptySetPieceSummary(): SetPieceOutcomeSummary {
 }
 
 /**
- * Desglosa por desenlace los eventos de un tipo de balón parado y un bando.
- * `opponent` selecciona el bando igual que el resto de agregados de la app.
+ * Desglosa los CÓRNERS por desenlace. `opponent` selecciona el bando igual
+ * que el resto de agregados de la app.
+ *
+ * No existe el equivalente para faltas: clasificar una falta cometida como
+ * "tiro" o "jugada" sería falso — describe lo que hizo el rival después.
  */
-export function summarizeSetPieceOutcomes(
+export function summarizeCornerOutcomes(
   events: GameEvent[],
-  type: ActionType.CORNER | ActionType.FOUL,
   opponent = false,
 ): SetPieceOutcomeSummary {
   const propios = events.filter(
-    (e) => e.type === type && !!e.metadata?.isOpponent === opponent,
+    (e) => e.type === ActionType.CORNER && !!e.metadata?.isOpponent === opponent,
   );
 
   const summary = emptySetPieceSummary();
@@ -191,4 +216,23 @@ export function describeSetPieceOutcomes(summary: SetPieceOutcomeSummary): strin
     partes.push(`${summary.unrecorded} ${SET_PIECE_OUTCOME_UNRECORDED_LABEL.toLowerCase()}`);
   }
   return partes.length > 0 ? `${summary.total} — ${partes.join(" · ")}` : String(summary.total);
+}
+
+/**
+ * Tiros (o goles) que DECLARAN proceder de un balón parado concreto.
+ *
+ * Es la única vía para "tiros de falta": se lee del propio tiro, no del
+ * evento FOUL del rival, y no requiere relacionar los dos eventos.
+ */
+export function countShotsFromSetPiece(
+  events: GameEvent[],
+  origin: SetPieceOrigin,
+  opponent = false,
+): number {
+  return events.filter(
+    (e) =>
+      (e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
+      !!e.metadata?.isOpponent === opponent &&
+      setPieceOriginOf(e) === origin,
+  ).length;
 }

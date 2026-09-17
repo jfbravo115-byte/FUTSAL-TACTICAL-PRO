@@ -34,7 +34,7 @@ import {
 } from "../utils/legacyZoneMap";
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
-import { SetPieceOutcomeSummary, summarizeSetPieceOutcomes } from "../utils/setPieceModel";
+import { SetPieceOutcomeSummary, summarizeCornerOutcomes } from "../utils/setPieceModel";
 
 export { GOAL_ZONE_IDS } from "../utils/goalZones";
 
@@ -80,13 +80,16 @@ export type ZoneDashboard = {
   out: number;
   corners: CornerSummary;
   /**
-   * Desglose por desenlace del balón parado. NO sustituye a la dimensión
-   * espacial: `corners` sigue dando el lado y los sectores siguen dando la
-   * ubicación. Esto responde a otra pregunta: cómo se ejecutó.
+   * Desglose del CÓRNER por desenlace. NO sustituye a la dimensión espacial:
+   * `corners` sigue dando el lado y los sectores siguen dando la ubicación.
+   * Esto responde a otra pregunta: cómo se ejecutó.
+   *
+   * No hay desglose de faltas: un FOUL es la infracción cometida, no la
+   * reanudación que ejecuta el rival. Los tiros de falta se cuentan en el
+   * propio tiro (`setPiece === 'free_kick'`).
    */
   setPieces: {
     corners: SetPieceOutcomeSummary;
-    fouls: SetPieceOutcomeSummary;
   };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
@@ -301,10 +304,7 @@ export function buildZoneDashboard(
   const corners = summarizeCorners(periodEvents, opponent);
   // Mismo conjunto acotado por período que los córners: el desglose debe
   // cuadrar con el total que se muestra al lado.
-  const setPieces = {
-    corners: summarizeSetPieceOutcomes(periodEvents, ActionType.CORNER, opponent),
-    fouls: summarizeSetPieceOutcomes(periodEvents, ActionType.FOUL, opponent),
-  };
+  const setPieces = { corners: summarizeCornerOutcomes(periodEvents, opponent) };
 
   return {
     zone12,

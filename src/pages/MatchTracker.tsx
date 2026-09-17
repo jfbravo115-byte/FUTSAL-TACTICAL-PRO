@@ -113,6 +113,7 @@ import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
+import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
 import { capturePagesToPdf } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
@@ -1412,6 +1413,8 @@ export default function MatchTracker() {
   const pdfPage5Ref = useRef<HTMLDivElement>(null);
   const pdfPage6Ref = useRef<HTMLDivElement>(null);
   const pdfPage7Ref = useRef<HTMLDivElement>(null);
+  // Página de balón parado: córners, faltas y tiros procedentes de una u otro.
+  const pdfPage8Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1824,7 +1827,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -3111,7 +3114,8 @@ export default function MatchTracker() {
           </div>
         );
 
-        const totalPages = allTeamsForPDF.length * 3 + 1;
+        // 3 páginas por equipo + mapas de zona + balón parado.
+        const totalPages = allTeamsForPDF.length * 3 + 2;
         let pageCounter = 0;
 
         return (
@@ -3391,7 +3395,7 @@ export default function MatchTracker() {
               style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
             >
               <Header
-                page={totalPages}
+                page={totalPages - 1}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3400,6 +3404,30 @@ export default function MatchTracker() {
               <div style={{ flex: 1 }}>
                 <ZoneMapBoard events={matchData.events} />
               </div>
+              <Footer page={totalPages - 1} total={totalPages} />
+            </div>
+
+            {/* ── BALÓN PARADO ─────────────────────────────────────────
+                Página propia porque la de mapas ya agota su presupuesto de
+                alto (ver ZONE_MAP_PAGE): añadir aquí habría comprimido las
+                seis pistas al insertarlas con addImage.
+
+                El bloque es el MISMO componente que usa el informe del
+                servicio de exportación. Este informe tenía su propia
+                plantilla y por eso los córners y las faltas de Fase 5 no
+                llegaban al PDF que genera el botón. */}
+            <div ref={pdfPage8Ref} style={pageStyle}>
+              <Header
+                page={totalPages}
+                total={totalPages}
+                mainTeam={matchData.teamName}
+                vsTeam={matchData.opponentName}
+                accent="#3b82f6"
+              />
+              <div style={{ marginBottom: 12, ...sectionLabelStyle }}>
+                balón parado — córners, faltas y tiros procedentes
+              </div>
+              <SetPieceSummaryBoard matchData={matchData} />
               <Footer page={totalPages} total={totalPages} />
             </div>
           </>

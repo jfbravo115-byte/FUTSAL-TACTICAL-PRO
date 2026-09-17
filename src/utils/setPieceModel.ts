@@ -55,13 +55,25 @@ export type SetPieceOutcome = "shot" | "play";
 export const SET_PIECE_OUTCOMES: readonly SetPieceOutcome[] = ["shot", "play"];
 
 /** Única vía autorizada para nombrarlo. El usuario nunca lee 'shot'. */
+/**
+ * Etiqueta de usuario. «Tiro directo» y no «Tiro» a propósito: describe que
+ * el córner se ejecutó directamente hacia portería, y así no se confunde con
+ * el tiro que declara proceder de un córner (`SHOT.setPiece === 'corner'`),
+ * que es un registro distinto y se cuenta aparte.
+ */
 export const SET_PIECE_OUTCOME_LABEL: Record<SetPieceOutcome, string> = {
-  shot: "Tiro",
+  shot: "Tiro directo",
   play: "Jugada",
 };
 
+/** Plural, para cabeceras y resúmenes. */
+export const SET_PIECE_OUTCOME_LABEL_PLURAL: Record<SetPieceOutcome, string> = {
+  shot: "Tiros directos",
+  play: "Jugadas",
+};
+
 export const SET_PIECE_OUTCOME_DESCRIPTION: Record<SetPieceOutcome, string> = {
-  shot: "Ejecución orientada directamente a tiro",
+  shot: "Se ejecuta directamente hacia portería",
   play: "Ejecución mediante jugada",
 };
 
@@ -204,18 +216,25 @@ export function summarizeCornerOutcomes(
 }
 
 /**
- * `"6 — 4 tiro · 1 jugada · 1 subtipo no registrado"`. Devuelve null si no
+ * `"6 · tiros directos 4 · jugadas 1 · sin registrar 1"`. Devuelve null si no
  * hubo ninguno: no se redactan frases sobre lo que no ocurrió.
+ *
+ * «Tiros directos» cuenta CÓRNERS ejecutados hacia portería. No es lo mismo
+ * que «tiros procedentes de córner», que cuenta TIROS y se lee del propio
+ * tiro: son dos registros independientes y nunca se suman ni se deducen uno
+ * del otro.
  */
 export function describeSetPieceOutcomes(summary: SetPieceOutcomeSummary): string | null {
   if (summary.total === 0) return null;
   const partes: string[] = [];
-  if (summary.shot > 0) partes.push(`${summary.shot} tiro`);
-  if (summary.play > 0) partes.push(`${summary.play} jugada`);
-  if (summary.unrecorded > 0) {
-    partes.push(`${summary.unrecorded} ${SET_PIECE_OUTCOME_UNRECORDED_LABEL.toLowerCase()}`);
+  if (summary.shot > 0) {
+    partes.push(`${SET_PIECE_OUTCOME_LABEL_PLURAL.shot.toLowerCase()} ${summary.shot}`);
   }
-  return partes.length > 0 ? `${summary.total} — ${partes.join(" · ")}` : String(summary.total);
+  if (summary.play > 0) {
+    partes.push(`${SET_PIECE_OUTCOME_LABEL_PLURAL.play.toLowerCase()} ${summary.play}`);
+  }
+  if (summary.unrecorded > 0) partes.push(`sin registrar ${summary.unrecorded}`);
+  return partes.length > 0 ? `${summary.total} · ${partes.join(" · ")}` : String(summary.total);
 }
 
 /**

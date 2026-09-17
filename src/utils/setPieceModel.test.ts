@@ -20,6 +20,8 @@ import {
   describeSetPieceOutcomes,
   formatSetPieceOrigin,
   formatSetPieceOutcome,
+  SET_PIECE_OUTCOME_LABEL,
+  SET_PIECE_OUTCOME_LABEL_PLURAL,
   isSetPieceOrigin,
   isSetPieceOutcome,
   setPieceOriginOf,
@@ -75,7 +77,7 @@ describe("desenlace del balón parado", () => {
   });
 
   it("nunca muestra el valor interno", () => {
-    expect(formatSetPieceOutcome(corner("shot"))).toBe("Tiro");
+    expect(formatSetPieceOutcome(corner("shot"))).toBe("Tiro directo");
     expect(formatSetPieceOutcome(corner("play"))).toBe("Jugada");
   });
 });
@@ -187,7 +189,7 @@ describe("agregado por desenlace", () => {
 
   it("redacta el agregado sin códigos internos", () => {
     const texto = describeSetPieceOutcomes(summarizeCornerOutcomes(eventos, false))!;
-    expect(texto).toBe("4 — 2 tiro · 1 jugada · 1 subtipo no registrado");
+    expect(texto).toBe("4 · tiros directos 2 · jugadas 1 · sin registrar 1");
     expect(texto).not.toMatch(/shot|play|CORNER|undefined/);
   });
 
@@ -323,5 +325,60 @@ describe("jugada de falta", () => {
     const eventos = [jugadaDeFalta(), corner("shot")];
     expect(summarizeCornerOutcomes(eventos, false).total).toBe(1);
     expect(summarizeSetPieceRestarts(eventos, false).total).toBe(1);
+  });
+});
+
+// ── TIROS DIRECTOS DE CÓRNER vs TIROS DESDE CÓRNER ──────────────────────
+//
+// Dos preguntas distintas sobre dos hechos distintos:
+//   · un CÓRNER que se ejecutó hacia portería   → CORNER.setPieceOutcome
+//   · un TIRO que declara venir de un córner    → SHOT.setPiece
+// Ni se suman, ni se deducen, ni una implica la otra.
+
+describe("tiros directos de córner", () => {
+  const directo = () => corner("shot");
+  const desdeCorner = () =>
+    event({ type: ActionType.SHOT, metadata: { isOpponent: false, setPiece: "corner" } });
+
+  it("un córner ejecutado en tiro suma a tiros directos y a NINGÚN tiro", () => {
+    const eventos = [directo()];
+    expect(summarizeCornerOutcomes(eventos, false).shot).toBe(1);
+    expect(countShotsFromSetPiece(eventos, "corner", false)).toBe(0);
+  });
+
+  it("un tiro desde córner suma a tiros desde córner y a NINGÚN tiro directo", () => {
+    const eventos = [desdeCorner()];
+    expect(countShotsFromSetPiece(eventos, "corner", false)).toBe(1);
+    expect(summarizeCornerOutcomes(eventos, false).shot).toBe(0);
+    expect(summarizeCornerOutcomes(eventos, false).total).toBe(0);
+  });
+
+  it("los dos a la vez: 1 directo, 1 desde córner, 1 córner, 1 tiro", () => {
+    const eventos = [directo(), desdeCorner()];
+    const corners = summarizeCornerOutcomes(eventos, false);
+    expect(corners.total).toBe(1);
+    expect(corners.shot).toBe(1);
+    expect(countShotsFromSetPiece(eventos, "corner", false)).toBe(1);
+    // Un único evento de tiro: el córner no crea ninguno.
+    expect(eventos.filter((e) => e.type === ActionType.SHOT)).toHaveLength(1);
+  });
+
+  it("un córner histórico sin subtipo no aporta tiros directos", () => {
+    const eventos = [corner(), corner()];
+    const corners = summarizeCornerOutcomes(eventos, false);
+    expect(corners.shot).toBe(0);
+    expect(corners.unrecorded).toBe(2);
+    expect(countShotsFromSetPiece(eventos, "corner", false)).toBe(0);
+  });
+
+  it("la etiqueta de usuario es inequívoca y nunca es solo «Tiro»", () => {
+    expect(SET_PIECE_OUTCOME_LABEL.shot).toBe("Tiro directo");
+    expect(SET_PIECE_OUTCOME_LABEL_PLURAL.shot).toBe("Tiros directos");
+  });
+
+  it("el resumen nombra las dos lecturas sin confundirlas", () => {
+    const texto = describeSetPieceOutcomes(summarizeCornerOutcomes([directo(), corner("play")]))!;
+    expect(texto).toBe("2 · tiros directos 1 · jugadas 1");
+    expect(texto).not.toMatch(/procedent/i);
   });
 });

@@ -60,13 +60,13 @@ describe("balón parado en el Historial", () => {
 
   it("añade el desenlace cuando consta", () => {
     expect(formatEventTypeLabel(corner({ cornerSide: "left", setPieceOutcome: "shot" })))
-      .toBe("🚩 Córner · izquierda · Tiro");
+      .toBe("🚩 Córner · izquierda · Tiro directo");
     expect(formatEventTypeLabel(corner({ cornerSide: "right", setPieceOutcome: "play" })))
       .toBe("🚩 Córner · derecha · Jugada");
   });
 
   it("un córner histórico sin desenlace no inventa ninguno", () => {
-    expect(formatEventTypeLabel(corner({ cornerSide: "left" }))).not.toMatch(/Tiro|Jugada/);
+    expect(formatEventTypeLabel(corner({ cornerSide: "left" }))).not.toMatch(/Tiro directo|Jugada/);
   });
 
   it("la falta se lee SOLO como falta: es la infracción, no la reanudación", () => {

@@ -27,6 +27,7 @@ import React from "react";
 import { ActionType, GameEvent, MatchData } from "../../types/futsal";
 import { CornerSummary, summarizeCorners } from "../../utils/cornerModel";
 import {
+  SET_PIECE_OUTCOME_LABEL,
   SET_PIECE_RESTART_LABEL_PLURAL,
   SetPieceOutcomeSummary,
   SetPieceRestartSummary,
@@ -117,8 +118,8 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
               <th style={head}>Total</th>
               <th style={head}>Izquierda</th>
               <th style={head}>Derecha</th>
-              <th style={head}>Tiro</th>
-              <th style={head}>Jugada</th>
+              <th style={head}>{SET_PIECE_OUTCOME_LABEL.shot}</th>
+              <th style={head}>{SET_PIECE_OUTCOME_LABEL.play}</th>
               <th style={head}>Sin subtipo registrado</th>
             </tr>
           </thead>
@@ -137,6 +138,11 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
           </tbody>
         </table>
         <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
+          «Tiro directo» indica que el córner se ejecutó directamente hacia portería. «Desde
+          córner», más abajo, contabiliza tiros registrados con procedencia córner. Son registros
+          independientes: ni se suman ni se deducen uno del otro.
+        </p>
+        <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 4 }}>
           «Sin subtipo registrado» significa que no consta cómo se ejecutó el córner; no es una
           estimación. El lado se lee desde la perspectiva del equipo que saca.
         </p>

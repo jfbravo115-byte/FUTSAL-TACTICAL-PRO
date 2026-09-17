@@ -261,6 +261,10 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
           <div>
             Desde falta {shotsFromFreeKick} · desde córner {shotsFromCorner}
           </div>
+          <div style={{ fontSize: 8, color: "#6b7280" }}>
+            Distinto de los tiros directos de córner, que cuentan córners ejecutados hacia
+            portería. Registros independientes.
+          </div>
         </div>
       )}
 

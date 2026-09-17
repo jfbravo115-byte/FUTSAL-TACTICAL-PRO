@@ -370,3 +370,43 @@ describe("jugadas de falta en el informe", () => {
     ]);
   });
 });
+
+// ── LAS DOS MÉTRICAS, SEPARADAS, EN LA PÁGINA 8 ─────────────────────────
+
+describe("tiros directos de córner en el informe", () => {
+  it("la columna se llama «Tiro directo», no «Tiro»", () => {
+    const host = render(partidoCompleto());
+    const tablaCorners = host.querySelector("[data-set-piece-row]")!.closest("table")!;
+    const cabeceras = Array.from(tablaCorners.querySelectorAll("th")).map((th) => th.textContent);
+    expect(cabeceras).toEqual([
+      "Equipo", "Total", "Izquierda", "Derecha", "Tiro directo", "Jugada", "Sin subtipo registrado",
+    ]);
+  });
+
+  it("el tiro directo NO se suma a «Desde córner», que viene del propio tiro", () => {
+    // partidoCompleto: 2 córners propios en tiro… más 1 tiro setPiece='corner'.
+    const host = render(partidoCompleto());
+    const corners = fila(host, "data-set-piece-row", "Equipo Local");
+    const tiros = fila(host, "data-shot-origin-row", "Equipo Local");
+    expect(corners[4]).toBe("1"); // tiros directos
+    expect(tiros[2]).toBe("1");   // desde córner
+  });
+
+  it("un córner en tiro sin ningún SHOT deja «Desde córner» a cero", () => {
+    const host = render(match([corner("left", "shot")]));
+    expect(fila(host, "data-set-piece-row", "Equipo Local")[4]).toBe("1");
+    expect(fila(host, "data-shot-origin-row", "Equipo Local")[2]).toBe("0");
+  });
+
+  it("un tiro desde córner sin CORNER registrado deja «Tiro directo» a cero", () => {
+    const host = render(match([shot("corner")]));
+    expect(fila(host, "data-set-piece-row", "Equipo Local")[4]).toBe("0");
+    expect(fila(host, "data-shot-origin-row", "Equipo Local")[2]).toBe("1");
+  });
+
+  it("la página explica que son registros independientes", async () => {
+    const texto = await exportarPagina(partidoCompleto());
+    expect(texto).toContain("«Tiro directo» indica que el córner se ejecutó directamente hacia portería");
+    expect(texto).toContain("Son registros independientes");
+  });
+});

@@ -423,13 +423,15 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   const cornersTxt = describeSetPieceOutcomes(r.setPieces.corners.team);
   if (cornersTxt) {
     lines.push(
-      `Córners **${cornersTxt}**` +
+      `Córners: **${cornersTxt}**` +
         (r.setPieces.corners.opponent.total > 0
           ? ` · del rival **${describeSetPieceOutcomes(r.setPieces.corners.opponent)}**`
           : ""),
     );
     lines.push(
-      "«Subtipo no registrado» significa que no consta cómo se ejecutó el córner; no es una estimación.",
+      "«Tiros directos» son córners ejecutados hacia portería; «tiros procedentes de córner», " +
+        "más abajo, son tiros registrados con esa procedencia. Son registros independientes. " +
+        "«Sin registrar» significa que no consta cómo se ejecutó el córner; no es una estimación.",
     );
   }
   // Tercera lectura, separada de las otras dos: la falta a favor que se puso
@@ -444,9 +446,9 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   }
   if (r.teamTotals.shotsFromFreeKick > 0 || r.teamTotals.shotsFromCorner > 0) {
     lines.push(
-      `Tiros procedentes de balón parado — falta **${r.teamTotals.shotsFromFreeKick}** · ` +
-        `córner **${r.teamTotals.shotsFromCorner}**. Son tiros propios: no son las faltas ` +
-        `cometidas, que se cuentan aparte.`,
+      `Tiros procedentes de balón parado — desde falta **${r.teamTotals.shotsFromFreeKick}** · ` +
+        `desde córner **${r.teamTotals.shotsFromCorner}**. Son tiros propios: no son las faltas ` +
+        `cometidas ni los tiros directos de córner, que se cuentan aparte.`,
     );
   }
   lines.push("");

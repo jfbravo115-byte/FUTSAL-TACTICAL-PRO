@@ -1060,7 +1060,7 @@ describe("PDF del informe · balón parado", () => {
   it("imprime el desglose de ejecución de los córners", async () => {
     const texto = await paginaZonas();
     expect(texto).toContain("Córners · ejecución");
-    expect(texto).toContain("4 — 2 tiro · 1 jugada · 1 subtipo no registrado");
+    expect(texto).toContain("4 · tiros directos 2 · jugadas 1 · sin registrar 1");
   });
 
   it("NO clasifica las faltas cometidas como tiro o jugada", async () => {

@@ -85,7 +85,7 @@ describe("CSV de acciones · balón parado", () => {
   it("traduce lado y desenlace del córner, sin códigos internos", () => {
     const fila = filas().find((f) => f.includes('"CORNER"') && f.includes("01:00"))!;
     expect(fila).toContain('"izquierda"');
-    expect(fila).toContain('"Tiro"');
+    expect(fila).toContain('"Tiro directo"');
     expect(fila).not.toContain('"shot"');
   });
 

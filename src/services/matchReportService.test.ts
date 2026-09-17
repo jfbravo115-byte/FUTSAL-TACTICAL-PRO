@@ -292,8 +292,8 @@ describe("balón parado en el informe", () => {
   it("el markdown que recibe Tactical Pro ya menciona los córners", () => {
     const md = formatMatchReportAsMarkdown(generateMatchReport(conBalonParado()));
     expect(md).toContain("Córners");
-    expect(md).toContain("2 tiro");
-    expect(md).toContain("subtipo no registrado");
+    expect(md).toContain("tiros directos 2");
+    expect(md).toContain("sin registrar 1");
     expect(md).not.toMatch(/setPieceOutcome|CORNER|'shot'/);
   });
 

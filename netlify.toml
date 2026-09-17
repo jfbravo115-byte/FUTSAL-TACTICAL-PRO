@@ -20,6 +20,16 @@
   to = "/.netlify/functions/tactical-pro"
   status = 200
 
+# TEMPORAL — sonda de diagnostico de streaming (Fase 6, paso 2G). Mismo patron
+# que la regla de arriba a proposito: es lo que permite comparar la ruta con
+# rewrite contra la directa y saber si esta capa acumula la respuesta o si se
+# pierde la cabecera Accept. Se borra con la funcion cuando el diagnostico
+# termine.
+[[redirects]]
+  from = "/api/stream-probe"
+  to = "/.netlify/functions/stream-probe"
+  status = 200
+
 
 # CRUD de Partidos — Netlify Database (@netlify/database, NETLIFY_DB_URL)
 [[redirects]]

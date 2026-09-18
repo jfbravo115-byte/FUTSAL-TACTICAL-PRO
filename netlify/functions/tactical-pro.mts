@@ -198,6 +198,51 @@ export function wantsNdjson(req: { headers: { get(name: string): string | null }
   return (req.headers.get("accept") || "").toLowerCase().includes(NDJSON_CONTENT_TYPE);
 }
 
+/**
+ * TECHO DE GASTO DEL SERVIDOR
+ * ===========================
+ * El cliente aborta a los 25 s, pero eso no detiene nada al otro lado: está
+ * medido que tras el corte del navegador la función siguió generando hasta los
+ * 47,5 s, y otra ejecución llegó al tope de Netlify. `ReadableStream.cancel()`
+ * nunca se invocó, y el `Context` de Netlify no expone ninguna señal de
+ * desconexión, así que el servidor no tiene forma de enterarse de que el
+ * usuario se fue.
+ *
+ * De ahí que el techo tenga que ser suyo y no depender del navegador: estos
+ * dos relojes siguen valiendo aunque mañana cambien los del cliente, o aunque
+ * el cliente sea otro.
+ *
+ * LOS NÚMEROS, Y POR QUÉ
+ * ----------------------
+ * La única finalización válida medida tardó 52,0 s (primer evento a 1,5 s,
+ * primer texto a 19,4 s). Netlify corta en seco a los 60 s. 57 s deja margen
+ * sobre esa generación válida y aún permite emitir la línea de error y cerrar
+ * el stream ordenadamente, que es exactamente lo que a los 60 s ya no se puede.
+ *
+ * Es un compromiso con UNA muestra: si aparece una generación válida más larga,
+ * la cortaremos. Preferimos cortarla nosotros con un error legible.
+ *
+ * El de inactividad va DELIBERADAMENTE por encima de los 20 s del cliente. No
+ * es su relevo: cubre lo que ocurre cuando el cliente ya no está.
+ *
+ * No hay reloj de servidor para el primer texto: con 19,4 s reales, cualquier
+ * umbral prudente quedaría por encima de los 25 s del navegador y no llegaría
+ * a dispararse nunca. Ese caso lo cubren el deadline y el presupuesto de 2L.
+ */
+export const SERVER_DEADLINE_MS = 57_000;
+export const SERVER_IDLE_MS = 25_000;
+
+export type CutoffReason = "deadline" | "idle";
+
+export const CUTOFF_MESSAGE: Record<CutoffReason, string> = {
+  deadline:
+    "La generación se detuvo al alcanzar el límite de tiempo del servidor. " +
+    "El informe determinista sigue disponible.",
+  idle:
+    "La generación se detuvo por falta de actividad. " +
+    "El informe determinista sigue disponible.",
+};
+
 /** Clase del error, para el log. Nunca su mensaje: puede llevar contenido. */
 function errorNameOf(error: any): string {
   return String(error?.name ?? error?.constructor?.name ?? "Error");
@@ -226,20 +271,75 @@ export function ndjsonStreamFrom(stream: {
   abort: () => void;
 }): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
+
+  // Estado que start() y cancel() comparten: los relojes hay que poder
+  // soltarlos desde los dos lados, y el aborto tiene que ser uno solo.
+  let abortado = false;
+  let deadline: ReturnType<typeof setTimeout> | null = null;
+  let inactividad: ReturnType<typeof setTimeout> | null = null;
+
+  const limpiarRelojes = () => {
+    if (deadline !== null) { clearTimeout(deadline); deadline = null; }
+    if (inactividad !== null) { clearTimeout(inactividad); inactividad = null; }
+  };
+
+  /** Idempotente: dos condiciones de corte no abortan dos veces. */
+  const abortar = () => {
+    if (abortado) return;
+    abortado = true;
+    stream.abort();
+  };
+
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      // Dos variables, las dos funcionales: cuántos fragmentos de informe han
-      // salido —de ello depende si esto termina en `done` o en error— y el
-      // motivo de cierre que declaró Anthropic, que va dentro del error para
-      // que se pueda saber POR QUÉ no hubo texto.
+      // Dos variables funcionales: cuántos fragmentos de informe han salido
+      // —de ello depende si esto termina en `done` o en error— y el motivo de
+      // cierre que declaró Anthropic, que va dentro del error.
       let fragmentos = 0;
       let stopReason = "unknown";
 
-      const push = (chunk: TacticalProChunk) =>
-        controller.enqueue(encoder.encode(ndjsonLine(chunk)));
+      // Y la bandera del techo de gasto. Existe porque NO se puede confiar en
+      // que `stream.abort()` haga lanzar al `for await`: el iterador del SDK
+      // es una cola, y si el aborto llega mientras procesamos un delta en vez
+      // de mientras esperamos el siguiente, el bucle TERMINA LIMPIAMENTE. Sin
+      // esta bandera, un informe cortado a medias saldría con `done` y el
+      // cliente lo guardaría como bueno: exactamente lo contrario de lo que
+      // arreglamos al prohibir el informe vacío.
+      let cutoffReason: CutoffReason | null = null;
+
+      let cerrado = false;
+
+      const cortar = (motivo: CutoffReason) => {
+        if (cutoffReason !== null) return;
+        cutoffReason = motivo;
+        limpiarRelojes();
+        abortar();
+      };
+
+      /** Solo un fragmento de texto REAL rearma el reloj; uno vacío no. */
+      const rearmarInactividad = () => {
+        if (inactividad !== null) clearTimeout(inactividad);
+        inactividad = setTimeout(() => cortar("idle"), SERVER_IDLE_MS);
+      };
+
+      // Encolar sobre un stream que el consumidor ya canceló lanza. Que el
+      // usuario se haya ido no debe convertirse en una excepción en el log.
+      const push = (chunk: TacticalProChunk) => {
+        if (cerrado) return;
+        try {
+          controller.enqueue(encoder.encode(ndjsonLine(chunk)));
+        } catch {
+          cerrado = true;
+        }
+      };
 
       try {
+        // Se arma aquí, ya dentro del bucle-listener: abortar antes de que el
+        // iterador registre sus manejadores dejaría un rechazo huérfano.
+        deadline = setTimeout(() => cortar("deadline"), SERVER_DEADLINE_MS);
+
         for await (const event of stream) {
+          if (cutoffReason !== null) break;
           if (
             event?.type === "message_delta" &&
             typeof event?.delta?.stop_reason === "string"
@@ -253,17 +353,22 @@ export function ndjsonStreamFrom(stream: {
             event.delta.text.length > 0
           ) {
             fragmentos++;
+            // El reloj de inactividad nace con el primer texto útil: antes de
+            // eso no hay nada que vigilar, y el techo lo pone el deadline.
+            rearmarInactividad();
             push({ t: event.delta.text });
           }
         }
-        if (fragmentos === 0) {
+
+        if (cutoffReason !== null) {
+          // Da igual si el bucle salió por excepción o limpiamente: si el
+          // servidor cortó, esto es un error y nunca un informe.
+          push({ error: CUTOFF_MESSAGE[cutoffReason] });
+        } else if (fragmentos === 0) {
           // Un informe vacío NO es un informe. Terminar aquí con `done` haría
           // que el cliente resolviera con una cadena vacía y la guardara en el
           // partido como análisis bueno: un fallo silencioso que después se
           // exportaría a PDF sin que nadie supiera que nunca hubo texto.
-          //
-          // Se reutiliza el error del propio protocolo; no hay un tercer caso.
-          // El motivo es un enum técnico de la API, no contenido.
           push({
             error:
               "El modelo terminó sin producir texto (stop_reason: " +
@@ -271,24 +376,36 @@ export function ndjsonStreamFrom(stream: {
               "). El informe determinista sigue disponible.",
           });
         } else {
-          // Única señal de que el informe está entero. Va después del bucle a
-          // propósito: si el bucle lanza, no se llega aquí.
+          // Única señal de que el informe está entero.
           push({ done: true });
         }
       } catch (error: any) {
         // Clase del error, nunca el objeto entero: un mensaje de la API puede
         // arrastrar fragmentos de lo enviado.
         console.error("tactical-pro stream failed:", errorNameOf(error));
-        push({ error: errorMessageOf(error) });
+        push({
+          error: cutoffReason !== null
+            ? CUTOFF_MESSAGE[cutoffReason]
+            : errorMessageOf(error),
+        });
       } finally {
-        controller.close();
+        limpiarRelojes();
+        cerrado = true;
+        try {
+          controller.close();
+        } catch {
+          // Ya cerrado o cancelado: nada que hacer.
+        }
       }
     },
+
     cancel() {
-      // El usuario cerró el modal o abortó. Sin esto la generación seguiría
-      // hasta el final contra la cuenta de Anthropic sin que nadie la lea.
-      //
-      stream.abort();
+      // Oportunista, NO el techo de gasto: está medido que Netlify no lo
+      // invoca al desconectarse el cliente. Cuesta nada y es lo correcto si
+      // algún día lo hace. No se intenta entregar nada: si el consumidor
+      // canceló, lo único que importa es parar Anthropic y soltar los relojes.
+      limpiarRelojes();
+      abortar();
     },
   });
 }

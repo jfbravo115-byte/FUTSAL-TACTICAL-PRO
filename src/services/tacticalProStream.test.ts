@@ -21,7 +21,10 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 import handler, {
+  CUTOFF_MESSAGE,
   MAX_OUTPUT_TOKENS,
+  SERVER_DEADLINE_MS,
+  SERVER_IDLE_MS,
   TACTICAL_PRO_EFFORT,
   NDJSON_CONTENT_TYPE,
   SYSTEM_INSTRUCTION,
@@ -408,5 +411,347 @@ describe("una generación sin texto no es un informe", () => {
     expect(cuerpo).not.toContain("RAZONAMIENTO-SECRETO");
     expect(cuerpo).not.toContain("FIRMA-SECRETA");
     expect(cuerpo).toBe('{"t":"informe visible"}\n{"done":true}\n');
+  });
+});
+
+// ── PASO 2Q · TECHO DE GASTO DEL SERVIDOR ──────────────────────────────
+//
+// El cliente aborta a los 25 s y eso no detiene nada al otro lado: medido, la
+// función siguió generando hasta 47,5 s y otra llegó al tope de Netlify, sin
+// que `cancel()` llegara a invocarse nunca. El techo tiene que ser del
+// servidor y no depender del navegador.
+//
+// Temporizadores falsos y un stream falso gobernado desde el test. Ninguna
+// llamada a Anthropic.
+
+/** Stream de Anthropic conducido a mano: se emite y se cierra desde el test. */
+function streamGobernado() {
+  const abort = vi.fn();
+  let emitir!: (event: any) => void;
+  let terminar!: () => void;
+  let romper!: (e: any) => void;
+  const cola: any[] = [];
+  const espera: Array<(v: IteratorResult<any>) => void> = [];
+  const rompe: Array<(e: any) => void> = [];
+  let fin = false;
+
+  emitir = (event: any) => {
+    const w = espera.shift();
+    if (w) w({ value: event, done: false });
+    else cola.push(event);
+  };
+  terminar = () => {
+    fin = true;
+    while (espera.length) espera.shift()!({ value: undefined, done: true });
+  };
+  romper = (e: any) => {
+    fin = true;
+    while (rompe.length) rompe.shift()!(e);
+    espera.length = 0;
+  };
+
+  return {
+    abort,
+    emitir,
+    terminar,
+    romper,
+    /** Imita el abort del SDK que hace SALIR LIMPIAMENTE al for-await. */
+    abortarLimpio: () => terminar(),
+    [Symbol.asyncIterator]() {
+      return {
+        next: () =>
+          new Promise<IteratorResult<any>>((resolve, reject) => {
+            if (cola.length) return resolve({ value: cola.shift(), done: false });
+            if (fin) return resolve({ value: undefined, done: true });
+            espera.push(resolve);
+            rompe.push(reject);
+          }),
+      };
+    },
+  };
+}
+
+const td = (text: string) => ({
+  type: "content_block_delta",
+  index: 0,
+  delta: { type: "text_delta", text },
+});
+
+/** Consume el ReadableStream en segundo plano y acumula las líneas. */
+function consumir(rs: ReadableStream<Uint8Array>) {
+  const recibido: any[] = [];
+  const dec = new TextDecoder();
+  let resto = "";
+  const fin = (async () => {
+    const reader = rs.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      resto += dec.decode(value, { stream: true });
+      const partes = resto.split("\n");
+      resto = partes.pop() ?? "";
+      for (const l of partes) if (l.trim()) recibido.push(JSON.parse(l));
+    }
+  })();
+  return { recibido, fin };
+}
+
+describe("techo de gasto del servidor", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("los márgenes son 57 s y 25 s, por encima de los del cliente", () => {
+    expect(SERVER_DEADLINE_MS).toBe(57_000);
+    expect(SERVER_IDLE_MS).toBe(25_000);
+    // El de inactividad NO copia el del cliente (20 s): cubre lo que pasa
+    // cuando el cliente ya no está.
+    expect(SERVER_IDLE_MS).toBeGreaterThan(20_000);
+    // Y el deadline deja margen para cerrar antes del tope de Netlify.
+    expect(SERVER_DEADLINE_MS).toBeLessThan(60_000);
+  });
+
+  /** Mantiene vivo el reloj de inactividad para poder llegar al deadline. */
+  const latir = async (s: any, hasta: number) => {
+    for (let t = 0; t < hasta; t += 20_000) {
+      await vi.advanceTimersByTimeAsync(Math.min(20_000, hasta - t));
+      s.emitir(td("."));
+      await vi.advanceTimersByTimeAsync(1);
+    }
+  };
+
+  it("57 s sin finalizar → aborta exactamente una vez", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    // Texto cada 20 s: la inactividad nunca vence, así que quien corta es el
+    // deadline. Es el escenario real de una generación que no termina.
+    await latir(s, 56_000);
+    expect(s.abort).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(s.abort).toHaveBeenCalledTimes(1);
+    s.abortarLimpio();
+    await fin;
+    expect(recibido.some((l) => l.done)).toBe(false);
+  });
+
+  it("el deadline produce error y NUNCA done", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    await latir(s, 56_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    s.abortarLimpio();
+    await fin;
+    expect(recibido[recibido.length - 1]).toEqual({ error: CUTOFF_MESSAGE.deadline });
+    expect(recibido.some((l) => l.done)).toBe(false);
+  });
+
+  it("una generación que termina a 52 s NO se corta", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    // Primer texto a 19,4 s, como la generación real, y fin a 52 s.
+    await vi.advanceTimersByTimeAsync(19_400);
+    s.emitir(td("## 1. Lectura"));
+    for (let t = 0; t < 32; t++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      s.emitir(td("."));
+    }
+    s.terminar();
+    await fin;
+    expect(s.abort).not.toHaveBeenCalled();
+    expect(recibido[recibido.length - 1]).toEqual({ done: true });
+  });
+
+  it("25 s sin texto tras el primero → aborta y da error", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("empieza"));
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SERVER_IDLE_MS + 10);
+    expect(s.abort).toHaveBeenCalledTimes(1);
+    s.abortarLimpio();
+    await fin;
+    expect(recibido).toEqual([
+      { t: "empieza" },
+      { error: CUTOFF_MESSAGE.idle },
+    ]);
+  });
+
+  it("antes del primer texto NO hay reloj de inactividad", async () => {
+    const s = streamGobernado();
+    consumir(ndjsonStreamFrom(s as any));
+    // 40 s de silencio absoluto: el deadline aún no ha vencido y el de
+    // inactividad ni siquiera existe, así que no se aborta.
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(s.abort).not.toHaveBeenCalled();
+  });
+
+  it("cada texto útil rearma el reloj de inactividad", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("a"));
+    await vi.advanceTimersByTimeAsync(1);
+    // Dos latidos justo por debajo del umbral —y por debajo del deadline—:
+    // sin rearme, el segundo ya habría cortado.
+    for (let i = 0; i < 2; i++) {
+      await vi.advanceTimersByTimeAsync(SERVER_IDLE_MS - 1_000);
+      s.emitir(td("b"));
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(s.abort).not.toHaveBeenCalled();
+    s.terminar();
+    await fin;
+    expect(recibido.filter((l) => l.t)).toHaveLength(3);
+    expect(recibido[recibido.length - 1]).toEqual({ done: true });
+  });
+
+  it("un delta vacío NO rearma el reloj de inactividad", async () => {
+    const s = streamGobernado();
+    consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("real"));
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SERVER_IDLE_MS - 2_000);
+    s.emitir(td("")); // vacío: no cuenta como actividad
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(3_000); // supera el umbral original
+    expect(s.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("CARRERA: si el abort hace salir LIMPIAMENTE al iterador, sigue siendo error", async () => {
+    // Es el caso que obliga a llevar bandera propia: el iterador del SDK es
+    // una cola, y un abort que llega mientras procesamos un delta termina el
+    // bucle sin excepción. Sin bandera, esto saldría con done.
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    await latir(s, 56_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    s.abortarLimpio(); // salida limpia, NO excepción
+    await fin;
+    expect(recibido.some((l) => l.done)).toBe(false);
+    expect(recibido[recibido.length - 1]).toEqual({ error: CUTOFF_MESSAGE.deadline });
+  });
+
+  it("CARRERA: si el abort hace LANZAR al iterador, el error es el del corte", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    await latir(s, 56_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    s.romper(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError" }));
+    await fin;
+    // No se filtra el mensaje del SDK: se explica el corte del servidor.
+    expect(recibido[recibido.length - 1]).toEqual({ error: CUTOFF_MESSAGE.deadline });
+    expect(JSON.stringify(recibido)).not.toContain("Request was aborted");
+  });
+});
+
+describe("relojes del servidor: limpieza", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const pendientes = () => vi.getTimerCount();
+
+  it("finalización normal → cero timers vivos", async () => {
+    const s = streamGobernado();
+    const { fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("a"));
+    await vi.advanceTimersByTimeAsync(1);
+    s.terminar();
+    await fin;
+    expect(pendientes()).toBe(0);
+  });
+
+  it("error de Anthropic → cero timers vivos", async () => {
+    const s = streamGobernado();
+    const { fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("a"));
+    await vi.advanceTimersByTimeAsync(1);
+    s.romper(new Error("Overloaded"));
+    await fin;
+    expect(pendientes()).toBe(0);
+  });
+
+  it("deadline → cero timers vivos", async () => {
+    const s = streamGobernado();
+    const { fin } = consumir(ndjsonStreamFrom(s as any));
+    await vi.advanceTimersByTimeAsync(SERVER_DEADLINE_MS + 10);
+    s.abortarLimpio();
+    await fin;
+    expect(pendientes()).toBe(0);
+  });
+
+  it("inactividad → cero timers vivos", async () => {
+    const s = streamGobernado();
+    const { fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("a"));
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SERVER_IDLE_MS + 10);
+    s.abortarLimpio();
+    await fin;
+    expect(pendientes()).toBe(0);
+  });
+
+  it("cancel() → aborta, limpia y no intenta entregar nada", async () => {
+    const s = streamGobernado();
+    const rs = ndjsonStreamFrom(s as any);
+    const reader = rs.getReader();
+    s.emitir(td("a"));
+    await reader.read();
+    await reader.cancel();
+    expect(s.abort).toHaveBeenCalledTimes(1);
+    expect(pendientes()).toBe(0);
+    // No se fabrica ni `done` ni un informe a partir de un stream cancelado.
+    s.abortarLimpio();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pendientes()).toBe(0);
+  });
+});
+
+describe("aborto idempotente", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("dos condiciones de corte → un solo abort y un solo error", async () => {
+    const s = streamGobernado();
+    const rs = ndjsonStreamFrom(s as any);
+    const { recibido, fin } = consumir(rs);
+    s.emitir(td("a"));
+    await vi.advanceTimersByTimeAsync(1);
+    // Inactividad primero; el deadline llegaría después si no se hubiera
+    // limpiado. Y encima, una cancelación del consumidor.
+    await vi.advanceTimersByTimeAsync(SERVER_IDLE_MS + 10);
+    await vi.advanceTimersByTimeAsync(SERVER_DEADLINE_MS);
+    s.abortarLimpio();
+    await fin;
+    expect(s.abort).toHaveBeenCalledTimes(1);
+    expect(recibido.filter((l) => l.error)).toHaveLength(1);
+    expect(recibido[recibido.length - 1]).toEqual({ error: CUTOFF_MESSAGE.idle });
+  });
+
+  it("abortar DESPUÉS de finalizar es inocuo", async () => {
+    const s = streamGobernado();
+    const { recibido, fin } = consumir(ndjsonStreamFrom(s as any));
+    s.emitir(td("informe"));
+    await vi.advanceTimersByTimeAsync(1);
+    s.terminar();
+    await fin;
+    expect(recibido[recibido.length - 1]).toEqual({ done: true });
+
+    // Ya no queda ningún reloj, así que nada puede abortar a destiempo, y
+    // dejar pasar el tiempo no añade ninguna línea.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(SERVER_DEADLINE_MS + SERVER_IDLE_MS);
+    expect(recibido.filter((l) => l.done)).toHaveLength(1);
+    expect(recibido.filter((l) => l.error)).toHaveLength(0);
+    expect(s.abort).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("los mensajes de corte no filtran nada", () => {
+  it("no contienen datos del partido ni del prompt", () => {
+    const todo = CUTOFF_MESSAGE.deadline + CUTOFF_MESSAGE.idle;
+    for (const s of ["matchData", "Z4L", "GK", "originGrid", "Redacta", "GLOSARIO", "stop_reason"]) {
+      expect(todo).not.toContain(s);
+    }
+    expect(CUTOFF_MESSAGE.deadline).toContain("informe determinista sigue disponible");
+    expect(CUTOFF_MESSAGE.idle).toContain("informe determinista sigue disponible");
   });
 });

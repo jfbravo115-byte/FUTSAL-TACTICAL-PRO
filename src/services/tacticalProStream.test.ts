@@ -22,6 +22,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 
 import handler, {
   MAX_OUTPUT_TOKENS,
+  TACTICAL_PRO_EFFORT,
   NDJSON_CONTENT_TYPE,
   SYSTEM_INSTRUCTION,
   buildPrompt,
@@ -304,13 +305,41 @@ describe("presupuesto de salida", () => {
     expect(incremental).toEqual(json);
   });
 
-  it("el razonamiento sigue activo: no se pasa thinking ni effort", async () => {
+  it("el razonamiento sigue ACTIVO: nunca se desactiva explícitamente", async () => {
     stream.mockReturnValue(fakeStream([textDelta("x")]));
     await (await handler(req(CUERPO, NDJSON), {} as any)).text();
     const params = stream.mock.calls[0][0];
+    // Omitir `thinking` es lo que deja corriendo el modo adaptativo en
+    // Sonnet 5. Pedir {type:"disabled"} sería lo contrario de lo que queremos.
     expect(params.thinking).toBeUndefined();
-    expect(params.output_config).toBeUndefined();
+    expect(JSON.stringify(params)).not.toContain("disabled");
     expect(params.model).toBe("claude-sonnet-5");
+  });
+
+  it("el esfuerzo es medium, un escalón por debajo del defecto", async () => {
+    stream.mockReturnValue(fakeStream([textDelta("x")]));
+    await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+    expect(TACTICAL_PRO_EFFORT).toBe("medium");
+    expect(stream.mock.calls[0][0].output_config).toEqual({ effort: "medium" });
+  });
+
+  it("LAS DOS ramas reciben el mismo esfuerzo, no dos literales", async () => {
+    create.mockResolvedValue({ content: [{ type: "text", text: "x" }] });
+    stream.mockReturnValue(fakeStream([textDelta("x")]));
+    await handler(req(CUERPO), {} as any);
+    await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+    expect(create.mock.calls[0][0].output_config).toEqual({ effort: TACTICAL_PRO_EFFORT });
+    expect(stream.mock.calls[0][0].output_config).toEqual({ effort: TACTICAL_PRO_EFFORT });
+  });
+
+  it("subir el esfuerzo no puede llevarse por delante el presupuesto", async () => {
+    // Los dos van juntos en la misma petición compartida: si alguien tocara
+    // uno sin el otro, esta comparación lo delataría.
+    stream.mockReturnValue(fakeStream([textDelta("x")]));
+    await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+    const params = stream.mock.calls[0][0];
+    expect(params.max_tokens).toBe(8192);
+    expect(params.output_config.effort).toBe("medium");
   });
 });
 

@@ -78,6 +78,27 @@ ${matchDataStr}
  */
 export const MAX_OUTPUT_TOKENS = 8192;
 
+/**
+ * Profundidad del razonamiento, compartida por las DOS ramas.
+ *
+ * Subir el presupuesto a 8192 no bastó: la generación siguió pensando hasta
+ * chocar con el límite de 60 s de Netlify, sin emitir un solo `text_delta`.
+ * Darle más techo a un razonamiento que no se detiene solo alarga la espera.
+ *
+ * `effort` es la palanca que regula cuánto piensa el modelo antes de escribir.
+ * `high` es el valor por defecto cuando se omite; se baja un escalón, a
+ * `medium`, que es exactamente el cambio de una variable.
+ *
+ * NO se desactiva el razonamiento. `thinking` se sigue omitiendo, y omitirlo
+ * es lo que deja corriendo el modo adaptativo en Claude Sonnet 5: pedir
+ * `{type:"disabled"}` sería otra cosa, y no es lo que queremos.
+ *
+ * Verificado contra el SDK instalado (0.121.0):
+ *   MessageCreateParamsBase.output_config?: OutputConfig
+ *   OutputConfig.effort?: 'low'|'medium'|'high'|'xhigh'|'max'|null
+ */
+export const TACTICAL_PRO_EFFORT = "medium" as const;
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -503,6 +524,7 @@ export default async (req: Request, _context: Context) => {
   const requestParams = {
     model: "claude-sonnet-5",
     max_tokens: MAX_OUTPUT_TOKENS,
+    output_config: { effort: TACTICAL_PRO_EFFORT },
     system: SYSTEM_INSTRUCTION,
     messages: [
       {
@@ -522,6 +544,8 @@ export default async (req: Request, _context: Context) => {
     userPromptChars: requestParams.messages[0].content.length,
     userPromptBytes: utf8Bytes(requestParams.messages[0].content),
     maxTokens: requestParams.max_tokens,
+    // Enum de la API, no contenido.
+    effort: requestParams.output_config.effort,
     model: requestParams.model,
   });
 

@@ -232,7 +232,9 @@ describe("hitos registrados", () => {
     const listo = logs.find((l) => l.includes("prompt-ready"))!;
     for (const campo of [
       "matchDataBytes=", "deterministicReportBytes=", "tacticalContextBytes=",
-      "systemChars=", "userPromptChars=", "userPromptBytes=", "maxTokens=", "model=",
+      "systemChars=", "userPromptChars=", "userPromptBytes=", "maxTokens=",
+      // Añadido en el paso 2L: es un enum de la API, no contenido.
+      "effort=medium", "model=",
     ]) {
       expect(listo).toContain(campo);
     }

@@ -63,7 +63,7 @@ import {
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
-import { generateTacticalReport } from "../services/tacticalAnalysisService";
+import { streamTacticalReport } from "../services/tacticalAnalysisService";
 import { TacticalReportModal } from "../components/TacticalReportModal";
 import {
   saveMatchSnapshot,
@@ -1146,24 +1146,9 @@ const StatsExportTemplate = React.forwardRef<
   );
 });
 
-// ── SANEAMIENTO DE SURROGATES HUÉRFANOS (fix real del bug reportado) ────
-// Si un campo de texto libre (nombre de equipo/jugador) contiene un
-// surrogate UTF-16 sin pareja — típicamente por un emoji cortado a mitad
-// al pegar texto, o por un fallo de autocorrección del teclado — el JSON
-// resultante de JSON.stringify() sigue siendo JSON válido (los surrogates
-// sueltos se permiten como \uXXXX), PERO al codificar ese string a UTF-8
-// para el body de fetch(), Safari/WebKit en iOS lanza exactamente:
-// "TypeError: The string did not match the expected pattern." — un error
-// nativo del motor, no de esta app ni del SDK de Anthropic (confirmado:
-// no aparece en ningún dependencia ni en @anthropic-ai/sdk). Chrome/V8 no
-// lanza este error para el mismo string, así que el fallo solo se
-// reproduce en Safari/iOS — coherente con que la app corre principalmente
-// como PWA en iPhone. Reemplazamos cualquier surrogate huérfano por el
-// carácter de reemplazo U+FFFD antes de enviar el body, sin tocar el
-// resto de la cadena.
-const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-const stripLoneSurrogates = (str: string): string =>
-  str.replace(LONE_SURROGATE_RE, "\uFFFD");
+// El saneamiento de surrogates huérfanos —el fix del TypeError de Safari/iOS
+// al codificar el body— vive ahora donde se construye ese body:
+// services/tacticalAnalysisService. Esta pantalla ya no arma la petición.
 
 const formatTime = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -1434,6 +1419,11 @@ export default function MatchTracker() {
   const [baseReportMarkdown, setBaseReportMarkdown] = useState<string | null>(null);
   const [aiAnalysisMarkdown, setAiAnalysisMarkdown] = useState<string | null>(null);
   const [tacticalProError, setTacticalProError] = useState<string | null>(null);
+  // El informe IA llegó a medias: se enseña, se marca como incompleto y NO se
+  // guarda en el partido. Ver services/tacticalAnalysisService.
+  const [isTacticalProPartial, setIsTacticalProPartial] = useState(false);
+  // Cancelación viva: cerrar el modal o desmontar corta la generación en curso.
+  const tacticalAbortRef = useRef<AbortController | null>(null);
   const displayedReport = baseReportMarkdown
     ? baseReportMarkdown +
       (aiAnalysisMarkdown ? `\n\n---\n\n## ✨ Análisis Tactical Pro\n\n${aiAnalysisMarkdown}` : "")
@@ -1450,6 +1440,7 @@ export default function MatchTracker() {
     setBaseReportMarkdown(formatMatchReportAsMarkdown(report));
     setAiAnalysisMarkdown(null);
     setTacticalProError(null);
+    setIsTacticalProPartial(false);
     setIsTacticalModalOpen(true);
   };
 
@@ -1462,31 +1453,40 @@ export default function MatchTracker() {
     setIsTacticalModalOpen(true);
     setIsGeneratingReport(true);
     setTacticalProError(null);
+    setIsTacticalProPartial(false);
+    setAiAnalysisMarkdown(null);
+
+    tacticalAbortRef.current?.abort();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    tacticalAbortRef.current = controller;
+
     try {
-      const res = await fetch('/api/tactical-pro', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: stripLoneSurrogates(JSON.stringify({ matchData: dataToAnalyze })),
+      // Mismo servicio y mismo protocolo que MatchAnalysis. El texto se pinta
+      // según llega; no hay un único plazo para "terminar el informe": los
+      // relojes vigilan que la cadena arranque y que no enmudezca.
+      const analysis = await streamTacticalReport(dataToAnalyze, {
         signal: controller.signal,
+        onDelta: (text) => setAiAnalysisMarkdown((prev) => (prev ?? '') + text),
       });
-      if (!res.ok) throw new Error(`TACTICAL PRO: ${res.status}`);
-      const data = await res.json();
-      if (data.analysis) {
-        setAiAnalysisMarkdown(data.analysis);
-        // La interpretación queda en el mismo estado/snapshot del partido y
-        // se incluirá en el guardado final normal. No crea registros remotos extra.
-        setMatchData((prev) => ({ ...prev, tacticalAnalysis: data.analysis }));
-        if (localCopyId) {
-          updateFinalLocalCopyMatchData(localCopyId, { ...dataToAnalyze, tacticalAnalysis: data.analysis });
-        }
-        return data.analysis as string;
+
+      // Solo aquí, con el informe ENTERO, se toca el partido. Un análisis a
+      // medias no puede acabar guardado y luego exportado como si fuera bueno.
+      setAiAnalysisMarkdown(analysis);
+      setMatchData((prev) => ({ ...prev, tacticalAnalysis: analysis }));
+      if (localCopyId) {
+        updateFinalLocalCopyMatchData(localCopyId, { ...dataToAnalyze, tacticalAnalysis: analysis });
       }
-      setTacticalProError('TACTICAL PRO no está disponible');
-      return null;
+      return analysis;
     } catch (e: any) {
       console.error(e);
+      if (e?.name === 'AbortError' && controller.signal.aborted && tacticalAbortRef.current !== controller) {
+        // Cancelación provocada por otra petición o por el cierre del modal:
+        // no es un fallo que anunciar.
+        return null;
+      }
+      // Lo que llegó se conserva a la vista, marcado como incompleto. Nunca
+      // se persiste: `setMatchData` queda fuera de esta rama a propósito.
+      setIsTacticalProPartial(!!e?.partial || !!aiAnalysisMarkdown);
       setTacticalProError(
         e?.name === 'AbortError'
           ? 'TACTICAL PRO no está disponible (tiempo de espera agotado)'
@@ -1494,10 +1494,21 @@ export default function MatchTracker() {
       );
       return null;
     } finally {
-      clearTimeout(timeoutId);
+      if (tacticalAbortRef.current === controller) tacticalAbortRef.current = null;
       setIsGeneratingReport(false);
     }
   };
+
+  // Cerrar el modal corta la generación en curso: ni se sigue pagando ni se
+  // guarda el parcial.
+  const closeTacticalModal = () => {
+    tacticalAbortRef.current?.abort();
+    tacticalAbortRef.current = null;
+    setIsTacticalModalOpen(false);
+  };
+
+  // Desmontar la pantalla con una generación viva dejaría el fetch huérfano.
+  useEffect(() => () => tacticalAbortRef.current?.abort(), []);
 
   const handleTacticalAnalysis = async () => {
     try {
@@ -3784,9 +3795,11 @@ export default function MatchTracker() {
 
       <TacticalReportModal 
         isOpen={isTacticalModalOpen}
-        onClose={() => setIsTacticalModalOpen(false)}
+        onClose={closeTacticalModal}
         report={displayedReport}
         isLoading={isGeneratingReport}
+        isStreaming={isGeneratingReport && !!aiAnalysisMarkdown}
+        isPartial={isTacticalProPartial}
         errorMessage={tacticalProError}
         onRetry={handleTacticalAnalysis}
       />

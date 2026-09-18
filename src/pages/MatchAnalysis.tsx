@@ -31,7 +31,7 @@ import { FutsalPitch } from "../components/field/FutsalPitch";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { describeSetPieceOutcomes } from "../utils/setPieceModel";
-import { generateTacticalReport } from "../services/tacticalAnalysisService";
+import { streamTacticalReport } from "../services/tacticalAnalysisService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
 function fmtSeconds(seconds: number) {
@@ -67,6 +67,9 @@ export default function MatchAnalysis() {
   const [ai, setAi] = useState<string>("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // El informe llegó a medias: se enseña, se marca y no se da por bueno.
+  const [aiPartial, setAiPartial] = useState(false);
+  const aiAbortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [zoneOpponent, setZoneOpponent] = useState(false);
   const [zoneMetric, setZoneMetric] = useState<ZoneMetric>("all");
@@ -130,20 +133,35 @@ export default function MatchAnalysis() {
     [match, zoneOpponent],
   );
 
+  // Mismo servicio y mismo protocolo que MatchTracker. Esta pantalla NO
+  // persiste el análisis —nunca lo hizo— y este paso no lo cambia.
+  // Salir de la pantalla corta la generación en curso.
+  useEffect(() => () => aiAbortRef.current?.abort(), []);
+
   const runAI = async () => {
     if (!match) return;
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
     setAiLoading(true);
     setAiError(null);
+    setAiPartial(false);
+    setAi("");
     try {
-      const result = await Promise.race([
-        generateTacticalReport(match),
-        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 20000)),
-      ]);
+      const result = await streamTacticalReport(match, {
+        signal: controller.signal,
+        onDelta: (text) => setAi((prev) => prev + text),
+      });
       setAi(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      if (err?.name === "AbortError" && aiAbortRef.current !== controller) return;
+      // Lo recibido se queda a la vista marcado como incompleto; no se guarda
+      // en ningún sitio porque esta pantalla no guarda.
+      setAiPartial(true);
       setAiError("TACTICAL PRO no está disponible. El informe automático sigue completo.");
     } finally {
+      if (aiAbortRef.current === controller) aiAbortRef.current = null;
       setAiLoading(false);
     }
   };
@@ -408,7 +426,9 @@ export default function MatchAnalysis() {
           </div>
           <div className="p-5">
             {aiError && <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-amber-300 text-xs">{aiError}</div>}
-            {ai ? <div className="prose prose-invert prose-sm max-w-none prose-headings:text-lime-300"><Markdown>{ai}</Markdown></div> : <div className="py-6 text-center text-slate-500 text-sm"><Users className="mx-auto opacity-20 mb-2"/>El informe determinista ya está disponible. Tactical Pro añade interpretación sin sustituir los datos.</div>}
+            {aiLoading && <div className="mb-4 flex items-center gap-2 text-lime-300/80 text-[10px] font-black uppercase tracking-widest"><Loader2 className="animate-spin" size={12}/>{ai ? "Escribiendo…" : "Analizando…"}</div>}
+            {aiPartial && ai && !aiLoading && <div className="mb-3 inline-block rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-amber-300">Informe incompleto · no guardado</div>}
+            {ai ? <div className={`prose prose-invert prose-sm max-w-none prose-headings:text-lime-300${aiPartial && !aiLoading ? " opacity-60" : ""}`}><Markdown>{ai}</Markdown></div> : !aiLoading && <div className="py-6 text-center text-slate-500 text-sm"><Users className="mx-auto opacity-20 mb-2"/>El informe determinista ya está disponible. Tactical Pro añade interpretación sin sustituir los datos.</div>}
           </div>
         </section>
       </main>

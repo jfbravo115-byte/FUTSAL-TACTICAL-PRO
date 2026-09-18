@@ -21,6 +21,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 import handler, {
+  MAX_OUTPUT_TOKENS,
   NDJSON_CONTENT_TYPE,
   SYSTEM_INSTRUCTION,
   buildPrompt,
@@ -265,5 +266,118 @@ describe("validaciones previas, comunes a las dos ramas", () => {
     const res = await handler(req(CUERPO, NDJSON), {} as any);
     expect(res.status).toBe(500);
     expect(stream).not.toHaveBeenCalled();
+  });
+});
+
+// ── PASO 2K ────────────────────────────────────────────────────────────
+//
+// La ejecución real `6ufrlr` lo dejó demostrado:
+//
+//   stopReason=max_tokens  inputTokens=12916  outputTokens=4096
+//   thinkingTokens=4096    deltas=0           47,5 s
+//
+// Sonnet 5 razona por defecto y el razonamiento cuenta contra `max_tokens`.
+// Con 4096 el presupuesto se agotaba pensando, antes de escribir una palabra.
+
+const msgDelta = (stop_reason: string) => ({
+  type: "message_delta",
+  delta: { stop_reason },
+  usage: { output_tokens: 8192, output_tokens_details: { thinking_tokens: 8192 } },
+});
+
+describe("presupuesto de salida", () => {
+  it("son 8192 tokens, restaurando los que tenía el endpoint", () => {
+    expect(MAX_OUTPUT_TOKENS).toBe(8192);
+  });
+
+  it("LAS DOS ramas usan la misma constante, no dos literales", async () => {
+    create.mockResolvedValue({ content: [{ type: "text", text: "x" }] });
+    stream.mockReturnValue(fakeStream([textDelta("x")]));
+    await handler(req(CUERPO), {} as any);
+    await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+
+    const json = create.mock.calls[0][0];
+    const incremental = stream.mock.calls[0][0];
+    expect(json.max_tokens).toBe(MAX_OUTPUT_TOKENS);
+    expect(incremental.max_tokens).toBe(MAX_OUTPUT_TOKENS);
+    // Y no solo el presupuesto: la petición entera es la misma.
+    expect(incremental).toEqual(json);
+  });
+
+  it("el razonamiento sigue activo: no se pasa thinking ni effort", async () => {
+    stream.mockReturnValue(fakeStream([textDelta("x")]));
+    await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+    const params = stream.mock.calls[0][0];
+    expect(params.thinking).toBeUndefined();
+    expect(params.output_config).toBeUndefined();
+    expect(params.model).toBe("claude-sonnet-5");
+  });
+});
+
+describe("una generación sin texto no es un informe", () => {
+  it("con texto y final normal: fragmentos y done", async () => {
+    stream.mockReturnValue(fakeStream([textDelta("## 1."), textDelta(" Lectura"), msgDelta("end_turn")]));
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls).toEqual([{ t: "## 1." }, { t: " Lectura" }, { done: true }]);
+  });
+
+  it("cero texto con stop_reason max_tokens → error, NUNCA done", async () => {
+    stream.mockReturnValue(
+      fakeStream([
+        { type: "content_block_start", content_block: { type: "thinking" } },
+        { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "razonando…" } },
+        msgDelta("max_tokens"),
+      ]),
+    );
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls).toHaveLength(1);
+    expect(ls[0].done).toBeUndefined();
+    expect(ls[0].error).toContain("sin producir texto");
+    expect(ls[0].error).toContain("max_tokens");
+  });
+
+  it("cero texto con stop_reason end_turn → error, NUNCA done", async () => {
+    stream.mockReturnValue(fakeStream([{ type: "message_start" }, msgDelta("end_turn")]));
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls).toHaveLength(1);
+    expect(ls[0].done).toBeUndefined();
+    expect(ls[0].error).toContain("end_turn");
+  });
+
+  it("cero texto sin desenlace declarado → error con unknown", async () => {
+    stream.mockReturnValue(fakeStream([{ type: "message_start" }]));
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls[0].error).toContain("unknown");
+    expect(ls[0].done).toBeUndefined();
+  });
+
+  it("el error explica que el informe determinista sigue ahí", async () => {
+    stream.mockReturnValue(fakeStream([msgDelta("max_tokens")]));
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls[0].error).toContain("informe determinista sigue disponible");
+  });
+
+  it("un text_delta vacío no salva la generación", async () => {
+    stream.mockReturnValue(
+      fakeStream([{ type: "content_block_delta", delta: { type: "text_delta", text: "" } }, msgDelta("end_turn")]),
+    );
+    const ls = await lineas(await handler(req(CUERPO, NDJSON), {} as any));
+    expect(ls[0].error).toBeDefined();
+    expect(ls[0].done).toBeUndefined();
+  });
+
+  it("el razonamiento nunca llega al navegador", async () => {
+    stream.mockReturnValue(
+      fakeStream([
+        { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "RAZONAMIENTO-SECRETO" } },
+        { type: "content_block_delta", delta: { type: "signature_delta", signature: "FIRMA-SECRETA" } },
+        textDelta("informe visible"),
+        msgDelta("end_turn"),
+      ]),
+    );
+    const cuerpo = await (await handler(req(CUERPO, NDJSON), {} as any)).text();
+    expect(cuerpo).not.toContain("RAZONAMIENTO-SECRETO");
+    expect(cuerpo).not.toContain("FIRMA-SECRETA");
+    expect(cuerpo).toBe('{"t":"informe visible"}\n{"done":true}\n');
   });
 });

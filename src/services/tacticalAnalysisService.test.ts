@@ -323,3 +323,35 @@ describe("relojes", () => {
     expect(pendientes()).toBe(0);
   });
 });
+
+describe("un informe vacío nunca es un éxito (paso 2K)", () => {
+  it("done sin un solo fragmento NO resuelve: rechaza", async () => {
+    // El servidor ya no manda esto, pero la promesa es lo único que separa
+    // "no hubo informe" de "se guardó una cadena vacía en el partido".
+    mockFetch(async () => respuesta(lineas([{ done: true }])));
+    const err = await streamTacticalReport(partido()).catch((e) => e);
+    expect(err).toBeInstanceOf(IncompleteReportError);
+    expect(err.message).toMatch(/no produjo ningún texto/);
+    expect(err.partial).toBe("");
+  });
+
+  it("un t vacío seguido de done tampoco cuela", async () => {
+    mockFetch(async () => respuesta(lineas([{ t: "" }, { done: true }])));
+    await expect(streamTacticalReport(partido())).rejects.toBeInstanceOf(IncompleteReportError);
+  });
+
+  it("el error de cero texto del servidor rechaza, no resuelve vacío", async () => {
+    mockFetch(async () =>
+      respuesta(lineas([{ error: "El modelo terminó sin producir texto (stop_reason: max_tokens)." }])),
+    );
+    const err = await streamTacticalReport(partido()).catch((e) => e);
+    expect(err).toBeInstanceOf(IncompleteReportError);
+    expect(err.message).toContain("max_tokens");
+    expect(err.partial).toBe("");
+  });
+
+  it("un informe con texto sí resuelve, como siempre", async () => {
+    mockFetch(async () => respuesta(lineas([{ t: "# Informe" }, { done: true }])));
+    expect(await streamTacticalReport(partido())).toBe("# Informe");
+  });
+});

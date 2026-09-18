@@ -276,12 +276,15 @@ describe("el protocolo no cambia", () => {
     expect(cuerpo).not.toContain("SECRETO-FIRMA");
   });
 
-  it("done conserva su semántica actual, incluso con cero fragmentos", async () => {
-    // Durante este paso NO se corrige: un informe vacío sigue terminando en
-    // `done`. Mezclar diagnóstico y corrección haría el resultado ilegible.
+  it("cero fragmentos ya NO es done: es error (corregido en el paso 2K)", async () => {
+    // Hasta el paso 2J esto devolvía {"done":true} y el cliente habría
+    // guardado una cadena vacía como informe del partido.
     stream.mockReturnValue(fakeStream(SOLO_RAZONAMIENTO));
     const cuerpo = await (await handler(req(NDJSON), {} as any)).text();
-    expect(cuerpo).toBe('{"done":true}\n');
+    expect(cuerpo).not.toContain('"done"');
+    const linea = JSON.parse(cuerpo.trim());
+    expect(linea.error).toContain("sin producir texto");
+    expect(linea.error).toContain("max_tokens");
   });
 
   it("error sigue sin done y con su mensaje intacto", async () => {

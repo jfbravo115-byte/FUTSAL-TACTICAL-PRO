@@ -221,6 +221,14 @@ export async function streamTacticalReport(
       );
     }
 
+    // Segundo cerrojo, redundante a propósito. El servidor ya no manda `done`
+    // sin texto, pero esta promesa es lo único que separa "no hubo informe" de
+    // "se guardó una cadena vacía como informe del partido". Un despliegue
+    // antiguo, un proxy o un cambio futuro no deben poder colarlo.
+    if (!received) {
+      throw new IncompleteReportError('El modelo no produjo ningún texto', '');
+    }
+
     return received;
   } catch (error: any) {
     // Cortar la conexión dispara el `cancel()` del ReadableStream en la

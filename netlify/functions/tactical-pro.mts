@@ -59,6 +59,25 @@ ${matchDataStr}
 `;
 }
 
+/**
+ * Presupuesto de salida, compartido por las DOS ramas.
+ *
+ * Claude Sonnet 5 razona por defecto —omitir `thinking` ejecuta el modo
+ * adaptativo— y los tokens de razonamiento cuentan contra este presupuesto.
+ * Con 4096 la ejecución real `6ufrlr` se lo gastó entero pensando:
+ *
+ *   stopReason=max_tokens  outputTokens=4096  thinkingTokens=4096  deltas=0
+ *
+ * 47 segundos de generación y ni una palabra de informe. Se restauran los
+ * 8192 que este endpoint tuvo originalmente y que un commit anterior había
+ * reducido a la mitad en el mismo cambio que agrandó el prompt.
+ *
+ * Es una constante y no dos literales a propósito: si cada rama llevara el
+ * suyo, la de streaming y la JSON podrían divergir sin que nadie lo notara,
+ * que es justo el patrón que llevamos toda la Fase 6 eliminando.
+ */
+export const MAX_OUTPUT_TOKENS = 8192;
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -142,6 +161,8 @@ export type StreamTally = {
   observe: (event: any) => void;
   /** Cuántos `text_delta` con texto se han visto. */
   readonly textDeltas: number;
+  /** Motivo de cierre que declaró Anthropic, o `unknown` si no llegó. */
+  readonly stopReason: string;
   /** Vuelca el censo y el desenlace. Nunca escribe contenido. */
   report: (diag: Diagnostics | undefined) => void;
 };
@@ -224,6 +245,10 @@ export function createStreamTally(): StreamTally {
 
     get textDeltas() {
       return textDeltas;
+    },
+
+    get stopReason() {
+      return typeof stopReason === "string" ? stopReason : "unknown";
     },
 
     report(diag) {
@@ -364,14 +389,27 @@ export function ndjsonStreamFrom(
           }
         }
         censo.report(diag);
-        // Única señal de que el informe está entero. Va después del bucle a
-        // propósito: si el bucle lanza, no se llega aquí.
-        //
-        // Durante este paso `done` conserva EXACTAMENTE su semántica actual,
-        // incluso con cero fragmentos: mezclar diagnóstico y corrección haría
-        // imposible saber cuál de los dos cambió el resultado.
-        push({ done: true });
-        diag?.mark("stream-complete", { deltas: fragmentos });
+        if (fragmentos === 0) {
+          // Un informe vacío NO es un informe. Terminar aquí con `done` haría
+          // que el cliente resolviera con una cadena vacía y la guardara en el
+          // partido como análisis bueno: un fallo silencioso que después se
+          // exportaría a PDF sin que nadie supiera que nunca hubo texto.
+          //
+          // Se reutiliza el error del propio protocolo; no hay un tercer caso.
+          // El motivo es un enum técnico de la API, no contenido.
+          push({
+            error:
+              "El modelo terminó sin producir texto (stop_reason: " +
+              censo.stopReason +
+              "). El informe determinista sigue disponible.",
+          });
+          diag?.mark("stream-empty", { stopReason: censo.stopReason });
+        } else {
+          // Única señal de que el informe está entero. Va después del bucle a
+          // propósito: si el bucle lanza, no se llega aquí.
+          push({ done: true });
+          diag?.mark("stream-complete", { deltas: fragmentos });
+        }
       } catch (error: any) {
         console.error("tactical-pro stream error:", error);
         // El NOMBRE del error, nunca su mensaje: un mensaje de la API podría
@@ -464,7 +502,7 @@ export default async (req: Request, _context: Context) => {
   // generadores divergentes, que es el problema que arrastramos desde Fase 4.
   const requestParams = {
     model: "claude-sonnet-5",
-    max_tokens: 4096,
+    max_tokens: MAX_OUTPUT_TOKENS,
     system: SYSTEM_INSTRUCTION,
     messages: [
       {

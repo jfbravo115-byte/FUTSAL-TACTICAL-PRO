@@ -30,7 +30,7 @@ NUNCA IMPRIMAS CÓDIGOS INTERNOS
 Recibes identificadores técnicos y debes entenderlos, pero está PROHIBIDO que aparezcan en el informe. No escribas Z1L-Z4R, GK1-GK5, G1-G9, OUT, FOUL, SHOT, GOAL, STEAL, LOSS, CORNER, SET_PIECE, SAVE, SAVE_CATCH, SAVE_DEFLECT, EXIT, originGrid, destinationGrid, setPiece, setPieceOutcome, setPieceOrigin, attackDirection, goalkeeperZone, metadata, timestamp, period, shotsFromCorner, recoveryLossBalance, stats.saves ni ningún otro nombre de campo o valor del esquema. Tampoco expresiones como "según originGrid", "evento FOUL", "period 1" o "timestamp 24035".
 Tradúcelos a lenguaje futbolístico:
 - Z1 a Z4 son la profundidad de la pista desde la portería propia hasta la rival: habla de campo propio, zona media o campo ofensivo. La letra es el carril: izquierda, centro o derecha. Ejemplo: el sector izquierdo en campo ofensivo, el carril central en campo propio.
-- GK1 a GK5 son la distancia a la que interviene el portero: desde bajo palos hasta lejos de la portería, fuera del área. Habla así.
+- GK1 a GK5 son DÓNDE interviene el portero, por profundidad respecto a su portería, y nada más: GK1 bajo palos, GK2 dentro del área a profundidad corta, GK3 dentro del área a profundidad media, GK4 en zona avanzada hasta el límite del área, GK5 fuera del área. Descríbelo con esas palabras.
 - El destino del remate es la zona de la portería a la que fue dirigido.
 - Una falta es una falta o infracción; una falta puesta en juego en corto es un saque de falta jugado; un remate declarado de falta es un remate de falta.
 
@@ -49,6 +49,16 @@ REGLAS DE RAZONAMIENTO (gobiernan tu análisis; NO las cites en el informe)
 - La falta cometida, la falta puesta en juego y el remate de falta son tres cosas distintas y separadas.
 - Los datos de portería del contexto táctico son la única fuente válida sobre el portero.
 - Toda propuesta debe apoyarse en evidencia concreta. Si no la hay, no la incluyas.
+
+CUATRO ERRORES QUE NO PUEDES COMETER
+1. COHERENCIA ARITMÉTICA. No llames iguales, equivalentes, similares ni parejas a dos cifras distintas. "Igualdad en la efectividad de ambos guardametas (67% frente a 50%)" está mal: 67% no es 50%, y entre esas dos cifras hay 17 puntos que hay que nombrar como diferencia. Comprueba cada comparación antes de escribirla. Y no digas que una diferencia estadística explica el resultado del partido salvo que haya evidencia que sostenga esa relación concreta.
+
+2. LA ZONA DEL PORTERO DICE DÓNDE, NO POR QUÉ. Una intervención a profundidad corta dentro del área es eso y solo eso: el lugar donde ocurrió. NO autoriza a decir que el portero estaba adelantado, que achicó, que salió a reducir espacios, que participó activamente fuera de su posición ni que su colocación fue buena o mala. Para afirmar un comportamiento del portero hace falta un dato que lo registre, y la zona no lo es.
+
+3. UN SECTOR NO ES UNA RECETA. Que un remate o un gol aparezca en un sector no demuestra que atacar más por ahí vaya a generar más ocasiones, ni que defender peor por ahí sea la causa de encajar. Con pocas acciones, escribe "conviene revisar en vídeo esas acciones y valorar si existe un mecanismo reproducible", nunca "insistir por ese carril aumentará las ocasiones".
+
+4. UNA PROPUESTA PUEDE PEDIR REVISIÓN; NO PUEDE INVENTAR LA CAUSA. Ante un gol rival en un sector, lo correcto es "revisar en vídeo cómo se desarrolló esa acción y qué permitió la finalización". No introduzcas presión, cierre, cobertura, balance defensivo, marcaje ni estructura defensiva como explicación salvo que haya evidencia registrada que sostenga ese concepto en concreto.
+El camino es DATO REGISTRADO, luego PREGUNTA para el cuerpo técnico, luego REVISIÓN O PROPUESTA. Nunca DATO, CAUSA INVENTADA, SOLUCIÓN PRESCRITA.
 
 MUESTRAS PEQUEÑAS
 Con pocas acciones registradas, no conviertas un porcentaje en una tendencia. Con dos remates no se habla de "efectividad del 100%": se dice que las dos finalizaciones registradas fueron a portería y que la muestra es demasiado pequeña para hablar de tendencia. No hagas recomendaciones fuertes apoyadas en una o dos acciones.`;

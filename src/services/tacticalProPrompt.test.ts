@@ -83,8 +83,10 @@ describe("los códigos internos no salen en el informe", () => {
   });
 
   it("enseña a traducir la portería y el destino del remate", () => {
-    expect(SYSTEM_INSTRUCTION).toMatch(/GK1 a GK5 son la distancia a la que interviene el portero/);
-    expect(SYSTEM_INSTRUCTION).toMatch(/bajo palos hasta lejos de la portería/);
+    // Desde el paso 2N la escala es la autoritativa completa, no una
+    // paráfrasis: decir "distancia" a secas invitaba a leerla como conducta.
+    expect(SYSTEM_INSTRUCTION).toMatch(/GK1 a GK5 son DÓNDE interviene el portero/);
+    expect(SYSTEM_INSTRUCTION).toMatch(/GK1 bajo palos.*GK5 fuera del área/s);
     expect(SYSTEM_INSTRUCTION).toMatch(/destino del remate es la zona de la portería/);
   });
 
@@ -282,5 +284,114 @@ describe("el contrato no se contradice a sí mismo", () => {
     // Si esto se dispara, el contrato se ha convertido en un manual y compite
     // con los datos por el presupuesto de entrada.
     expect(contrato().length).toBeLessThan(12_000);
+  });
+});
+
+// ── PASO 2N ────────────────────────────────────────────────────────────
+//
+// El informe real del paso 2M ya no imprime códigos, pero cometió cuatro
+// errores de rigor. Los ejemplos de abajo son literales de esa salida: si
+// alguien afloja el contrato, estos tests lo dicen.
+
+describe("coherencia aritmética", () => {
+  it("prohíbe llamar iguales a dos cifras distintas", () => {
+    expect(SYSTEM_INSTRUCTION).toContain("COHERENCIA ARITMÉTICA");
+    expect(SYSTEM_INSTRUCTION).toMatch(
+      /No llames iguales, equivalentes, similares ni parejas a dos cifras distintas/,
+    );
+  });
+
+  it("usa el error real como ejemplo, con las dos cifras", () => {
+    // "igualdad en la efectividad de ambos guardametas (67% frente a 50%)"
+    expect(SYSTEM_INSTRUCTION).toContain("67% frente a 50%");
+    expect(SYSTEM_INSTRUCTION).toMatch(/67% no es 50%/);
+    expect(SYSTEM_INSTRUCTION).toMatch(/hay que nombrar como diferencia/);
+  });
+
+  it("obliga a comprobar cada comparación antes de escribirla", () => {
+    expect(SYSTEM_INSTRUCTION).toMatch(/Comprueba cada comparación antes de escribirla/);
+  });
+
+  it("prohíbe que una diferencia estadística explique el resultado sin evidencia", () => {
+    expect(SYSTEM_INSTRUCTION).toMatch(
+      /no digas que una diferencia estadística explica el resultado del partido salvo que haya evidencia/,
+    );
+  });
+});
+
+describe("la zona del portero dice dónde, no por qué", () => {
+  it("da la escala espacial autoritativa completa", () => {
+    // La misma que fija types/futsal.ts. Ni una interpretación de más.
+    expect(SYSTEM_INSTRUCTION).toContain("GK1 bajo palos");
+    expect(SYSTEM_INSTRUCTION).toContain("GK2 dentro del área a profundidad corta");
+    expect(SYSTEM_INSTRUCTION).toContain("GK3 dentro del área a profundidad media");
+    expect(SYSTEM_INSTRUCTION).toContain("GK4 en zona avanzada hasta el límite del área");
+    expect(SYSTEM_INSTRUCTION).toContain("GK5 fuera del área");
+  });
+
+  it("declara que la zona es ubicación, no comportamiento", () => {
+    expect(SYSTEM_INSTRUCTION).toContain("LA ZONA DEL PORTERO DICE DÓNDE, NO POR QUÉ");
+    expect(SYSTEM_INSTRUCTION).toMatch(/el lugar donde ocurrió/);
+    expect(SYSTEM_INSTRUCTION).toMatch(/DÓNDE interviene el portero, por profundidad/);
+  });
+
+  it("prohíbe una por una las lecturas tácticas que se coló", () => {
+    for (const invento of [
+      "estaba adelantado",
+      "achicó",
+      "salió a reducir espacios",
+      "participó activamente fuera de su posición",
+      "colocación fue buena o mala",
+    ]) {
+      expect(SYSTEM_INSTRUCTION).toContain(invento);
+    }
+    expect(SYSTEM_INSTRUCTION).toMatch(/NO autoriza/);
+  });
+
+  it("exige un dato registrado para afirmar un comportamiento del portero", () => {
+    expect(SYSTEM_INSTRUCTION).toMatch(
+      /hace falta un dato que lo registre, y la zona no lo es/,
+    );
+  });
+});
+
+describe("un sector no es una receta", () => {
+  it("prohíbe convertir la correlación espacial en prescripción", () => {
+    expect(SYSTEM_INSTRUCTION).toContain("UN SECTOR NO ES UNA RECETA");
+    expect(SYSTEM_INSTRUCTION).toMatch(/no demuestra que atacar más por ahí vaya a generar más ocasiones/);
+    expect(SYSTEM_INSTRUCTION).toMatch(/ni que defender peor por ahí sea la causa de encajar/);
+  });
+
+  it("da la fórmula correcta y la incorrecta, literales", () => {
+    expect(SYSTEM_INSTRUCTION).toContain(
+      "conviene revisar en vídeo esas acciones y valorar si existe un mecanismo reproducible",
+    );
+    expect(SYSTEM_INSTRUCTION).toContain("insistir por ese carril aumentará las ocasiones");
+    expect(SYSTEM_INSTRUCTION).toMatch(/nunca "insistir por ese carril/);
+  });
+});
+
+describe("una propuesta pide revisión, no inventa la causa", () => {
+  it("da la forma correcta ante un gol rival en un sector", () => {
+    expect(SYSTEM_INSTRUCTION).toContain("UNA PROPUESTA PUEDE PEDIR REVISIÓN; NO PUEDE INVENTAR LA CAUSA");
+    expect(SYSTEM_INSTRUCTION).toContain(
+      "revisar en vídeo cómo se desarrolló esa acción y qué permitió la finalización",
+    );
+  });
+
+  it("nombra los seis conceptos que no pueden colarse como explicación", () => {
+    for (const concepto of [
+      "presión", "cierre", "cobertura", "balance defensivo", "marcaje", "estructura defensiva",
+    ]) {
+      expect(SYSTEM_INSTRUCTION).toContain(concepto);
+    }
+    expect(SYSTEM_INSTRUCTION).toMatch(/salvo que haya evidencia registrada que sostenga ese concepto en concreto/);
+  });
+
+  it("fija el camino permitido y el prohibido", () => {
+    expect(SYSTEM_INSTRUCTION).toMatch(
+      /DATO REGISTRADO, luego PREGUNTA para el cuerpo técnico, luego REVISIÓN O PROPUESTA/,
+    );
+    expect(SYSTEM_INSTRUCTION).toMatch(/Nunca DATO, CAUSA INVENTADA, SOLUCIÓN PRESCRITA/);
   });
 });

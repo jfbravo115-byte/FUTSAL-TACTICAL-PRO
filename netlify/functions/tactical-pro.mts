@@ -116,6 +116,143 @@ export function utf8Bytes(str: string): number {
   return new TextEncoder().encode(str).length;
 }
 
+/**
+ * Ausente ≠ cero.
+ *
+ * Es la misma regla que el glosario le impone al modelo, aplicada a nosotros:
+ * un campo que no viene significa "no lo sabemos", no "vale 0". Si esto
+ * devolviera 0, un `thinkingTokens=0` inventado apuntaría al diagnóstico
+ * contrario del real.
+ */
+export function orUnknown(value: unknown): string | number {
+  return typeof value === "number" ? value : "unknown";
+}
+
+/** Censo compacto de tipos: `a:3,b:1`, sin espacios y en orden estable. */
+function tally(counts: Map<string, number>): string {
+  if (counts.size === 0) return "none";
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([k, n]) => `${k}:${n}`)
+    .join(",");
+}
+
+export type StreamTally = {
+  /** Registra un evento del stream. Solo mira tipos y números. */
+  observe: (event: any) => void;
+  /** Cuántos `text_delta` con texto se han visto. */
+  readonly textDeltas: number;
+  /** Vuelca el censo y el desenlace. Nunca escribe contenido. */
+  report: (diag: Diagnostics | undefined) => void;
+};
+
+/**
+ * Observador del stream de Anthropic.
+ *
+ * La ejecución `5kjdhw` generó durante 42 s y terminó limpiamente con CERO
+ * `text_delta`. Nuestro filtro es correcto —solo el texto es informe— pero
+ * ciego: no distingue "no llegó nada" de "llegó mucho y nada era texto".
+ *
+ * Esto cuenta lo que pasó de largo y recoge el desenlace que Anthropic ya
+ * manda en `message_start` y `message_delta`. No cuesta ninguna llamada: son
+ * campos de la misma generación.
+ *
+ * SOLO TIPOS Y NÚMEROS. El texto de un `thinking_delta`, de un `text_delta` o
+ * de una firma no se lee, no se acumula y no se registra: únicamente se suma
+ * uno a su contador.
+ */
+export function createStreamTally(): StreamTally {
+  const events = new Map<string, number>();
+  const blocks = new Map<string, number>();
+  const deltas = new Map<string, number>();
+  let textDeltas = 0;
+
+  let stopReason: unknown;
+  let inputTokens: unknown;
+  let outputTokens: unknown;
+  let thinkingTokens: unknown;
+  let cacheCreate: unknown;
+  let cacheRead: unknown;
+
+  const bump = (m: Map<string, number>, key: unknown) => {
+    const k = typeof key === "string" && key ? key : "unknown";
+    m.set(k, (m.get(k) ?? 0) + 1);
+  };
+
+  /** Solo sobrescribe con números: un `null` del SDK no borra lo ya sabido. */
+  const keepNumber = (current: unknown, next: unknown) =>
+    typeof next === "number" ? next : current;
+
+  const readUsage = (usage: any) => {
+    if (!usage) return;
+    inputTokens = keepNumber(inputTokens, usage.input_tokens);
+    outputTokens = keepNumber(outputTokens, usage.output_tokens);
+    cacheCreate = keepNumber(cacheCreate, usage.cache_creation_input_tokens);
+    cacheRead = keepNumber(cacheRead, usage.cache_read_input_tokens);
+    thinkingTokens = keepNumber(
+      thinkingTokens,
+      usage.output_tokens_details?.thinking_tokens,
+    );
+  };
+
+  return {
+    observe(event: any) {
+      bump(events, event?.type);
+      if (event?.type === "content_block_start") {
+        bump(blocks, event?.content_block?.type);
+      }
+      if (event?.type === "content_block_delta") {
+        bump(deltas, event?.delta?.type);
+        if (
+          event?.delta?.type === "text_delta" &&
+          typeof event.delta.text === "string" &&
+          event.delta.text.length > 0
+        ) {
+          textDeltas++;
+        }
+      }
+      // `message_start` trae el usage inicial (entrada y caché);
+      // `message_delta` trae el desenlace y la salida.
+      if (event?.type === "message_start") readUsage(event?.message?.usage);
+      if (event?.type === "message_delta") {
+        readUsage(event?.usage);
+        if (typeof event?.delta?.stop_reason === "string") {
+          stopReason = event.delta.stop_reason;
+        }
+      }
+    },
+
+    get textDeltas() {
+      return textDeltas;
+    },
+
+    report(diag) {
+      if (!diag) return;
+      diag.mark("stream-types", {
+        events: tally(events),
+        blocks: tally(blocks),
+        deltas: tally(deltas),
+      });
+      diag.mark("message-result", {
+        stopReason: typeof stopReason === "string" ? stopReason : "unknown",
+        inputTokens: orUnknown(inputTokens),
+        outputTokens: orUnknown(outputTokens),
+        thinkingTokens: orUnknown(thinkingTokens),
+        cacheCreate: orUnknown(cacheCreate),
+        cacheRead: orUnknown(cacheRead),
+      });
+      if (textDeltas === 0) {
+        // La línea que convierte "no pasó nada" en un diagnóstico.
+        diag.mark("no-text-produced", {
+          stopReason: typeof stopReason === "string" ? stopReason : "unknown",
+          outputTokens: orUnknown(outputTokens),
+          thinkingTokens: orUnknown(thinkingTokens),
+        });
+      }
+    },
+  };
+}
+
 /** Tipo de contenido del protocolo incremental. */
 export const NDJSON_CONTENT_TYPE = "application/x-ndjson";
 
@@ -194,6 +331,8 @@ export function ndjsonStreamFrom(
       let primerTexto = false;
       let primerEnvio = false;
       let fragmentos = 0;
+      // Observa TODO lo que pasa; el filtro de abajo sigue enviando solo texto.
+      const censo = createStreamTally();
 
       const push = (chunk: TacticalProChunk) => {
         controller.enqueue(encoder.encode(ndjsonLine(chunk)));
@@ -204,6 +343,7 @@ export function ndjsonStreamFrom(
       };
       try {
         for await (const event of stream) {
+          censo.observe(event);
           if (!primerEvento) {
             primerEvento = true;
             // El tipo del evento es metadato del protocolo, no contenido.
@@ -223,8 +363,13 @@ export function ndjsonStreamFrom(
             push({ t: event.delta.text });
           }
         }
+        censo.report(diag);
         // Única señal de que el informe está entero. Va después del bucle a
         // propósito: si el bucle lanza, no se llega aquí.
+        //
+        // Durante este paso `done` conserva EXACTAMENTE su semántica actual,
+        // incluso con cero fragmentos: mezclar diagnóstico y corrección haría
+        // imposible saber cuál de los dos cambió el resultado.
         push({ done: true });
         diag?.mark("stream-complete", { deltas: fragmentos });
       } catch (error: any) {
@@ -235,6 +380,9 @@ export function ndjsonStreamFrom(
           type: String(error?.name ?? error?.constructor?.name ?? "Error"),
           deltas: fragmentos,
         });
+        // Antes del push: si el consumidor se fue, encolar lanza y perderíamos
+        // el censo, que es justo lo que explica un fallo a mitad.
+        censo.report(diag);
         push({ error: errorMessageOf(error) });
       } finally {
         controller.close();

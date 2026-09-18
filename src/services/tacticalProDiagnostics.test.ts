@@ -180,6 +180,10 @@ describe("hitos registrados", () => {
       "first-anthropic-event",
       "first-text-delta",
       "first-enqueue",
+      // Añadidos en el paso 2J: el censo de tipos y el desenlace que Anthropic
+      // manda en la misma generación. Van antes del cierre a propósito.
+      "stream-types",
+      "message-result",
       "stream-complete",
     ]);
   });

@@ -159,199 +159,6 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-// ── INSTRUMENTACIÓN TEMPORAL (Fase 6, paso 2H) ─────────────────────────
-//
-// Por qué existe: el informe en streaming agota el reloj de 25 s del cliente
-// sin que llegue un solo fragmento. El paso 2G descartó por medición que la
-// culpa fuera del transporte —Netlify transmite cada `enqueue` al momento por
-// las dos rutas, con los dos Content-Type, con POST, con compresión y con un
-// cuerpo del tamaño real—, así que el tramo que queda a oscuras es el de
-// dentro: qué tarda en pasar entre que pedimos el stream a Anthropic y que
-// sale nuestro primer byte.
-//
-// Estos marcadores son OBSERVACIONALES. No cambian el protocolo, no alteran
-// los tiempos y no tocan una sola decisión del código. Se retiran cuando el
-// diagnóstico cierre.
-//
-// NO SE REGISTRA NINGÚN CONTENIDO. Ni el prompt, ni la respuesta, ni nombres,
-// ni jugadores, ni eventos, ni logos, ni la API key. Solo instantes y tamaños.
-
-/** Identificador corto para poder seguir una invocación concreta en el log. */
-function diagnosticId(): string {
-  return Math.random().toString(36).slice(2, 8);
-}
-
-export type Diagnostics = {
-  id: string;
-  /** Milisegundos monotónicos desde la entrada a la función. */
-  mark: (event: string, fields?: Record<string, string | number>) => void;
-};
-
-export function createDiagnostics(
-  log: (line: string) => void = console.log,
-  now: () => number = () => performance.now(),
-): Diagnostics {
-  const id = diagnosticId();
-  const t0 = now();
-  return {
-    id,
-    mark(event, fields) {
-      const extra = fields
-        ? " " + Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(" ")
-        : "";
-      log(`[TACTICAL-PRO ${id}] +${Math.round(now() - t0)}ms ${event}${extra}`);
-    },
-  };
-}
-
-/** Bytes reales de una cadena UTF-8, que es como viaja. */
-export function utf8Bytes(str: string): number {
-  return new TextEncoder().encode(str).length;
-}
-
-/**
- * Ausente ≠ cero.
- *
- * Es la misma regla que el glosario le impone al modelo, aplicada a nosotros:
- * un campo que no viene significa "no lo sabemos", no "vale 0". Si esto
- * devolviera 0, un `thinkingTokens=0` inventado apuntaría al diagnóstico
- * contrario del real.
- */
-export function orUnknown(value: unknown): string | number {
-  return typeof value === "number" ? value : "unknown";
-}
-
-/** Censo compacto de tipos: `a:3,b:1`, sin espacios y en orden estable. */
-function tally(counts: Map<string, number>): string {
-  if (counts.size === 0) return "none";
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([k, n]) => `${k}:${n}`)
-    .join(",");
-}
-
-export type StreamTally = {
-  /** Registra un evento del stream. Solo mira tipos y números. */
-  observe: (event: any) => void;
-  /** Cuántos `text_delta` con texto se han visto. */
-  readonly textDeltas: number;
-  /** Motivo de cierre que declaró Anthropic, o `unknown` si no llegó. */
-  readonly stopReason: string;
-  /** Vuelca el censo y el desenlace. Nunca escribe contenido. */
-  report: (diag: Diagnostics | undefined) => void;
-};
-
-/**
- * Observador del stream de Anthropic.
- *
- * La ejecución `5kjdhw` generó durante 42 s y terminó limpiamente con CERO
- * `text_delta`. Nuestro filtro es correcto —solo el texto es informe— pero
- * ciego: no distingue "no llegó nada" de "llegó mucho y nada era texto".
- *
- * Esto cuenta lo que pasó de largo y recoge el desenlace que Anthropic ya
- * manda en `message_start` y `message_delta`. No cuesta ninguna llamada: son
- * campos de la misma generación.
- *
- * SOLO TIPOS Y NÚMEROS. El texto de un `thinking_delta`, de un `text_delta` o
- * de una firma no se lee, no se acumula y no se registra: únicamente se suma
- * uno a su contador.
- */
-export function createStreamTally(): StreamTally {
-  const events = new Map<string, number>();
-  const blocks = new Map<string, number>();
-  const deltas = new Map<string, number>();
-  let textDeltas = 0;
-
-  let stopReason: unknown;
-  let inputTokens: unknown;
-  let outputTokens: unknown;
-  let thinkingTokens: unknown;
-  let cacheCreate: unknown;
-  let cacheRead: unknown;
-
-  const bump = (m: Map<string, number>, key: unknown) => {
-    const k = typeof key === "string" && key ? key : "unknown";
-    m.set(k, (m.get(k) ?? 0) + 1);
-  };
-
-  /** Solo sobrescribe con números: un `null` del SDK no borra lo ya sabido. */
-  const keepNumber = (current: unknown, next: unknown) =>
-    typeof next === "number" ? next : current;
-
-  const readUsage = (usage: any) => {
-    if (!usage) return;
-    inputTokens = keepNumber(inputTokens, usage.input_tokens);
-    outputTokens = keepNumber(outputTokens, usage.output_tokens);
-    cacheCreate = keepNumber(cacheCreate, usage.cache_creation_input_tokens);
-    cacheRead = keepNumber(cacheRead, usage.cache_read_input_tokens);
-    thinkingTokens = keepNumber(
-      thinkingTokens,
-      usage.output_tokens_details?.thinking_tokens,
-    );
-  };
-
-  return {
-    observe(event: any) {
-      bump(events, event?.type);
-      if (event?.type === "content_block_start") {
-        bump(blocks, event?.content_block?.type);
-      }
-      if (event?.type === "content_block_delta") {
-        bump(deltas, event?.delta?.type);
-        if (
-          event?.delta?.type === "text_delta" &&
-          typeof event.delta.text === "string" &&
-          event.delta.text.length > 0
-        ) {
-          textDeltas++;
-        }
-      }
-      // `message_start` trae el usage inicial (entrada y caché);
-      // `message_delta` trae el desenlace y la salida.
-      if (event?.type === "message_start") readUsage(event?.message?.usage);
-      if (event?.type === "message_delta") {
-        readUsage(event?.usage);
-        if (typeof event?.delta?.stop_reason === "string") {
-          stopReason = event.delta.stop_reason;
-        }
-      }
-    },
-
-    get textDeltas() {
-      return textDeltas;
-    },
-
-    get stopReason() {
-      return typeof stopReason === "string" ? stopReason : "unknown";
-    },
-
-    report(diag) {
-      if (!diag) return;
-      diag.mark("stream-types", {
-        events: tally(events),
-        blocks: tally(blocks),
-        deltas: tally(deltas),
-      });
-      diag.mark("message-result", {
-        stopReason: typeof stopReason === "string" ? stopReason : "unknown",
-        inputTokens: orUnknown(inputTokens),
-        outputTokens: orUnknown(outputTokens),
-        thinkingTokens: orUnknown(thinkingTokens),
-        cacheCreate: orUnknown(cacheCreate),
-        cacheRead: orUnknown(cacheRead),
-      });
-      if (textDeltas === 0) {
-        // La línea que convierte "no pasó nada" en un diagnóstico.
-        diag.mark("no-text-produced", {
-          stopReason: typeof stopReason === "string" ? stopReason : "unknown",
-          outputTokens: orUnknown(outputTokens),
-          thinkingTokens: orUnknown(thinkingTokens),
-        });
-      }
-    },
-  };
-}
-
 /** Tipo de contenido del protocolo incremental. */
 export const NDJSON_CONTENT_TYPE = "application/x-ndjson";
 
@@ -391,6 +198,11 @@ export function wantsNdjson(req: { headers: { get(name: string): string | null }
   return (req.headers.get("accept") || "").toLowerCase().includes(NDJSON_CONTENT_TYPE);
 }
 
+/** Clase del error, para el log. Nunca su mensaje: puede llevar contenido. */
+function errorNameOf(error: any): string {
+  return String(error?.name ?? error?.constructor?.name ?? "Error");
+}
+
 /** Mensaje legible de un fallo del SDK, con el mismo criterio que la rama JSON. */
 function errorMessageOf(error: any): string {
   return (
@@ -409,44 +221,30 @@ function errorMessageOf(error: any): string {
  * `delta.type === "text_delta"` lleva Markdown del informe. El resto se ignora
  * en silencio: no son texto y colarlos rompería el documento.
  */
-export function ndjsonStreamFrom(
-  stream: {
-    [Symbol.asyncIterator](): AsyncIterator<any>;
-    abort: () => void;
-  },
-  diag?: Diagnostics,
-): ReadableStream<Uint8Array> {
+export function ndjsonStreamFrom(stream: {
+  [Symbol.asyncIterator](): AsyncIterator<any>;
+  abort: () => void;
+}): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      // Los tres instantes que separan las hipótesis que quedan vivas:
-      //   first-anthropic-event  llegó ALGO (message_start, ping…) → conectó
-      //   first-text-delta       llegó el primer texto → empezó a escribir
-      //   first-enqueue          salió nuestro primer byte → nos toca a nosotros
-      // Si los tres van juntos y tarde, el retraso es de Anthropic. Si el
-      // primero es pronto y el segundo tarde, conectó y tardó en generar. Si
-      // los dos primeros son pronto y el tercero tarde, el problema es nuestro.
-      let primerEvento = false;
-      let primerTexto = false;
-      let primerEnvio = false;
+      // Dos variables, las dos funcionales: cuántos fragmentos de informe han
+      // salido —de ello depende si esto termina en `done` o en error— y el
+      // motivo de cierre que declaró Anthropic, que va dentro del error para
+      // que se pueda saber POR QUÉ no hubo texto.
       let fragmentos = 0;
-      // Observa TODO lo que pasa; el filtro de abajo sigue enviando solo texto.
-      const censo = createStreamTally();
+      let stopReason = "unknown";
 
-      const push = (chunk: TacticalProChunk) => {
+      const push = (chunk: TacticalProChunk) =>
         controller.enqueue(encoder.encode(ndjsonLine(chunk)));
-        if (!primerEnvio) {
-          primerEnvio = true;
-          diag?.mark("first-enqueue");
-        }
-      };
+
       try {
         for await (const event of stream) {
-          censo.observe(event);
-          if (!primerEvento) {
-            primerEvento = true;
-            // El tipo del evento es metadato del protocolo, no contenido.
-            diag?.mark("first-anthropic-event", { type: String(event?.type ?? "?") });
+          if (
+            event?.type === "message_delta" &&
+            typeof event?.delta?.stop_reason === "string"
+          ) {
+            stopReason = event.delta.stop_reason;
           }
           if (
             event?.type === "content_block_delta" &&
@@ -454,15 +252,10 @@ export function ndjsonStreamFrom(
             typeof event.delta.text === "string" &&
             event.delta.text.length > 0
           ) {
-            if (!primerTexto) {
-              primerTexto = true;
-              diag?.mark("first-text-delta");
-            }
             fragmentos++;
             push({ t: event.delta.text });
           }
         }
-        censo.report(diag);
         if (fragmentos === 0) {
           // Un informe vacío NO es un informe. Terminar aquí con `done` haría
           // que el cliente resolviera con una cadena vacía y la guardara en el
@@ -474,27 +267,18 @@ export function ndjsonStreamFrom(
           push({
             error:
               "El modelo terminó sin producir texto (stop_reason: " +
-              censo.stopReason +
+              stopReason +
               "). El informe determinista sigue disponible.",
           });
-          diag?.mark("stream-empty", { stopReason: censo.stopReason });
         } else {
           // Única señal de que el informe está entero. Va después del bucle a
           // propósito: si el bucle lanza, no se llega aquí.
           push({ done: true });
-          diag?.mark("stream-complete", { deltas: fragmentos });
         }
       } catch (error: any) {
-        console.error("tactical-pro stream error:", error);
-        // El NOMBRE del error, nunca su mensaje: un mensaje de la API podría
+        // Clase del error, nunca el objeto entero: un mensaje de la API puede
         // arrastrar fragmentos de lo enviado.
-        diag?.mark("stream-error", {
-          type: String(error?.name ?? error?.constructor?.name ?? "Error"),
-          deltas: fragmentos,
-        });
-        // Antes del push: si el consumidor se fue, encolar lanza y perderíamos
-        // el censo, que es justo lo que explica un fallo a mitad.
-        censo.report(diag);
+        console.error("tactical-pro stream failed:", errorNameOf(error));
         push({ error: errorMessageOf(error) });
       } finally {
         controller.close();
@@ -504,20 +288,12 @@ export function ndjsonStreamFrom(
       // El usuario cerró el modal o abortó. Sin esto la generación seguiría
       // hasta el final contra la cuenta de Anthropic sin que nadie la lea.
       //
-      // Se marca ANTES de abortar: si esta línea no aparece en el log tras un
-      // timeout del cliente, significa que Netlify no nos comunica que el
-      // consumidor se fue — y entonces cada timeout deja una generación
-      // corriendo y facturándose para nadie.
-      diag?.mark("stream-cancelled");
       stream.abort();
     },
   });
 }
 
 export default async (req: Request, _context: Context) => {
-  const diag = createDiagnostics();
-  diag.mark("request-start", { method: req.method });
-
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" });
   }
@@ -530,13 +306,8 @@ export default async (req: Request, _context: Context) => {
   }
 
   let body: any;
-  let bodyBytes = 0;
   try {
-    // Se lee como texto y se parsea, en vez de `req.json()`, únicamente para
-    // poder medir los bytes REALES que llegaron. El resultado es idéntico.
-    const raw = await req.text();
-    bodyBytes = utf8Bytes(raw);
-    body = JSON.parse(raw);
+    body = await req.json();
   } catch {
     return jsonResponse(400, {
       error: "Cuerpo de la petición inválido: se esperaba JSON",
@@ -547,7 +318,6 @@ export default async (req: Request, _context: Context) => {
   if (matchData === undefined || matchData === null) {
     return jsonResponse(400, { error: "Falta matchData en el cuerpo de la petición" });
   }
-  diag.mark("request-validated", { bodyBytes });
 
   let matchDataStr: string;
   let deterministicReportStr: string;
@@ -587,31 +357,14 @@ export default async (req: Request, _context: Context) => {
     ],
   };
 
-  // Tamaños, nunca contenido. Es lo que permite saber si el prompt creció sin
-  // que nos diéramos cuenta, sin filtrar una sola palabra del partido.
-  diag.mark("prompt-ready", {
-    matchDataBytes: utf8Bytes(matchDataStr),
-    deterministicReportBytes: utf8Bytes(deterministicReportStr),
-    tacticalContextBytes: utf8Bytes(tacticalContextStr),
-    systemChars: SYSTEM_INSTRUCTION.length,
-    userPromptChars: requestParams.messages[0].content.length,
-    userPromptBytes: utf8Bytes(requestParams.messages[0].content),
-    maxTokens: requestParams.max_tokens,
-    // Enum de la API, no contenido.
-    effort: requestParams.output_config.effort,
-    model: requestParams.model,
-  });
-
   const anthropic = new Anthropic({ apiKey });
 
   // Negociación de contenido: quien no pida NDJSON recibe exactamente la misma
   // respuesta que antes de este cambio. TacticalBoard depende de ello y no se
   // toca; la compatibilidad es por construcción, no un parche.
   if (wantsNdjson(req)) {
-    diag.mark("ndjson-selected");
     const stream = anthropic.messages.stream(requestParams);
-    diag.mark("anthropic-stream-created");
-    return new Response(ndjsonStreamFrom(stream as any, diag), {
+    return new Response(ndjsonStreamFrom(stream as any), {
       status: 200,
       headers: {
         "Content-Type": NDJSON_CONTENT_TYPE,
@@ -623,10 +376,8 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  diag.mark("json-selected");
   try {
     const response = await anthropic.messages.create(requestParams);
-    diag.mark("json-response-received");
 
     const analysis = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
@@ -642,8 +393,7 @@ export default async (req: Request, _context: Context) => {
 
     return jsonResponse(200, { analysis });
   } catch (error: any) {
-    console.error("tactical-pro error:", error);
-    diag.mark("json-error", { type: String(error?.name ?? "Error") });
+    console.error("tactical-pro request failed:", errorNameOf(error), error?.status ?? "");
     const status = typeof error?.status === "number" ? error.status : 500;
     const message =
       error?.error?.error?.message ||

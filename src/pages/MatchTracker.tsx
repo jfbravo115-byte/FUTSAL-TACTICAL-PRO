@@ -64,6 +64,7 @@ import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
 import { streamTacticalReport } from "../services/tacticalAnalysisService";
+import { availableForSubstitution } from "../utils/squadModel";
 import { TacticalReportModal } from "../components/TacticalReportModal";
 import {
   saveMatchSnapshot,
@@ -6068,14 +6069,9 @@ export default function MatchTracker() {
               </span>
             </div>
             <div className="grid grid-cols-4 gap-1 overflow-y-auto custom-scrollbar">
-              {matchData.players
-                .filter(
-                  (p) =>
-                    !p.isOnPitch &&
-                    p.role !== Role.COACH &&
-                    p.role !== Role.DELEGATE &&
-                    p.stats.redCards === 0,
-                )
+              {/* Tercera puerta al banquillo, y por tanto el mismo helper: sin
+                  bando, porque este panel lista los dos equipos. */}
+              {availableForSubstitution(matchData.players)
                 .map((p) => (
                   <button
                     key={p.id}
@@ -6969,20 +6965,21 @@ export default function MatchTracker() {
         {activeSlotToAdd && (
           <BenchRadialMenu
             isOpponent={activeSlotToAdd.isOpponent}
-            benchPlayers={matchData.players.filter((p) => {
+            // Elegibilidad del banquillo: SIEMPRE desde utils/squadModel. Con
+            // la convocatoria aplicada, `matchData.players` ya son solo los
+            // convocados, así que esto es convocados − pista y nunca plantilla
+            // − pista, que es lo que ofrecía antes.
+            benchPlayers={availableForSubstitution(
+              matchData.players,
+              activeSlotToAdd.isOpponent,
+            ).filter((p) => {
               const currentGS = activeSlotToAdd.isOpponent ? rivalGameState : gameState;
               const currentSlots = PITCH_SYSTEMS[currentGS] || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
               const slotLabel = currentSlots[activeSlotToAdd.index]?.label;
+              // Lo único que queda aquí es la regla del hueco concreto:
+              // depende del sistema activo, no del jugador.
               const isFixedGK = currentGS !== GameState.PJ_ATTACK;
-              
-              const baseFilter = !p.isOnPitch &&
-                p.role !== Role.COACH &&
-                p.role !== Role.DELEGATE &&
-                p.stats.redCards === 0 &&
-                p.isOpponent === activeSlotToAdd.isOpponent;
-                
-              if (!baseFilter) return false;
-              
+
               if (isFixedGK) {
                 if (slotLabel === "POR") return p.role === Role.GOALKEEPER;
               // If it's a field player slot, don't allow GKs
@@ -7024,7 +7021,12 @@ export default function MatchTracker() {
         {swapSelection && (
           <BenchRadialMenu
             isOpponent={matchData.players.find(pl => pl.id === swapSelection)?.isOpponent}
-            benchPlayers={matchData.players.filter((p) => {
+            // Mismo helper que el radial de arriba, a propósito: son las dos
+            // puertas al banquillo y arreglar solo una dejaba el bug vivo.
+            benchPlayers={availableForSubstitution(
+              matchData.players,
+              !!matchData.players.find((pl) => pl.id === swapSelection)?.isOpponent,
+            ).filter((p) => {
               const swapper = matchData.players.find(
                 (pl) => pl.id === swapSelection,
               );
@@ -7035,14 +7037,6 @@ export default function MatchTracker() {
               const pos = swapper.pitchPosition ?? 0;
               const slotLabel = currentSlots[pos]?.label;
               const isFixedGK = currentGS !== GameState.PJ_ATTACK;
-
-              const baseFilter = !p.isOnPitch &&
-                p.role !== Role.COACH &&
-                p.role !== Role.DELEGATE &&
-                p.stats.redCards === 0 &&
-                !!p.isOpponent === !!swapper?.isOpponent;
-
-              if (!baseFilter) return false;
 
               if (isFixedGK) {
                 if (slotLabel === "POR") return p.role === Role.GOALKEEPER;

@@ -7,6 +7,11 @@ import { Role } from '../types/futsal';
 import { normalizeLineup } from '../utils/lineupIntegrity';
 import { loadTemplateLocalFirst, buildTemplatePayload, StoredTemplate } from '../services/templateLoadService';
 import {
+  STARTER_BLOCK_MESSAGE,
+  calledUpPlayers,
+  starterBlockReason,
+} from '../utils/squadModel';
+import {
   Plus, Trash2, Save, Play, Shield, Users, ChevronDown,
   Upload, Star, Edit3, Check, X, UserCheck, UserMinus
 } from 'lucide-react';
@@ -72,6 +77,12 @@ export default function PreMatch() {
     { id: 'tp8', number: 3,  name: 'Portero 2',   role: Role.GOALKEEPER, isStarter: false, isOpponent: false },
   ]);
 
+  // CONVOCATORIA: solo los jugadores que van a ESTE partido. Vive únicamente
+  // aquí, en el estado prepartido; NO se guarda en `futsal_template`, porque
+  // la plantilla es permanente y la convocatoria pertenece al encuentro.
+  // Arranca con todos marcados: el gesto normal es quitar a los que no van.
+  const [calledUp, setCalledUp] = useState<Set<string>>(new Set());
+  const [squadNotice, setSquadNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -107,6 +118,40 @@ export default function PreMatch() {
     loadTemplate();
   }, [user]);
 
+  // Todo jugador local nuevo entra convocado por defecto; los que ya no
+  // están en la plantilla salen del conjunto. La convocatoria NUNCA puede
+  // contener a alguien que no esté en la plantilla.
+  useEffect(() => {
+    setCalledUp((prev) => {
+      const vivos = players.filter((p) => !p.isOpponent).map((p) => p.id);
+      const siguiente = new Set(vivos.filter((id) => prev.has(id) || !prev.size));
+      // Primera carga (`prev` vacío): todos convocados.
+      if (!prev.size) return new Set(vivos);
+      return siguiente;
+    });
+  }, [players]);
+
+  const isCalledUp = (id: string) => calledUp.has(id);
+
+  /**
+   * Convocar / desconvocar. Desconvocar a un titular lo saca también del
+   * quinteto: dejarlo marcado como titular sin estar convocado sería una
+   * inconsistencia que luego `startMatch` tendría que resolver en silencio.
+   */
+  const toggleCalledUp = (id: string) => {
+    setSquadNotice(null);
+    setCalledUp((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        setPlayers((ps) => ps.map((p) => (p.id === id ? { ...p, isStarter: false } : p)));
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   // ── Save template ──────────────────────────────────────────────
   const saveTemplate = async () => {
     setSaving(true);
@@ -139,8 +184,16 @@ export default function PreMatch() {
     // - ningún pitchPosition fuera de 0-4;
     // - un segundo portero marcado como titular NO queda en pista, pero se
     //   conserva en la plantilla (banquillo).
-    const localCandidates = players
-      .filter((p) => !p.isOpponent)
+    // AQUÍ se materializa la convocatoria. Todo lo que venga después —el
+    // quinteto, el banquillo, el radial de CAMBIO, los tiempos, el informe—
+    // trabaja sobre este subconjunto y no sobre la plantilla.
+    //
+    // Era justo lo que faltaba: antes esto era `players.filter(!isOpponent)`,
+    // la plantilla entera, y por eso el banquillo ofrecía a jugadores que no
+    // estaban en el pabellón.
+    const convocatoria = calledUpPlayers(players, calledUp);
+
+    const localCandidates = convocatoria
       .map((p) => ({ id: p.id, role: p.role, wantsOnPitch: p.isStarter }));
     const normalized = new Map(normalizeLineup(localCandidates).map((n) => [n.id, n]));
 
@@ -161,7 +214,7 @@ export default function PreMatch() {
       };
     };
 
-    const localPlayers = players.filter((p) => !p.isOpponent).map((p) => buildPlayer(p));
+    const localPlayers = convocatoria.map((p) => buildPlayer(p));
 
     // Garantiza que siempre exista cuerpo técnico LOCAL para poder
     // registrar tarjetas, aunque el usuario no lo haya añadido manualmente
@@ -222,8 +275,38 @@ export default function PreMatch() {
     setEditingId(null);
   };
 
+  /**
+   * Marcar/desmarcar titular, con los límites APLICADOS AQUÍ.
+   *
+   * Antes se podían marcar ocho titulares y `normalizeLineup` recortaba en
+   * silencio al arrancar: el usuario elegía una cosa y empezaba otra. Ahora
+   * el gesto que rompería el quinteto se rechaza y se dice por qué, con las
+   * mismas reglas que sigue aplicando `normalizeLineup` (5 y un portero).
+   *
+   * Y hacer titular a un no convocado lo convoca: es lo que el usuario
+   * quiere decir con ese gesto, y bloquearlo sería pedirle dos pasos para
+   * una sola intención.
+   */
   const toggleStarter = (id: string) => {
-    setPlayers(prev => prev.map(p => p.id === id ? { ...p, isStarter: !p.isStarter } : p));
+    const player = players.find((p) => p.id === id);
+    if (!player) return;
+    setSquadNotice(null);
+
+    if (player.isStarter) {
+      setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, isStarter: false } : p)));
+      return;
+    }
+
+    const convocatoria = new Set(calledUp);
+    convocatoria.add(id);
+    const motivo = starterBlockReason(player, players, convocatoria);
+    if (motivo) {
+      setSquadNotice(STARTER_BLOCK_MESSAGE[motivo]);
+      return;
+    }
+
+    setCalledUp(convocatoria);
+    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, isStarter: true } : p)));
   };
 
   const removePlayer = (id: string) => {
@@ -252,8 +335,11 @@ export default function PreMatch() {
     reader.readAsDataURL(file);
   };
 
-  const starters = players.filter(p => p.isStarter);
-  const bench = players.filter(p => !p.isStarter);
+  const locales = players.filter((p) => !p.isOpponent);
+  const convocados = locales.filter((p) => calledUp.has(p.id));
+  const noConvocados = locales.filter((p) => !calledUp.has(p.id));
+  const starters = convocados.filter((p) => p.isStarter);
+  const bench = convocados.filter((p) => !p.isStarter);
 
   if (loading) {
     return (
@@ -363,6 +449,27 @@ export default function PreMatch() {
           </div>
         </section>
 
+        {/* CONVOCATORIA: plantilla contra los que van a este partido */}
+        <section>
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest">
+              <span className="text-slate-400">Plantilla</span>
+              <span className="text-white">{locales.length}</span>
+              <span className="text-slate-600">·</span>
+              <span className="text-blue-300">Convocados</span>
+              <span className="text-white">{convocados.length}</span>
+            </div>
+            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
+              Solo los convocados juegan
+            </span>
+          </div>
+          {squadNotice && (
+            <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-300">
+              {squadNotice}
+            </p>
+          )}
+        </section>
+
         {/* Starters */}
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -382,6 +489,8 @@ export default function PreMatch() {
                 onConfirm={confirmEdit}
                 onCancel={() => setEditingId(null)}
                 onToggleStarter={() => toggleStarter(p.id)}
+                onToggleCalledUp={() => toggleCalledUp(p.id)}
+                isCalledUp={isCalledUp(p.id)}
                 onRemove={() => removePlayer(p.id)}
                 setEditName={setEditName} setEditNumber={setEditNumber} setEditRole={setEditRole}
               />
@@ -414,6 +523,8 @@ export default function PreMatch() {
                 onConfirm={confirmEdit}
                 onCancel={() => setEditingId(null)}
                 onToggleStarter={() => toggleStarter(p.id)}
+                onToggleCalledUp={() => toggleCalledUp(p.id)}
+                isCalledUp={isCalledUp(p.id)}
                 onRemove={() => removePlayer(p.id)}
                 setEditName={setEditName} setEditNumber={setEditNumber} setEditRole={setEditRole}
               />
@@ -423,6 +534,39 @@ export default function PreMatch() {
             )}
           </div>
         </section>
+
+        {/* No convocados: siguen en la plantilla, no van a este partido */}
+        {noConvocados.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <UserMinus size={14} className="text-slate-600" />
+                <span className="text-[11px] font-black uppercase tracking-widest text-slate-600">No convocados</span>
+                <span className="text-[10px] font-black text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">{noConvocados.length}</span>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-700">
+                Siguen en la plantilla
+              </span>
+            </div>
+            <div className="space-y-2 opacity-60">
+              {noConvocados.map(p => (
+                <PlayerRow
+                  key={p.id} player={p}
+                  isEditing={editingId === p.id}
+                  editName={editName} editNumber={editNumber} editRole={editRole}
+                  onEdit={() => startEdit(p)}
+                  onConfirm={confirmEdit}
+                  onCancel={() => setEditingId(null)}
+                  onToggleStarter={() => toggleStarter(p.id)}
+                  onToggleCalledUp={() => toggleCalledUp(p.id)}
+                  isCalledUp={false}
+                  onRemove={() => removePlayer(p.id)}
+                  setEditName={setEditName} setEditNumber={setEditNumber} setEditRole={setEditRole}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="h-28" /> {/* Padding for bottom button */}
       </div>
@@ -446,14 +590,17 @@ function PlayerRow({
   player, isEditing,
   editName, editNumber, editRole,
   onEdit, onConfirm, onCancel,
-  onToggleStarter, onRemove,
+  onToggleStarter, onToggleCalledUp, isCalledUp, onRemove,
   setEditName, setEditNumber, setEditRole,
 }: {
   player: TemplatPlayer;
   isEditing: boolean;
   editName: string; editNumber: number; editRole: Role;
   onEdit: () => void; onConfirm: () => void; onCancel: () => void;
-  onToggleStarter: () => void; onRemove: () => void;
+  onToggleStarter: () => void;
+  onToggleCalledUp: () => void;
+  isCalledUp: boolean;
+  onRemove: () => void;
   setEditName: (v: string) => void;
   setEditNumber: (v: number) => void;
   setEditRole: (v: Role) => void;
@@ -501,7 +648,21 @@ function PlayerRow({
 
   return (
     <div className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-2xl px-3 py-2.5">
-      {/* Starter toggle */}
+      {/* Convocatoria: si va o no a este partido. Es una pregunta distinta
+          de "sale de inicio", y por eso es un botón distinto. */}
+      <button
+        onClick={onToggleCalledUp}
+        title={isCalledUp ? 'Convocado · quitar del partido' : 'No convocado · convocar'}
+        className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+          isCalledUp
+            ? 'bg-blue-500/20 border border-blue-500/30 text-blue-300'
+            : 'bg-white/5 border border-white/10 text-slate-600'
+        }`}
+      >
+        {isCalledUp ? <UserCheck size={11} /> : <UserMinus size={11} />}
+      </button>
+
+      {/* Titular: de los convocados, quién sale de inicio */}
       <button
         onClick={onToggleStarter}
         className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 transition-all ${

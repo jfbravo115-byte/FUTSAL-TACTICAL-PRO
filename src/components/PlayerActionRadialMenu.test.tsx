@@ -320,3 +320,87 @@ describe("Contexto de apilamiento de los paneles secundarios", () => {
     }
   });
 });
+
+// ── TARJETAS ───────────────────────────────────────────────────────────
+//
+// En un partido real no se encontró la amarilla. Los botones nunca se habían
+// quitado: estaban en una barra fija a `bottom-4`, sin área segura y por
+// debajo de la navegación inferior. Estos tests montan el menú de verdad, no
+// leen el fuente.
+
+describe("las tarjetas se ven y pertenecen a un jugador concreto", () => {
+  const barra = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll("div")).find((d) =>
+      (d.textContent || "").includes("Tarjetas"),
+    )!;
+
+  const boton = (host: HTMLElement, texto: string) =>
+    Array.from(host.querySelectorAll("button")).find((b) =>
+      (b.textContent || "").includes(texto),
+    )!;
+
+  it("ambas tarjetas están a la vista nada más abrir el menú", () => {
+    const { host } = mount();
+    expect(boton(host, "Amarilla")).toBeTruthy();
+    expect(boton(host, "Roja")).toBeTruthy();
+  });
+
+  it("la barra dice a quién se le saca la tarjeta", () => {
+    const { host } = mount({ number: 7, name: "Carlos Ruiz" });
+    const texto = barra(host).textContent || "";
+    expect(texto).toContain("#7");
+    expect(texto).toContain("Carlos");
+  });
+
+  it("respeta el área segura inferior y se apoya sobre la navegación", () => {
+    const { host } = mount();
+    const estilo = barra(host).getAttribute("style") || "";
+    expect(estilo).toContain("env(safe-area-inset-bottom");
+    expect(estilo).toContain("48px");
+  });
+
+  it("emite el tipo de evento de siempre y cierra el menú", () => {
+    const { host, onAction, onClose } = mount();
+    act(() => {
+      boton(host, "Amarilla").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onAction).toHaveBeenCalledWith(ActionType.YELLOW_CARD, "gk1");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("la roja también", () => {
+    const { host, onAction } = mount();
+    act(() => {
+      boton(host, "Roja").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onAction).toHaveBeenCalledWith(ActionType.RED_CARD, "gk1");
+  });
+
+  it("avisa de que la segunda amarilla expulsa, sin cambiar ninguna regla", () => {
+    const { host } = mount({
+      stats: { ...player().stats, yellowCards: 1 },
+    });
+    expect(barra(host).textContent || "").toContain("segunda amarilla expulsa");
+  });
+
+  it("un jugador sin tarjetas no recibe ese aviso", () => {
+    const { host } = mount();
+    expect(barra(host).textContent || "").not.toContain("segunda amarilla expulsa");
+  });
+
+  it("muestra cuántas lleva acumuladas", () => {
+    const { host } = mount({ stats: { ...player().stats, yellowCards: 1, redCards: 1 } });
+    expect(boton(host, "Amarilla").textContent).toContain("1");
+    expect(boton(host, "Roja").textContent).toContain("1");
+  });
+
+  it("la barra del portero no se apila sobre la de tarjetas", () => {
+    const { host } = mount();
+    const gk = Array.from(host.querySelectorAll("div")).find((d) =>
+      (d.textContent || "").includes("% Paradas"),
+    )!;
+    const estilo = gk.getAttribute("style") || "";
+    expect(estilo).toContain("env(safe-area-inset-bottom");
+    expect(estilo).toContain("7rem");
+  });
+});

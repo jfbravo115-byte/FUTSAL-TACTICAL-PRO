@@ -297,7 +297,7 @@ function PlayersTable({ report }: { report: MatchReport }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
-              {["#", "Jugador", "Rol", "TOT", "ROT", "Rot.", "G", "Tiros", "Rec.", "Pér+Err", "F", "🟨", "🟥"].map((h) => (
+              {["#", "Jugador", "Rol", "TOT", "ROT", "Rot.", "G", "Tiros", "A port.", "Fuera", "Bloq.", "Rec.", "Pér+Err", "F", "🟨", "🟥"].map((h) => (
                 <th key={h} style={{ borderBottom: "1px solid #e5e7eb", padding: 5, textAlign: "left" }}>{h}</th>
               ))}
             </tr>
@@ -313,6 +313,9 @@ function PlayersTable({ report }: { report: MatchReport }) {
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.rotationsCount}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.goals}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.attempts}</td>
+                <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.shotsOnTarget}</td>
+                <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.shotsOffTarget}</td>
+                <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.shotsBlocked}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.steals + p.interceptions}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.losses + p.errors}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.fouls}</td>

@@ -28,12 +28,14 @@ import {
   availableForSubstitution,
   calledUpPlayers,
   isAvailableForSubstitution,
+  disciplinaryState,
   isSentOff,
   isStaff,
   starterBlockReason,
 } from "./squadModel";
 
 const leer = (rel: string) => readFileSync(path.resolve(__dirname, rel), "utf-8");
+const matchTracker = leer("../pages/MatchTracker.tsx");
 
 const STATS = {
   goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
@@ -356,5 +358,140 @@ describe("una sola puerta al banquillo", () => {
     expect(leer("../types/futsal.ts")).not.toContain("isCalledUp");
     expect(leer("../types/futsal.ts")).not.toContain("calledUpPlayerIds");
     expect(leer("../types/futsal.ts")).not.toContain("squadIds");
+  });
+});
+
+// ── ESTADO DISCIPLINARIO ───────────────────────────────────────────────
+//
+// En CD MURCIA 2-4 PR7 el informe salió con 0 tarjetas de jugador. Los
+// botones nunca se habían quitado: vivían en una barra fija al pie de la
+// pantalla, sin área segura y por debajo de la navegación inferior, así que
+// en un móvil no se encontraban. Estos tests fijan las dos cosas — la regla
+// disciplinaria, que no cambia, y el sitio donde se pulsa, que sí.
+
+describe("6-10 · el indicador se deriva de las estadísticas del jugador", () => {
+  const conTarjetas = (yellowCards: number, redCards: number) =>
+    jugador({ id: "x", stats: { ...STATS, yellowCards, redCards } });
+
+  it("6 · una amarilla deja el estado en 'yellow'", () => {
+    expect(disciplinaryState(conTarjetas(1, 0))).toBe("yellow");
+  });
+
+  it("7 · una roja deja el estado en 'red'", () => {
+    expect(disciplinaryState(conTarjetas(0, 1))).toBe("red");
+  });
+
+  it("7b · la roja manda sobre la amarilla", () => {
+    expect(disciplinaryState(conTarjetas(2, 1))).toBe("red");
+  });
+
+  it("sin tarjetas no hay indicador", () => {
+    expect(disciplinaryState(conTarjetas(0, 0))).toBe("none");
+    expect(disciplinaryState({ stats: undefined as any })).toBe("none");
+  });
+
+  it("10 · borrar la tarjeta devuelve el indicador solo, porque sale de stats", () => {
+    // No hay estado visual paralelo que revertir: si handleDeleteEvent baja
+    // el contador, el aura desaparece sin que nadie la toque.
+    const amonestado = conTarjetas(1, 0);
+    expect(disciplinaryState(amonestado)).toBe("yellow");
+    const revertido = { ...amonestado, stats: { ...amonestado.stats, yellowCards: 0 } };
+    expect(disciplinaryState(revertido)).toBe("none");
+  });
+
+  it("8 · la doble amarilla sigue produciendo expulsión, y se lee como roja", () => {
+    // La regla vive en MatchTracker.handleAction y no se ha tocado.
+    expect(matchTracker).toMatch(
+      /stats\.yellowCards \+= 1;[\s\S]{0,160}stats\.yellowCards >= 2[\s\S]{0,160}stats\.redCards \+= 1;/,
+    );
+    expect(matchTracker).toMatch(/stats\.redCards \+= 1;[\s\S]{0,120}isOnPitch: false/);
+    expect(disciplinaryState(conTarjetas(2, 1))).toBe("red");
+  });
+
+  it("9 · un expulsado no puede volver mediante sustitución", () => {
+    const expulsado = jugador({ id: "x", stats: { ...STATS, redCards: 1 } });
+    expect(isSentOff(expulsado)).toBe(true);
+    expect(isAvailableForSubstitution(expulsado)).toBe(false);
+    expect(availableForSubstitution([expulsado])).toEqual([]);
+  });
+
+  it("isSentOff y disciplinaryState no pueden discrepar: comparten fuente", () => {
+    expect(readFileSync(path.resolve(__dirname, "squadModel.ts"), "utf-8")).toContain(
+      'return disciplinaryState(player) === "red";',
+    );
+  });
+});
+
+describe("11 · las tarjetas se pulsan, y se pulsan sobre un jugador concreto", () => {
+  const radial = leer("../components/PlayerActionRadialMenu.tsx");
+
+  it("la barra respeta el área segura inferior", () => {
+    // Era `bottom-4` a secas: en la PWA de iPhone caía sobre el indicador de
+    // inicio y por debajo de la navegación.
+    expect(radial).toContain("env(safe-area-inset-bottom, 0px)");
+    expect(radial).toContain("style={{ bottom: CARD_BAR_BOTTOM }}");
+    expect(radial).not.toContain('className="fixed bottom-4 left-4 right-4 z-[260] flex gap-3"');
+  });
+
+  it("se apoya por encima de la navegación inferior en vez de taparla", () => {
+    expect(radial).toMatch(/BOTTOM_NAV_PX\s*=\s*48/);
+    expect(leer("../pages/MatchTracker.tsx")).toContain(
+      'className="lg:hidden bg-slate-900/95',
+    );
+  });
+
+  it("la barra del portero no se solapa con la de tarjetas", () => {
+    expect(radial).toContain("style={{ bottom: GK_BAR_BOTTOM }}");
+    expect(radial).not.toContain("fixed bottom-24");
+  });
+
+  it("dice a quién se le saca la tarjeta", () => {
+    expect(radial).toMatch(/Tarjetas[\s\S]{0,400}#\{player\.number\}/);
+  });
+
+  it("los botones superan el mínimo táctil", () => {
+    const barra = radial.slice(radial.indexOf("key=\"card-buttons\""));
+    expect(barra).toContain("min-h-[52px]");
+  });
+
+  it("siguen siendo los tipos de evento de siempre", () => {
+    expect(radial).toContain("onAction(ActionType.YELLOW_CARD, player.id)");
+    expect(radial).toContain("onAction(ActionType.RED_CARD, player.id)");
+  });
+});
+
+describe("el aura disciplinaria llega a las tres representaciones del jugador", () => {
+  it("pista, banquillo y radial de CAMBIO usan el mismo componente", () => {
+    // Tres superficies, una sola implementación: es lo que evita que una de
+    // ellas se quede sin el indicador rojo, como pasaba en el banquillo.
+    const auras = matchTracker.match(/<DisciplinaryAura /g) || [];
+    expect(auras.length).toBe(3);
+    expect(matchTracker).toContain("disciplinaryState(player)");
+    expect(matchTracker).toContain("disciplinaryState(p)");
+  });
+
+  it("no existe un estado visual paralelo al de las estadísticas", () => {
+    const aura = leer("../components/DisciplinaryAura.tsx");
+    expect(aura).toContain("DisciplinaryState");
+    for (const prohibido of ["useState", "useEffect", "localStorage"]) {
+      expect(aura).not.toContain(prohibido);
+    }
+  });
+
+  it("el aura no captura toques ni tapa el dorsal", () => {
+    const aura = leer("../components/DisciplinaryAura.tsx");
+    expect(aura).toContain("pointer-events-none");
+    expect(aura).toContain("absolute");
+  });
+
+  it("las estadísticas y las reglas de expulsión no se tocan desde el aura", () => {
+    // Sobre el CÓDIGO, sin comentarios: la cabecera del archivo cita
+    // `player.stats.yellowCards` a propósito, para explicar de dónde sale.
+    const codigo = leer("../components/DisciplinaryAura.tsx")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    for (const prohibido of ["stats.", "redCards", "yellowCards", "isOnPitch"]) {
+      expect(codigo).not.toContain(prohibido);
+    }
   });
 });

@@ -34,6 +34,7 @@ import {
 } from "../utils/legacyZoneMap";
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
+import { summarizeShots } from "../utils/shotModel";
 import {
   SetPieceOutcomeSummary,
   SetPieceRestartSummary,
@@ -105,6 +106,8 @@ export type ZoneDashboard = {
     zonedActions: number;
     attempts: number;
     onTarget: number;
+    /** Bloqueados o desviados antes de llegar a portería. Ni dentro ni fuera. */
+    blocked: number;
     unknownTarget: number;
     goals: number;
     recoveries: number;
@@ -296,6 +299,9 @@ export function buildZoneDashboard(
   });
 
   const out = attempts.filter((e) => e.destinationGrid?.toUpperCase() === "OUT").length;
+  // Fuente única del desenlace (src/utils/shotModel.ts): aquí solo se toma la
+  // cifra, para que el dashboard no tenga su propio criterio de «bloqueado».
+  const blocked = summarizeShots(events).blocked;
   const onTarget = attempts.filter((e) => {
     const destination = e.destinationGrid?.toUpperCase();
     return destination ? destination !== "OUT" : isGoal(e);
@@ -337,7 +343,11 @@ export function buildZoneDashboard(
       zonedActions: (zone12?.total ?? 0) + (legacy?.total ?? 0),
       attempts: attempts.length,
       onTarget,
-      unknownTarget: Math.max(0, attempts.length - onTarget - out),
+      blocked,
+      // Lo que queda tras descontar los tres desenlaces conocidos. Un tiro
+      // bloqueado dejó de caer aquí: tiene su propia categoría y mezclarlo
+      // con «no se registró» era decir que no sabemos algo que sí sabemos.
+      unknownTarget: Math.max(0, attempts.length - onTarget - out - blocked),
       goals: attempts.filter(isGoal).length,
       recoveries: events.filter(isRecovery).length,
       losses: events.filter(isLoss).length,

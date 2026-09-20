@@ -28,6 +28,8 @@ import {
   zoneMetricValue,
 } from "../services/matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import { PeriodShotMapsBoard } from "../components/export/PeriodShotMaps";
+import { summarizePlayerShots } from "../utils/shotModel";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { describeSetPieceOutcomes } from "../utils/setPieceModel";
@@ -290,6 +292,28 @@ export default function MatchAnalysis() {
             <div className="rounded-xl bg-black/20 border border-white/5 p-3"><div className="text-xl font-black text-white">{zones.totals.zonedActions}</div><div className="text-[8px] uppercase text-slate-500 font-black">Con zona</div></div>
           </div>
 
+          {/* ── TIROS POR PARTE ─────────────────────────────────────
+              El mapa de abajo es acumulado y responde «desde dónde se tira».
+              Esta franja responde otra pregunta distinta: «qué cambió en la
+              segunda parte». Se separan solo los TIROS porque es la lectura
+              pedida; el resto de métricas siguen siendo del partido entero.
+
+              Respeta el selector de equipo de la cabecera de la sección, así
+              que el mismo botón sirve para ver nuestros tiros o los del
+              rival. */}
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 mb-4">
+            <div className="text-[9px] uppercase font-black text-slate-500 mb-3">
+              Tiros por parte · {zoneOpponent ? match.opponentName : match.teamName}
+            </div>
+            <PeriodShotMapsBoard
+              events={match.events}
+              opponent={zoneOpponent}
+              theme="dark"
+              pitchWidth={320}
+              accent={zoneOpponent ? "#f87171" : "#22d3ee"}
+            />
+          </div>
+
           <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
             {(Object.keys(METRIC_LABEL) as ZoneMetric[]).map((metric) => (
               <button key={metric} onClick={() => setZoneMetric(metric)} className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase border whitespace-nowrap ${zoneMetric === metric ? "bg-white text-slate-950 border-white" : "bg-black/20 text-slate-400 border-white/10"}`}>{METRIC_LABEL[metric]}</button>
@@ -406,10 +430,14 @@ export default function MatchAnalysis() {
 
         <section ref={timesRef} className="scroll-mt-28 rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5 overflow-x-auto">
           <h2 className="font-black text-white uppercase flex items-center gap-2 mb-4"><Timer size={18} className="text-amber-400"/> Tiempos</h2>
-          <table className="w-full text-xs min-w-[620px]"><thead><tr className="text-slate-500 uppercase text-[9px] border-b border-white/10"><th className="py-2 text-left">#</th><th className="text-left">Jugador</th><th>Estado</th><th>TOT</th><th>ROT</th><th>G</th><th>Tiros</th><th>Rec.</th><th>Pér+Err</th></tr></thead><tbody>
+          <table className="w-full text-xs min-w-[760px]"><thead><tr className="text-slate-500 uppercase text-[9px] border-b border-white/10"><th className="py-2 text-left">#</th><th className="text-left">Jugador</th><th>Estado</th><th>TOT</th><th>ROT</th><th>G</th><th>Tiros</th><th>A port.</th><th>Fuera</th><th>Bloq.</th><th>Rec.</th><th>Pér+Err</th></tr></thead><tbody>
             {players.map((p) => {
               const line = report.playersUsed.find((x) => x.id === p.id);
-              return <tr key={p.id} className="border-b border-white/5"><td className="py-3 font-black text-slate-400">{p.number}</td><td className="font-black text-white">{p.name}</td><td className="text-center">{p.isOnPitch ? <span className="text-emerald-400 font-black">PISTA</span> : <span className="text-slate-500">BANCO</span>}</td><td className="text-center font-mono font-black text-blue-400">{fmtSeconds(p.individualTimeSeconds)}</td><td className="text-center font-mono font-black text-emerald-400">{p.isOnPitch ? fmtSeconds(p.rotationTimeSeconds ?? 0) : "—"}</td><td className="text-center">{line?.goals ?? p.stats.goals}</td><td className="text-center">{line?.attempts ?? (p.stats.goals + p.stats.shots + p.stats.shotsOffTarget)}</td><td className="text-center">{line ? line.steals + line.interceptions : p.stats.steals + p.stats.interceptions}</td><td className="text-center">{line ? line.losses + line.errors : p.stats.losses + p.stats.errors}</td></tr>;
+              // Un jugador sin línea de informe no tiene eventos, así que su
+              // recuento es cero. Se deriva igualmente en vez de leer
+              // `PlayerStats`, para que las dos ramas digan lo mismo.
+              const tiros = summarizePlayerShots(match.events, p);
+              return <tr key={p.id} className="border-b border-white/5"><td className="py-3 font-black text-slate-400">{p.number}</td><td className="font-black text-white">{p.name}</td><td className="text-center">{p.isOnPitch ? <span className="text-emerald-400 font-black">PISTA</span> : <span className="text-slate-500">BANCO</span>}</td><td className="text-center font-mono font-black text-blue-400">{fmtSeconds(p.individualTimeSeconds)}</td><td className="text-center font-mono font-black text-emerald-400">{p.isOnPitch ? fmtSeconds(p.rotationTimeSeconds ?? 0) : "—"}</td><td className="text-center">{line?.goals ?? p.stats.goals}</td><td className="text-center">{tiros.shots}</td><td className="text-center">{tiros.onTarget}</td><td className="text-center">{tiros.offTarget}</td><td className="text-center">{tiros.blocked}</td><td className="text-center">{line ? line.steals + line.interceptions : p.stats.steals + p.stats.interceptions}</td><td className="text-center">{line ? line.losses + line.errors : p.stats.losses + p.stats.errors}</td></tr>;
             })}
           </tbody></table>
         </section>

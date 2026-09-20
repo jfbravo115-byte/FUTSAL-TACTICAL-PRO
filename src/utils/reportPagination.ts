@@ -16,8 +16,8 @@
 /** Páginas por equipo con jugadores: tabla, comparativa y perfil. */
 export const TEAM_REPORT_PAGES_PER_TEAM = 3;
 
-/** Páginas comunes al final: mapas de zona y balón parado. */
-export const TEAM_REPORT_SHARED_PAGES = 2;
+/** Páginas comunes al final: mapas de zona, tiros por periodo y balón parado. */
+export const TEAM_REPORT_SHARED_PAGES = 3;
 
 /**
  * Total de páginas del informe. `teamsWithPlayers` son los equipos que

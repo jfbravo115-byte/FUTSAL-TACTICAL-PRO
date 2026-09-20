@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertTriangle, Target, Zap, Timer, CheckCircle2 } from "lucide-react";
 import { MatchData, ActionType, GameState } from "../types/futsal";
+import { summarizeTeamShots } from "../utils/shotModel";
 
 interface TacticalAnalystProps {
   matchData: MatchData;
@@ -13,7 +14,10 @@ export const TacticalAnalyst: React.FC<TacticalAnalystProps> = ({ matchData }) =
     // All variables initialized with 0 and using optional chaining
     const localPlayers = matchData?.players?.filter(p => !p.isOpponent) || [];
     const localGoals = localPlayers.reduce((acc, p) => acc + (p?.stats?.goals || 0), 0);
-    const localShots = localPlayers.reduce((acc, p) => acc + (p?.stats?.shots || 0), 0);
+    // Intentos reales, desde los eventos. Sumar `stats.shots` dejaba fuera
+    // los tiros fuera y metía dentro los bloqueados, así que el denominador
+    // de la eficacia iba corto y las conclusiones salían infladas.
+    const localShots = summarizeTeamShots(matchData?.events || [], false).shots;
     const localSteals = localPlayers.reduce((acc, p) => acc + (p?.stats?.steals || 0), 0);
     const localLosses = localPlayers.reduce((acc, p) => acc + (p?.stats?.losses || 0), 0);
     const localFouls = matchData?.fouls?.team || 0;

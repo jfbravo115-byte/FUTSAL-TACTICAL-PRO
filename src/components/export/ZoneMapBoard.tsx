@@ -28,7 +28,6 @@ import React from "react";
 import { ActionType, GameEvent, GoalieAction } from "../../types/futsal";
 import { FutsalPitch, GoalCaptionTexts } from "../field/FutsalPitch";
 import { isZone12Id } from "../../utils/fieldZones";
-import { isAnySave } from "../../utils/goalkeeperActions";
 import { LEGACY_DISCLAIMER, classifyZone, isLegacyZoneId } from "../../utils/legacyZoneMap";
 
 // ── PRESUPUESTO DE LA PÁGINA ────────────────────────────────────────────
@@ -88,11 +87,16 @@ export type ZoneMapDef = {
   events: GameEvent[];
 };
 
-const OWN_CAPTIONS: GoalCaptionTexts = { left: "Portería propia", right: "Portería rival" };
-const RIVAL_CAPTIONS: GoalCaptionTexts = { left: "Ataque rival", right: "Nuestra portería" };
+export const OWN_CAPTIONS: GoalCaptionTexts = { left: "Portería propia", right: "Portería rival" };
+export const RIVAL_CAPTIONS: GoalCaptionTexts = { left: "Ataque rival", right: "Nuestra portería" };
+
+/** Rótulos de portería según de quién sea la acción. Punto único. */
+export function captionsForRival(isRivalAction: boolean): GoalCaptionTexts {
+  return isRivalAction ? RIVAL_CAPTIONS : OWN_CAPTIONS;
+}
 
 export function captionsFor(def: ZoneMapDef): GoalCaptionTexts {
-  return def.isRivalAction ? RIVAL_CAPTIONS : OWN_CAPTIONS;
+  return captionsForRival(def.isRivalAction);
 }
 
 /**
@@ -150,10 +154,22 @@ export function buildZoneMaps(events: GameEvent[]): ZoneMapDef[] {
       title: "Tiros recibidos",
       color: "#0ea5e9",
       isRivalAction: true,
-      // Un tiro recibido es cualquier disparo del rival, lo detuviera o no el
-      // portero. isAnySave cubre los cuatro tipos vivos y el histórico
-      // SAVE_PARRY, de modo que añadir un tipo nuevo no vuelve a olvidarse.
-      events: rival.filter((e) => e.type === ActionType.SHOT || isAnySave(e)),
+      // Los tiros DEL RIVAL, exactamente igual que el mapa «Tiros» son los
+      // nuestros: mismo criterio a los dos lados, y los goles encajados van
+      // en su propio mapa igual que nuestros goles.
+      //
+      // Antes se incluían además nuestras paradas (isAnySave). La intención
+      // era cubrir los tiros detenidos, pero una parada registrada desde el
+      // radial del portero es un evento NUESTRO —metadata.isOpponent false—
+      // y por tanto nunca llegaba a este filtro; lo que sí entraba eran los
+      // tiros rivales que el fallback histórico interpreta como parada, ya
+      // contados por ser SHOT. El resultado fue un mapa con 1 tiro recibido
+      // en un partido con 12 remates afrontados por nuestros porteros.
+      //
+      // Una parada sin tiro rival registrado sigue estando en el informe de
+      // portero. NO se dibuja aquí como tiro: no sabemos desde dónde se hizo
+      // ni si hubo remate, e inventarlo sería fabricar datos.
+      events: rival.filter((e) => e.type === ActionType.SHOT),
     },
   ];
 }

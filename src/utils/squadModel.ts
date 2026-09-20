@@ -43,9 +43,28 @@ export function isStaff(role: Role): boolean {
   return role === Role.COACH || role === Role.DELEGATE;
 }
 
+// ── ESTADO DISCIPLINARIO ───────────────────────────────────────────────
+//
+// Se DERIVA de `player.stats`, que es donde `handleAction` suma la tarjeta y
+// donde `handleDeleteEvent` la resta. No hay un segundo estado visual que
+// mantener sincronizado: borrar el evento devuelve las stats y el indicador
+// desaparece solo.
+//
+// La roja manda sobre la amarilla. Un jugador con dos amarillas tiene además
+// una roja automática (ver MatchTracker.handleAction), así que preguntar
+// primero por la roja también cubre la doble amonestación.
+
+export type DisciplinaryState = "none" | "yellow" | "red";
+
+export function disciplinaryState(player: Pick<Player, "stats">): DisciplinaryState {
+  if ((player.stats?.redCards ?? 0) > 0) return "red";
+  if ((player.stats?.yellowCards ?? 0) > 0) return "yellow";
+  return "none";
+}
+
 /** Un expulsado no vuelve a entrar en lo que queda de partido. */
 export function isSentOff(player: Pick<Player, "stats">): boolean {
-  return (player.stats?.redCards ?? 0) > 0;
+  return disciplinaryState(player) === "red";
 }
 
 /**

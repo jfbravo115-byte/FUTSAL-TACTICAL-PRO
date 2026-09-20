@@ -215,3 +215,41 @@ describe("Ajuste a la página A4", () => {
     expect(ZONE_MAP_PAGE.COLS * ZONE_MAP_PAGE.ROWS).toBe(buildZoneMaps([]).length);
   });
 });
+
+describe("22 · el mapa de tiros recibidos son tiros del rival, no paradas nuestras", () => {
+  const mapa = (events: GameEvent[]) =>
+    buildZoneMaps(events).find((m) => m.key === "tiros-recibidos")!;
+
+  it("dibuja los tiros del rival", () => {
+    expect(mapa([ev("1", ActionType.SHOT, "Z3C", true)]).events).toHaveLength(1);
+  });
+
+  it("una parada NUESTRA sin tiro rival registrado no se dibuja como tiro", () => {
+    // Es un evento propio (metadata.isOpponent === false) y no sabemos desde
+    // dónde se remató: pintarlo aquí sería inventar un tiro que nadie
+    // registró. Sigue estando en el informe de portero.
+    const paradas = [
+      ev("1", GoalieAction.SAVE, "Z2C"),
+      ev("2", GoalieAction.SAVE_CATCH, "Z2C"),
+      ev("3", GoalieAction.SAVE_DEFLECT, undefined),
+    ];
+    expect(mapa(paradas).events).toHaveLength(0);
+  });
+
+  it("un tiro rival parado cuenta UNA vez, no dos", () => {
+    const tiroParado: GameEvent = {
+      ...ev("1", ActionType.SHOT, "Z3C", true),
+      destinationGrid: "G5",
+      metadata: { isOpponent: true, goalieResponse: GoalieAction.SAVE },
+    };
+    expect(mapa([tiroParado]).events).toHaveLength(1);
+  });
+
+  it("los goles encajados van a su propio mapa, igual que nuestros goles", () => {
+    const gol = ev("1", ActionType.GOAL, "Z4C", true);
+    expect(mapa([gol]).events).toHaveLength(0);
+    expect(
+      buildZoneMaps([gol]).find((m) => m.key === "goles-encajados")!.events,
+    ).toHaveLength(1);
+  });
+});

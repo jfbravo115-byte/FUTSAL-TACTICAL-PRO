@@ -537,3 +537,71 @@ describe("objetivo 7 · el payload adelgaza sin perder hechos", () => {
     expect(porteros[0].timeline).toBeDefined();
   });
 });
+
+// ── PROPAGACIÓN DE LA CAPTURA CORREGIDA ────────────────────────────────
+//
+// El 80 % de conversión que TACTICAL PRO escribió sobre CD MURCIA salía de
+// `zones.opponent.totals` —4 goles entre 5 intentos— porque los otros ocho
+// remates del rival nunca se habían registrado como tiros. Con la captura
+// corregida, el mismo helper determinista produce la cifra correcta y el
+// modelo la recibe sin que haya que tocar el prompt ni la función.
+
+describe("un partido bien registrado llega corregido al contexto táctico", () => {
+  const tiroParado = (i: number) =>
+    ev({
+      id: `s${i}`,
+      type: ActionType.SHOT,
+      originGrid: "Z3C",
+      destinationGrid: "G5",
+      playerIds: ["riv", "tp1"],
+      metadata: {
+        isOpponent: true,
+        goalieResponse: GoalieAction.SAVE,
+        targetGoalkeeperId: "tp1",
+      },
+    });
+
+  const partidoRival = (): MatchData => ({
+    ...partido(),
+    events: [
+      ...Array.from({ length: 8 }, (_, i) => tiroParado(i)),
+      ...Array.from({ length: 4 }, (_, i) =>
+        ev({ id: `g${i}`, type: ActionType.GOAL, originGrid: "Z4C", destinationGrid: "G1",
+             metadata: { isOpponent: true } }),
+      ),
+      ...Array.from({ length: 3 }, (_, i) =>
+        ev({ id: `o${i}`, type: ActionType.SHOT, originGrid: "Z3L", destinationGrid: "OUT",
+             metadata: { isOpponent: true } }),
+      ),
+      ...Array.from({ length: 2 }, (_, i) =>
+        ev({ id: `b${i}`, type: ActionType.SHOT, originGrid: "Z3R",
+             metadata: { isOpponent: true, shotOutcome: "blocked", goalieResponse: "UNSPECIFIED" } }),
+      ),
+    ],
+  });
+
+  const totals = () =>
+    buildTacticalProPayload(partidoRival()).tacticalContext.zones.opponent.totals;
+
+  it("el rival aparece con sus 17 intentos, no con 5", () => {
+    expect(totals().attempts).toBe(17);
+    expect(totals().attempts).not.toBe(5);
+  });
+
+  it("la conversión deja de estar inflada", () => {
+    // 4 goles entre 17 intentos, no entre 5.
+    expect(totals().goals).toBe(4);
+    expect(totals().conversionPct).toBe(24);
+    expect(totals().conversionPct).not.toBe(80);
+  });
+
+  it("los bloqueados viajan como categoría propia, no como desconocidos", () => {
+    expect(totals().blocked).toBe(2);
+    expect(totals().onTarget).toBe(12);
+    expect(totals().unknownTarget).toBe(0);
+  });
+
+  it("y sale del helper determinista, no de un cálculo propio del payload", () => {
+    expect(totals()).toEqual(buildZoneDashboard(partidoRival(), true).totals);
+  });
+});

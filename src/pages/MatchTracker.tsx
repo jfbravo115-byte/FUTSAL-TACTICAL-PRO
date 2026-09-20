@@ -64,7 +64,7 @@ import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
 import { streamTacticalReport } from "../services/tacticalAnalysisService";
-import { availableForSubstitution } from "../utils/squadModel";
+import { availableForSubstitution, disciplinaryState } from "../utils/squadModel";
 import { TacticalReportModal } from "../components/TacticalReportModal";
 import {
   saveMatchSnapshot,
@@ -83,6 +83,13 @@ import { applyFieldFlip } from "../utils/fieldOrientation";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperOriginMap } from "../components/export/GoalkeeperMaps";
 import { ZoneMapBoard, ZONE_MAP_PAGE } from "../components/export/ZoneMapBoard";
+import { PeriodShotMapsBoard } from "../components/export/PeriodShotMaps";
+import { DisciplinaryAura, DisciplinaryCards } from "../components/DisciplinaryAura";
+import {
+  blockedShotMetadata,
+  isShotAttempt,
+  summarizeShots,
+} from "../utils/shotModel";
 import {
   ACTION_NOUN,
   acceptsOrigin,
@@ -1406,8 +1413,10 @@ export default function MatchTracker() {
   const pdfPage5Ref = useRef<HTMLDivElement>(null);
   const pdfPage6Ref = useRef<HTMLDivElement>(null);
   const pdfPage7Ref = useRef<HTMLDivElement>(null);
-  // Página de balón parado: córners, faltas y tiros procedentes de una u otro.
+  // Página de tiros separados por parte.
   const pdfPage8Ref = useRef<HTMLDivElement>(null);
+  // Página de balón parado: córners, faltas y tiros procedentes de una u otro.
+  const pdfPage9Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1846,7 +1855,7 @@ export default function MatchTracker() {
           style: { opacity: "1", visibility: "visible" },
         };
 
-        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref];
+        const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref, pdfPage9Ref];
         const images: string[] = [];
 
         for (const ref of refs) {
@@ -2146,6 +2155,44 @@ export default function MatchTracker() {
     });
   };
 
+
+  /**
+   * Cierre del registro de un tiro. ÚNICO punto por el que se materializa el
+   * evento, venga el desenlace de la pantalla de destino, de la respuesta del
+   * portero o del resultado de una salida.
+   *
+   * Antes cada rama del flujo construía su propio `metadata` por su cuenta, y
+   * por eso dos de ellas olvidaban campos que la tercera sí ponía. Aquí se
+   * arma una sola vez.
+   *
+   * Un tiro BLOQUEADO no lleva `destinationGrid`: el balón no llegó al marco
+   * y no sabemos a dónde habría ido. Inventarle una zona —o marcarlo OUT, que
+   * es lo que hacía el botón «Tiro Fuera / Desviado»— sería afirmar algo que
+   * nadie observó.
+   */
+  const registrarTiro = (opts: {
+    destinationGrid?: string;
+    goalieResponse?: GoalieResponseDeclared;
+    blocked?: boolean;
+    extraMetadata?: Record<string, any>;
+  }) => {
+    const current = pendingAction;
+    if (!current) return;
+    setPendingAction(null); // se limpia ya, para que un doble toque no duplique
+    const destinationGrid = opts.destinationGrid ?? current.destinationGrid;
+    const goalieResponse = opts.goalieResponse ?? current.goalieResponse;
+    handleAction(current.type, current.playerId, {
+      originGrid: current.originGrid,
+      ...(!opts.blocked && destinationGrid ? { destinationGrid } : {}),
+      metadata: {
+        isOpponent: current.isOpponent,
+        setPiece: current.setPiece || "normal",
+        ...(goalieResponse ? { goalieResponse } : {}),
+        ...(opts.blocked ? blockedShotMetadata() : {}),
+        ...(opts.extraMetadata ?? {}),
+      },
+    });
+  };
 
   const handleAction = (
     type: ActionType | GoalieAction,
@@ -3443,7 +3490,7 @@ export default function MatchTracker() {
               style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
             >
               <Header
-                page={totalPages - 1}
+                page={totalPages - 2}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3451,6 +3498,44 @@ export default function MatchTracker() {
               />
               <div style={{ flex: 1 }}>
                 <ZoneMapBoard events={matchData.events} />
+              </div>
+              <Footer page={totalPages - 2} total={totalPages} />
+            </div>
+
+            {/* ── TIROS POR PARTE ───────────────────────────────────────
+                Los seis mapas de la página anterior son acumulados, y eso
+                responde «desde dónde se tira en este partido» pero no «qué
+                cambió en la segunda». Aquí se separa únicamente el mapa de
+                TIROS —el nuestro y el recibido— porque es la lectura que el
+                cuerpo técnico pidió; duplicar los seis por parte daría doce
+                pistas ilegibles y no contestaría nada más.
+
+                Página propia por el mismo motivo que la de balón parado: el
+                presupuesto de alto de ZONE_MAP_PAGE ya está agotado. */}
+            <div
+              ref={pdfPage8Ref}
+              style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
+            >
+              <Header
+                page={totalPages - 1}
+                total={totalPages}
+                mainTeam={matchData.teamName}
+                vsTeam={matchData.opponentName}
+                accent="#3b82f6"
+              />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
+                <div>
+                  <div style={{ marginBottom: 8, ...sectionLabelStyle }}>
+                    tiros por parte — {matchData.teamName}
+                  </div>
+                  <PeriodShotMapsBoard events={matchData.events} opponent={false} />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 8, ...sectionLabelStyle }}>
+                    tiros recibidos por parte — {matchData.opponentName}
+                  </div>
+                  <PeriodShotMapsBoard events={matchData.events} opponent={true} />
+                </div>
               </div>
               <Footer page={totalPages - 1} total={totalPages} />
             </div>
@@ -3464,7 +3549,7 @@ export default function MatchTracker() {
                 servicio de exportación. Este informe tenía su propia
                 plantilla y por eso los córners y las faltas de Fase 5 no
                 llegaban al PDF que genera el botón. */}
-            <div ref={pdfPage8Ref} style={pageStyle}>
+            <div ref={pdfPage9Ref} style={pageStyle}>
               <Header
                 page={totalPages}
                 total={totalPages}
@@ -4440,20 +4525,23 @@ export default function MatchTracker() {
                             (acc, p) => acc + (p?.stats?.assists || 0),
                             0,
                           );
-                          const teamShotsEvents = myEvents.filter(e => 
-                            e?.type === ActionType.SHOT || 
-                            e?.type === ActionType.GOAL || 
-                            e?.type === GoalieAction.GOAL_CONCEDED
-                          );
-                          const totalShots = teamShotsEvents.length;
-                          const totalShotsOnTarget = teamShotsEvents.filter(e => 
-                            e?.type === ActionType.GOAL || 
-                            e?.type === GoalieAction.GOAL_CONCEDED || 
-                            (e?.type === ActionType.SHOT && e?.metadata?.destinationGrid !== "OUT")
-                          ).length;
-                          const totalShotsOffTarget = teamShotsEvents.filter(e => 
-                            e?.type === ActionType.SHOT && e?.metadata?.destinationGrid === "OUT"
-                          ).length;
+                          const teamShotsEvents = myEvents.filter(isShotAttempt);
+                          // Fuente única del desenlace (src/utils/shotModel.ts).
+                          //
+                          // Este bloque leía `e.metadata.destinationGrid`, y
+                          // ese campo vive en el PRIMER NIVEL del evento, no
+                          // dentro de metadata: la lectura devolvía siempre
+                          // undefined, así que «fuera» valía 0 y todo tiro se
+                          // contaba como tiro a portería.
+                          const shotTally = summarizeShots(teamShotsEvents);
+                          const totalShots = shotTally.shots;
+                          const totalShotsOnTarget = shotTally.onTarget;
+                          const totalShotsOffTarget = shotTally.offTarget;
+                          const totalShotsBlocked = shotTally.blocked;
+                          // Remates que resolvió el portero contrario. NO es
+                          // un subconjunto que sumar a los de arriba: es otra
+                          // pregunta sobre los mismos tiros.
+                          const totalGkInterventions = shotTally.goalkeeperInterventions;
 
                           const totalPenalties = teamShotsEvents.filter(e => e?.metadata?.setPiece === "penalty").length;
                           const totalDoublePenalties = teamShotsEvents.filter(e => e?.metadata?.setPiece === "double_penalty").length;
@@ -4499,7 +4587,7 @@ export default function MatchTracker() {
                                 <span className="text-2xl font-black text-white">
                                   {totalShots}
                                 </span>
-                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1">
+                                <div className="grid grid-cols-3 gap-x-2 gap-y-1 mt-1">
                                   <div className="flex flex-col items-center">
                                     <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">PORT.</span>
                                     <span className="text-[9px] font-black text-amber-400">{totalShotsOnTarget}</span>
@@ -4508,6 +4596,12 @@ export default function MatchTracker() {
                                     <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">FUERA</span>
                                     <span className="text-[9px] font-black text-slate-400">{totalShotsOffTarget}</span>
                                   </div>
+                                  {/* Bloqueado no es «fuera»: el balón no llegó
+                                      a portería porque lo interceptaron. */}
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">BLOQ.</span>
+                                    <span className="text-[9px] font-black text-slate-400">{totalShotsBlocked}</span>
+                                  </div>
                                   <div className="flex flex-col items-center">
                                     <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">PEN</span>
                                     <span className="text-[9px] font-black text-amber-600/80">{totalPenalties}</span>
@@ -4515,6 +4609,13 @@ export default function MatchTracker() {
                                   <div className="flex flex-col items-center">
                                     <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">D.PEN</span>
                                     <span className="text-[9px] font-black text-amber-600/80">{totalDoublePenalties}</span>
+                                  </div>
+                                  {/* Intervenciones del portero que encaró
+                                      estos tiros. Magnitud distinta de las de
+                                      arriba, nunca su suma. */}
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[5px] font-bold text-slate-500 uppercase leading-none">INTERV.</span>
+                                    <span className="text-[9px] font-black text-blue-400">{totalGkInterventions}</span>
                                   </div>
                                 </div>
                               </div>
@@ -6080,6 +6181,7 @@ export default function MatchTracker() {
                               ${swapSelection === p.id ? "bg-amber-600 border-white ring-2 ring-amber-500/30" : "bg-white/5 border-white/10 opacity-80 hover:opacity-100 hover:bg-white/10"}
                            `}
                   >
+                    <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
                     <div className="w-5 h-5 rounded bg-black/40 flex items-center justify-center font-black text-[10px] shrink-0 border border-white/10">
                       {p.number}
                     </div>
@@ -6092,9 +6194,9 @@ export default function MatchTracker() {
                           <Trophy size={8} fill="currentColor" />
                         </div>
                       )}
-                      {p.stats.yellowCards > 0 && (
-                        <div className="absolute top-0.5 right-0.5 w-1.5 h-2.5 bg-yellow-400 rounded-sm border-[0.5px] border-black/20" />
-                      )}
+                      <div className="absolute top-0.5 right-0.5">
+                        <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
+                      </div>
                       <span className={`text-[6px] font-mono font-black ${p.isOpponent ? "text-red-400" : "text-blue-400"} leading-none mt-0.5`}>
                         {formatPlayerTime(p.individualTimeSeconds)}
                       </span>
@@ -6695,19 +6797,21 @@ export default function MatchTracker() {
                               },
                             );
                           } else {
-                            // MODELO C: solo en tiros DEL RIVAL contra nuestra
-                            // portería se ofrece la respuesta antes del
-                            // destino. Nuestros propios tiros conservan su
-                            // flujo de siempre, sin paso extra.
-                            const ofreceRespuesta = !!goalieRespondingToShot(
-                              pendingAction.type,
-                              pendingAction.isOpponent,
-                              matchData.players,
-                            );
+                            // PRIMERO EL DESENLACE, DESPUÉS EL PORTERO.
+                            //
+                            // Antes se preguntaba «¿interviene el portero?»
+                            // ANTES de saber si el balón había ido siquiera
+                            // entre los tres palos, así que para registrar un
+                            // tiro fuera había que pasar por una pantalla que
+                            // no venía al caso y elegir «no registrar
+                            // intervención». Ese rodeo empujaba a registrar la
+                            // ocasión desde el radial del portero, que NO crea
+                            // ningún tiro rival: de ahí «el rival tiró 5 veces»
+                            // en un partido con 12 remates afrontados.
                             setPendingAction((prev) => ({
                               ...prev!,
                               originGrid: id,
-                              step: ofreceRespuesta ? "response" : "target",
+                              step: "target",
                             }));
                           }
                         }}
@@ -6718,28 +6822,27 @@ export default function MatchTracker() {
 
                   {/* MODELO C — ¿interviene el portero? Una sola secuencia
                       para la ocasión completa: el tiro y la respuesta quedan
-                      en un único evento, nunca como dos ocasiones. */}
+                      en un único evento, nunca como dos ocasiones.
+
+                      Se pregunta AHORA, con el destino ya elegido, y solo si
+                      el balón fue entre los tres palos. SALIDA ya no está
+                      aquí: es un desenlace del tiro —el balón nunca llegó a
+                      portería— y por tanto se elige en la pantalla anterior,
+                      junto a FUERA y BLOQUEADO. */}
                   {pendingAction.step === "response" && (
                     <div className="w-full space-y-3">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
                         ¿Interviene el portero?
                       </label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         {([
                           { type: GoalieAction.SAVE, label: "PARADA" },
                           { type: GoalieAction.SAVE_CATCH, label: "BLOCAJE" },
                           { type: GoalieAction.SAVE_DEFLECT, label: "DESPEJE" },
-                          { type: GoalieAction.EXIT, label: "SALIDA" },
                         ] as const).map((opt) => (
                           <button
                             key={opt.type}
-                            onClick={() =>
-                              setPendingAction((prev) => ({
-                                ...prev!,
-                                goalieResponse: opt.type,
-                                step: opt.type === GoalieAction.EXIT ? "exitOutcome" : "target",
-                              }))
-                            }
+                            onClick={() => registrarTiro({ goalieResponse: opt.type })}
                             className="py-4 rounded-2xl border-2 border-white/10 bg-white/5 hover:bg-blue-500/25 hover:border-blue-400 text-[11px] font-black uppercase text-white transition-all active:scale-95"
                           >
                             {opt.label}
@@ -6752,11 +6855,7 @@ export default function MatchTracker() {
                           no inventará una parada. */}
                       <button
                         onClick={() =>
-                          setPendingAction((prev) => ({
-                            ...prev!,
-                            goalieResponse: GOALIE_RESPONSE_UNSPECIFIED,
-                            step: "target",
-                          }))
+                          registrarTiro({ goalieResponse: GOALIE_RESPONSE_UNSPECIFIED })
                         }
                         className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
                       >
@@ -6776,20 +6875,12 @@ export default function MatchTracker() {
                         {(["success", "fail"] as ExitOutcome[]).map((outcome) => (
                           <button
                             key={outcome}
-                            onClick={() => {
-                              if (!pendingAction) return;
-                              const current = pendingAction;
-                              setPendingAction(null);
-                              handleAction(current.type, current.playerId, {
-                                originGrid: current.originGrid,
-                                metadata: {
-                                  isOpponent: current.isOpponent,
-                                  setPiece: current.setPiece || "normal",
-                                  goalieResponse: GoalieAction.EXIT,
-                                  exitOutcome: outcome,
-                                },
-                              });
-                            }}
+                            onClick={() =>
+                              registrarTiro({
+                                goalieResponse: GoalieAction.EXIT,
+                                extraMetadata: { exitOutcome: outcome },
+                              })
+                            }
                             className={`py-6 rounded-2xl border-2 border-white/15 bg-white/5 flex flex-col items-center gap-2 transition-all active:scale-95 ${
                               outcome === "success" ? "hover:bg-green-500/25" : "hover:bg-red-500/25"
                             }`}
@@ -6807,28 +6898,56 @@ export default function MatchTracker() {
                   {pendingAction.step === "target" && (
                     <div className="w-full space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
-                        Selecciona Objetivo (Portería)
+                        {pendingAction.type === ActionType.SHOT
+                          ? "¿Cómo terminó el tiro?"
+                          : "Selecciona Objetivo (Portería)"}
                       </label>
                       <GoalMap
+                        // Los desenlaces que no son «entre los tres palos»
+                        // solo tienen sentido para un tiro. Un GOL conserva
+                        // exactamente la pantalla que tenía.
+                        showBlocked={pendingAction.type === ActionType.SHOT}
+                        showGoal={pendingAction.type === ActionType.SHOT}
+                        showExit={
+                          pendingAction.type === ActionType.SHOT &&
+                          !!goalieRespondingToShot(
+                            pendingAction.type,
+                            pendingAction.isOpponent,
+                            matchData.players,
+                          )
+                        }
+                        onBlocked={() => registrarTiro({ blocked: true })}
+                        onExit={() =>
+                          setPendingAction((prev) => ({ ...prev!, step: "exitOutcome" }))
+                        }
+                        // GOL no crea un sistema nuevo: convierte el intento
+                        // en el ActionType.GOAL de siempre y sigue pidiendo la
+                        // zona de portería, exactamente como el botón GOL.
+                        onGoal={() =>
+                          setPendingAction((prev) => ({
+                            ...prev!,
+                            type: ActionType.GOAL,
+                            destinationGrid: undefined,
+                          }))
+                        }
                         onSelect={(id) => {
                           if (!pendingAction) return;
                           const current = pendingAction;
-                          setPendingAction(null); // clear immediately to prevent double tap
-                          handleAction(
-                            current.type,
-                            current.playerId,
-                            {
-                              originGrid: current.originGrid,
-                              destinationGrid: id,
-                              metadata: {
-                                isOpponent: current.isOpponent,
-                                setPiece: current.setPiece || "normal",
-                                ...(current.goalieResponse
-                                  ? { goalieResponse: current.goalieResponse }
-                                  : {}),
-                              },
-                            },
-                          );
+                          // El balón fue entre los tres palos y hay portero
+                          // nuestro que pudo responder: ahora sí toca
+                          // preguntar por él, y solo ahora.
+                          const preguntaPortero =
+                            id !== "OUT" &&
+                            !!goalieRespondingToShot(
+                              current.type,
+                              current.isOpponent,
+                              matchData.players,
+                            );
+                          if (preguntaPortero) {
+                            setPendingAction({ ...current, destinationGrid: id, step: "response" });
+                            return;
+                          }
+                          registrarTiro({ destinationGrid: id });
                         }}
                         selected={pendingAction.destinationGrid}
                       />
@@ -6844,7 +6963,12 @@ export default function MatchTracker() {
                         onClick={() =>
                           setPendingAction((prev) => ({
                             ...prev!,
-                            step: prev?.step === "target" ? "origin" : "player",
+                            step:
+                              prev?.step === "target"
+                                ? "origin"
+                                : prev?.step === "response" || prev?.step === "exitOutcome"
+                                  ? "target"
+                                  : "player",
                           }))
                         }
                         className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-black uppercase transition-all"
@@ -7484,12 +7608,40 @@ export default function MatchTracker() {
 }
 
 // Helper Components for Shot Tracking
+//
+// LOS CUATRO DESENLACES DE UN TIRO
+// --------------------------------
+// La rejilla de nueve zonas contesta «entró entre los tres palos y por
+// dónde». Lo que no cabe en la rejilla son los otros desenlaces, y hasta
+// ahora los dos primeros compartían un único botón rotulado «Tiro Fuera /
+// Desviado»:
+//
+//   FUERA      el balón se marcha  → destinationGrid OUT
+//   BLOQUEADO  lo intercepta un jugador de campo → metadata.shotOutcome
+//   SALIDA     el portero sale y el balón nunca llega al marco
+//   GOL        entró
+//
+// Un tiro que se va por encima del larguero y un tiro que un defensa saca
+// con el cuerpo dicen cosas distintas del ataque y de la defensa, y sumarlos
+// bajo la misma etiqueta borraba esa diferencia.
 const GoalMap = ({
   onSelect,
   selected,
+  showBlocked = false,
+  showGoal = false,
+  showExit = false,
+  onBlocked,
+  onGoal,
+  onExit,
 }: {
   onSelect: (id: string) => void;
   selected?: string;
+  showBlocked?: boolean;
+  showGoal?: boolean;
+  showExit?: boolean;
+  onBlocked?: () => void;
+  onGoal?: () => void;
+  onExit?: () => void;
 }) => (
   <div className="flex flex-col gap-4 w-full">
     {/* Portería realista: larguero + postes blancos, red de fondo */}
@@ -7537,19 +7689,55 @@ const GoalMap = ({
         <div className="absolute top-1 left-0 right-0 h-8 bg-gradient-to-b from-green-700/40 to-transparent" />
       </div>
     </div>
-    <motion.button
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={() => onSelect("OUT")}
-      className={`py-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 shadow-lg
-        ${selected === "OUT" 
-          ? "bg-red-600 border-white text-white shadow-red-900/40" 
-          : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-red-400 hover:border-red-500/50"}
-      `}
-    >
-      <X size={16} className={selected === "OUT" ? "text-white" : "text-slate-500"} />
-      Tiro Fuera / Desviado
-    </motion.button>
+    <div className="grid grid-cols-2 gap-2">
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => onSelect("OUT")}
+        className={`py-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 shadow-lg
+          ${selected === "OUT"
+            ? "bg-red-600 border-white text-white shadow-red-900/40"
+            : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-red-400 hover:border-red-500/50"}
+        `}
+      >
+        <X size={16} className={selected === "OUT" ? "text-white" : "text-slate-500"} />
+        Fuera
+      </motion.button>
+
+      {showBlocked && (
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => onBlocked?.()}
+          className="py-4 rounded-2xl border-2 border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-orange-300 hover:border-orange-500/50 font-black text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 shadow-lg"
+        >
+          <Shield size={16} className="text-slate-500" />
+          Bloqueado
+        </motion.button>
+      )}
+
+      {showExit && (
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => onExit?.()}
+          className="py-4 rounded-2xl border-2 border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-cyan-300 hover:border-cyan-500/50 font-black text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 shadow-lg"
+        >
+          🧤 Salida portero
+        </motion.button>
+      )}
+
+      {showGoal && (
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => onGoal?.()}
+          className="py-4 rounded-2xl border-2 border-green-500/40 bg-green-500/15 text-green-300 hover:bg-green-500/30 hover:border-green-400 font-black text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 shadow-lg"
+        >
+          ⚽ Gol
+        </motion.button>
+      )}
+    </div>
   </div>
 );
 
@@ -8004,6 +8192,7 @@ const BenchRadialMenu = ({
                   }}
                   className={`flex flex-col items-center justify-center gap-0.5 p-2 min-w-[52px] min-h-[52px] rounded-2xl ${themeBtnBg} border-2 border-white shadow-[0_10px_30px_rgba(0,0,0,0.6)] text-white transition-all ring-4 ${themeRing} relative overflow-visible`}
                 >
+                  <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-2xl" />
                   <span className="text-[11px] font-black leading-none">
                     {p.number}
                   </span>
@@ -8011,9 +8200,7 @@ const BenchRadialMenu = ({
                     <span className={`text-[7px] font-bold uppercase truncate max-w-[40px] leading-tight ${themeText}`}>
                       {p.name.split(" ")[0]}
                     </span>
-                    {p.stats.yellowCards > 0 && (
-                      <div className="w-1.5 h-2 bg-yellow-400 rounded-[1px] shadow-[0_0_4px_rgba(250,204,21,0.5)]" />
-                    )}
+                    <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
                   </div>
                   <span className="text-[6px] font-black text-white/60 tabular-nums">
                     {Math.floor(p.individualTimeSeconds / 60)}'
@@ -8041,6 +8228,10 @@ const PlayerCard = ({
   isSwapTarget?: boolean;
   isMenuActive?: boolean;
 }) => {
+  // Estado disciplinario REAL del jugador, derivado de sus stats. Viaja con
+  // el jugador, así que sobrevive a pista → banquillo → pista sin que esta
+  // casilla tenga que recordar nada.
+  const discipline = disciplinaryState(player);
   return (
     <button
       onClick={onClick}
@@ -8058,6 +8249,8 @@ const PlayerCard = ({
             }
          `}
     >
+      <DisciplinaryAura state={discipline} />
+
       <div className={`absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-full border shadow-lg z-20
         ${player.isOpponent ? "bg-red-600 border-red-400" : "bg-blue-600 border-blue-400"}
       `}>
@@ -8096,14 +8289,7 @@ const PlayerCard = ({
             <Trophy size={6} fill="currentColor" />
           </div>
         )}
-        <div className="flex gap-0.5">
-          {player.stats.yellowCards > 0 && (
-            <div className="w-1.5 h-2.5 bg-yellow-400 rounded-sm border border-black/20" title="Tarjeta Amarilla" />
-          )}
-          {player.stats.redCards > 0 && (
-            <div className="w-1.5 h-2.5 bg-red-600 rounded-sm border border-black/20" title="Tarjeta Roja" />
-          )}
-        </div>
+        <DisciplinaryCards yellow={player.stats.yellowCards} red={player.stats.redCards} />
       </div>
 
       {/* Swap Confirmation Indicator */}

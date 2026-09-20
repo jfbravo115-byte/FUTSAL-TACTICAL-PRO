@@ -632,9 +632,15 @@ describe("Semántica de OUT frente a la respuesta del portero", () => {
       },
     });
 
-  it("DESPEJE + OUT es legítimo: el botón se llama 'Tiro Fuera / Desviado'", () => {
+  it("DESPEJE + OUT sigue siendo legítimo, y así se leen los partidos guardados", () => {
     // Un portero que desvía un balón fuera para córner es el caso más común
     // de despeje en futsal. No se prohíbe.
+    //
+    // La combinación venía del botón «Tiro Fuera / Desviado», que confundía
+    // «se fue fuera» con «lo desviaron». En la captura nueva ese despeje se
+    // registra eligiendo la zona de portería a la que iba el remate y después
+    // DESPEJE, pero los eventos ya guardados con OUT se siguen leyendo
+    // exactamente igual: aquí no se migra nada.
     const e = tiro(GoalieAction.SAVE_DEFLECT, "OUT");
     expect(goalieStatsDelta(e, nuestroGk).saves).toBe(1);
     expect(isAnySave(e)).toBe(true);

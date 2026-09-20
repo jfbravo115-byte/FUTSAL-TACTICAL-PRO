@@ -32,6 +32,25 @@ export function radialGeometry(count: number, button: number, maxDiameter: numbe
 /** Diámetro del botón del anillo. 56 px, por encima del mínimo táctil de 44. */
 export const RADIAL_BUTTON_PX = 56;
 
+/**
+ * Altura de la navegación inferior de MatchTracker (`h-12`, solo en móvil).
+ * Las barras flotantes se apoyan por encima de ella en vez de taparla.
+ */
+export const BOTTOM_NAV_PX = 48;
+
+/**
+ * Separación al borde inferior, con área segura.
+ *
+ * `env(safe-area-inset-bottom)` es lo que faltaba: en la PWA de iPhone el
+ * indicador de inicio se come los últimos píxeles, y una barra a `bottom-4`
+ * queda debajo de él. El valor de respaldo `0px` deja el comportamiento
+ * intacto en navegadores que no lo definen.
+ */
+export const CARD_BAR_BOTTOM = `calc(0.75rem + ${BOTTOM_NAV_PX}px + env(safe-area-inset-bottom, 0px))`;
+
+/** La barra del portero se apila encima de la de tarjetas, sin solaparla. */
+export const GK_BAR_BOTTOM = `calc(0.75rem + ${BOTTOM_NAV_PX}px + 7rem + env(safe-area-inset-bottom, 0px))`;
+
 interface PlayerActionRadialMenuProps {
   player: Player;
   onAction: (type: ActionType | GoalieAction, playerId: string, metadata?: any) => void;
@@ -412,39 +431,73 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
         </motion.div>
       )}
 
-      {/* Card buttons — separate bar below the radial, not part of it */}
+      {/* TARJETAS — panel propio, no un botón más del anillo.
+
+          POR QUÉ NO ESTÁN EN EL ANILLO
+          Son sanción, no acción de juego, y meterlas entre los 18 botones
+          invitaría a pulsarlas por error en medio de una secuencia rápida.
+
+          POR QUÉ SE HA MOVIDO
+          Estaba en `bottom-4`, sin área segura: en la PWA de iPhone la barra
+          caía sobre el indicador de inicio y por debajo de la navegación
+          inferior (h-12), así que en un partido real no se encontraba. Ahora
+          se apoya sobre la navegación y respeta env(safe-area-inset-bottom).
+
+          POR QUÉ LLEVA TÍTULO
+          Dos botones sueltos al pie de la pantalla se leen como controles
+          globales. Con el dorsal y el nombre delante queda claro a quién se
+          le va a sacar la tarjeta. */}
       {!selectingZone && !selectingSubtype && !selectingExitOutcome && !selectingSaveType && (
         <motion.div
           key="card-buttons"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
-          className="fixed bottom-4 left-4 right-4 z-[260] flex gap-3"
+          style={{ bottom: CARD_BAR_BOTTOM }}
+          className="fixed left-3 right-3 z-[280] rounded-3xl bg-[#0E1015]/95 border border-white/15 shadow-[0_10px_40px_rgba(0,0,0,0.7)] px-3 pt-2 pb-3"
         >
-          <button
-            onClick={(e) => { e.stopPropagation(); onAction(ActionType.YELLOW_CARD, player.id); onClose(); }}
-            className="flex-1 py-3 rounded-2xl bg-yellow-600 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
-          >
-            <div className="w-3 h-4 bg-yellow-300 rounded-[1px] border border-yellow-700" />
-            <span className="text-[11px] font-black uppercase tracking-tighter">Amarilla</span>
-            {player.stats.yellowCards > 0 && (
-              <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
-                {player.stats.yellowCards}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onAction(ActionType.RED_CARD, player.id); onClose(); }}
-            className="flex-1 py-3 rounded-2xl bg-red-700 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
-          >
-            <div className="w-3 h-4 bg-red-500 rounded-[1px] border border-red-900" />
-            <span className="text-[11px] font-black uppercase tracking-tighter">Roja</span>
-            {player.stats.redCards > 0 && (
-              <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
-                {player.stats.redCards}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center justify-center gap-2 pb-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+              Tarjetas
+            </span>
+            <span className="text-[9px] font-black uppercase tracking-widest text-white truncate max-w-[55vw]">
+              #{player.number} {player.name.split(' ')[0]}
+            </span>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={(e) => { e.stopPropagation(); onAction(ActionType.YELLOW_CARD, player.id); onClose(); }}
+              className="flex-1 min-h-[52px] py-4 rounded-2xl bg-yellow-600 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
+            >
+              <div className="w-3 h-4 bg-yellow-300 rounded-[1px] border border-yellow-700" />
+              <span className="text-[11px] font-black uppercase tracking-tighter">Amarilla</span>
+              {player.stats.yellowCards > 0 && (
+                <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
+                  {player.stats.yellowCards}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onAction(ActionType.RED_CARD, player.id); onClose(); }}
+              className="flex-1 min-h-[52px] py-4 rounded-2xl bg-red-700 border-2 border-white shadow-lg flex items-center justify-center gap-2 text-white active:scale-95 transition-all"
+            >
+              <div className="w-3 h-4 bg-red-500 rounded-[1px] border border-red-900" />
+              <span className="text-[11px] font-black uppercase tracking-tighter">Roja</span>
+              {player.stats.redCards > 0 && (
+                <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-black flex items-center justify-center">
+                  {player.stats.redCards}
+                </span>
+              )}
+            </button>
+          </div>
+          {/* La segunda amarilla ya produce la roja y saca al jugador de
+              pista (MatchTracker.handleAction). No hay que registrarla dos
+              veces, y decirlo evita que alguien lo intente. */}
+          {player.stats.yellowCards === 1 && player.stats.redCards === 0 && (
+            <div className="pt-2 text-center text-[8px] font-black uppercase tracking-widest text-amber-400/80">
+              Ya amonestado · la segunda amarilla expulsa automáticamente
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -455,7 +508,8 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
-          className="fixed bottom-24 left-4 right-4 z-[260] bg-[#0E1015]/90 border border-white/10 rounded-2xl px-4 py-3 flex justify-around"
+          style={{ bottom: GK_BAR_BOTTOM }}
+          className="fixed left-4 right-4 z-[260] bg-[#0E1015]/90 border border-white/10 rounded-2xl px-4 py-3 flex justify-around"
         >
           {[
             { label: 'Paradas', val: player.stats.saves, color: 'text-blue-400' },

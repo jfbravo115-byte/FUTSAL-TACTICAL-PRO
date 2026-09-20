@@ -28,6 +28,7 @@ import {
   zoneMetricValue,
 } from "../services/matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import { PeriodShotMapsBoard } from "../components/export/PeriodShotMaps";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { describeSetPieceOutcomes } from "../utils/setPieceModel";
@@ -288,6 +289,28 @@ export default function MatchAnalysis() {
             <div className="rounded-xl bg-black/20 border border-white/5 p-3"><div className="text-xl font-black text-white">{zones.totals.recoveries}</div><div className="text-[8px] uppercase text-slate-500 font-black">Recuper.</div></div>
             <div className="rounded-xl bg-black/20 border border-white/5 p-3"><div className="text-xl font-black text-white">{zones.totals.losses}</div><div className="text-[8px] uppercase text-slate-500 font-black">Pérdidas</div></div>
             <div className="rounded-xl bg-black/20 border border-white/5 p-3"><div className="text-xl font-black text-white">{zones.totals.zonedActions}</div><div className="text-[8px] uppercase text-slate-500 font-black">Con zona</div></div>
+          </div>
+
+          {/* ── TIROS POR PARTE ─────────────────────────────────────
+              El mapa de abajo es acumulado y responde «desde dónde se tira».
+              Esta franja responde otra pregunta distinta: «qué cambió en la
+              segunda parte». Se separan solo los TIROS porque es la lectura
+              pedida; el resto de métricas siguen siendo del partido entero.
+
+              Respeta el selector de equipo de la cabecera de la sección, así
+              que el mismo botón sirve para ver nuestros tiros o los del
+              rival. */}
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 mb-4">
+            <div className="text-[9px] uppercase font-black text-slate-500 mb-3">
+              Tiros por parte · {zoneOpponent ? match.opponentName : match.teamName}
+            </div>
+            <PeriodShotMapsBoard
+              events={match.events}
+              opponent={zoneOpponent}
+              theme="dark"
+              pitchWidth={320}
+              accent={zoneOpponent ? "#f87171" : "#22d3ee"}
+            />
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 mb-3">

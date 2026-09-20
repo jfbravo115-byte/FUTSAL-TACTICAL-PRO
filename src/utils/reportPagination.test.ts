@@ -19,12 +19,12 @@ import {
 } from "./reportPagination";
 
 describe("total de páginas del informe", () => {
-  it("dos equipos con jugadores: tres páginas cada uno más las dos comunes", () => {
-    expect(teamReportPageCount(2)).toBe(8);
+  it("dos equipos con jugadores: tres páginas cada uno más las comunes", () => {
+    expect(teamReportPageCount(2)).toBe(9);
   });
 
   it("un solo equipo registrado no imprime las páginas del rival", () => {
-    expect(teamReportPageCount(1)).toBe(5);
+    expect(teamReportPageCount(1)).toBe(6);
   });
 
   it("sin equipos quedan solo las páginas comunes", () => {
@@ -78,7 +78,7 @@ describe("la plantilla no vuelve a fijar el denominador", () => {
   it("todas las páginas se numeran contra totalPages", () => {
     const bloque = bloqueDelInforme();
     const denominadores = bloque.match(/total=\{[^}]+\}/g) || [];
-    expect(denominadores.length).toBeGreaterThanOrEqual(8);
+    expect(denominadores.length).toBeGreaterThanOrEqual(9);
     for (const d of denominadores) expect(d).toBe("total={totalPages}");
   });
 

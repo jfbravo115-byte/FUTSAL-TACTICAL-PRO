@@ -605,3 +605,94 @@ describe("un partido bien registrado llega corregido al contexto táctico", () =
     expect(totals()).toEqual(buildZoneDashboard(partidoRival(), true).totals);
   });
 });
+
+// ── CONTEXTO TEMPORAL Y SITUACIONES ESPECIALES ─────────────────────────
+//
+// TACTICAL PRO no debe deducir ventanas de superioridad ni tiempos entre
+// goles a partir de los eventos: el prompt se lo prohíbe expresamente, y con
+// razón. Tiene que recibirlos ya calculados, como hechos.
+
+describe("las situaciones especiales y la secuencia de goles llegan al payload", () => {
+  const formacion = (timestamp: number, gameState: any, isOpponent = false) =>
+    ev({
+      id: `f-${timestamp}-${isOpponent}`,
+      timestamp,
+      type: ActionType.FORMATION_CHANGE,
+      gameState,
+      metadata: { isOpponent },
+      scoreAtEvent: { team: 0, opponent: 0 },
+    });
+
+  const partidoConSuperioridad = (): MatchData => ({
+    ...partido(),
+    events: [
+      formacion(60_000, "Superioridad"),
+      ev({ id: "s1", timestamp: 70_000, type: ActionType.SHOT, originGrid: "Z4C",
+           destinationGrid: "G5", metadata: { isOpponent: false } }),
+      ev({ id: "s2", timestamp: 80_000, type: ActionType.SHOT, originGrid: "Z4C",
+           destinationGrid: "G2", metadata: { isOpponent: false } }),
+      ev({ id: "g1", timestamp: 90_000, type: ActionType.GOAL, originGrid: "Z4C",
+           destinationGrid: "G1", metadata: { isOpponent: false, setPiece: "penalty" } }),
+      ev({ id: "s3", timestamp: 100_000, type: ActionType.SHOT, originGrid: "Z3C",
+           destinationGrid: "OUT", metadata: { isOpponent: false } }),
+      ev({ id: "s4", timestamp: 110_000, type: ActionType.SHOT, originGrid: "Z3L",
+           metadata: { isOpponent: false, shotOutcome: "blocked", goalieResponse: "UNSPECIFIED" } }),
+      formacion(162_000, "4vs4"),
+      ev({ id: "g2", timestamp: 209_000, type: ActionType.GOAL, originGrid: "Z4C",
+           destinationGrid: "G3", metadata: { isOpponent: true } }),
+    ],
+  });
+
+  const informe = () =>
+    buildTacticalProPayload(partidoConSuperioridad()).deterministicReport;
+
+  it("el payload lleva las ventanas de contexto", () => {
+    const grupos = informe().matchContextGroups;
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].label).toBe("Superioridad por expulsión rival");
+  });
+
+  it("y lleva los cinco tiros de esa superioridad ya desglosados", () => {
+    // El hecho que la IA debe recibir hecho: "durante la superioridad, 5
+    // tiros, 3 a portería, 1 fuera, 1 bloqueado, 1 gol".
+    const t = informe().matchContextGroups[0].tally;
+    expect(t.shots).toBe(5);
+    expect(t.onTarget).toBe(3);
+    expect(t.offTarget).toBe(1);
+    expect(t.blocked).toBe(1);
+    expect(t.goals).toBe(1);
+  });
+
+  it("con su duración calculada, no estimada", () => {
+    expect(informe().matchContextGroups[0].totalDuration).toBe(102_000);
+  });
+
+  it("la secuencia de goles llega con procedencia y tiempo de respuesta", () => {
+    const s = informe().goalSequence;
+    expect(s).toHaveLength(2);
+    expect(s[0].sourceLabel).toBe("Penalti");
+    expect(s[1].scoringTeam).toBe("opponent");
+    expect(s[1].secondsSinceOpponentPreviousGoal).toBe(119);
+  });
+
+  it("el texto que viaja no contiene ningún código interno de contexto", () => {
+    const json = JSON.stringify(informe().matchContextGroups);
+    expect(json).toContain("Superioridad por expulsión rival");
+    expect(json).not.toContain("PJ_ATTACK");
+  });
+
+  it("un partido sin declaraciones viaja con los bloques vacíos, no ausentes", () => {
+    const informeSimple = buildTacticalProPayload(partido()).deterministicReport;
+    expect(Array.isArray(informeSimple.matchContexts)).toBe(true);
+    expect(Array.isArray(informeSimple.goalSequence)).toBe(true);
+  });
+
+  it("no hace falta tocar el prompt: viajan dentro del resumen determinista", () => {
+    const payload = buildTacticalProPayload(partidoConSuperioridad());
+    expect(Object.keys(payload).sort()).toEqual([
+      "deterministicReport",
+      "matchData",
+      "tacticalContext",
+    ]);
+  });
+});

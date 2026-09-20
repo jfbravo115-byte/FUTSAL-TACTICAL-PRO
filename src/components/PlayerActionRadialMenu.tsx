@@ -56,9 +56,21 @@ interface PlayerActionRadialMenuProps {
   onAction: (type: ActionType | GoalieAction, playerId: string, metadata?: any) => void;
   onSwap: (id: string) => void;
   onClose: () => void;
+  /**
+   * Intentos de remate del jugador, derivados de los eventos.
+   *
+   * Este componente solo recibe el `Player`, así que por sí mismo no puede
+   * contarlos: `PlayerStats.shots` no incluye los tiros fuera y sí incluye
+   * los bloqueados, de modo que la cifra del botón TIRO no era ni una cosa
+   * ni la otra. Quien lo monta sí tiene los eventos y la pasa hecha.
+   *
+   * Opcional para no romper a quien monte el menú sin partido delante: en ese
+   * caso el botón va sin contador, que es preferible a enseñar uno falso.
+   */
+  shotCount?: number;
 }
 
-export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: PlayerActionRadialMenuProps) => {
+export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shotCount }: PlayerActionRadialMenuProps) => {
   const isGoalkeeper = player.role === Role.GOALKEEPER;
   const [selectingZone, setSelectingZone] = React.useState<boolean>(false);
   const [selectionStep, setSelectionStep] = React.useState<'shot' | 'goal'>('shot');
@@ -76,7 +88,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
 
   const playerActions = [
     { type: ActionType.GOAL,        label: 'GOL',    icon: '⚽',                         color: 'bg-green-500',  count: player.stats.goals },
-    { type: ActionType.SHOT,        label: 'TIRO',   icon: <Target size={14} />,         color: 'bg-rose-500',   count: player.stats.shots },
+    { type: ActionType.SHOT,        label: 'TIRO',   icon: <Target size={14} />,         color: 'bg-rose-500',   count: shotCount },
     { type: ActionType.ASSIST,      label: 'ASIST',  icon: <Handshake size={14} />,      color: 'bg-yellow-500', count: player.stats.assists },
     { type: ActionType.FOUL,        label: 'FALTA',  icon: <AlertTriangle size={14} />,  color: 'bg-orange-500', count: player.stats.fouls },
     { type: ActionType.SET_PIECE,   label: 'J.FALTA', icon: <PlayCircle size={14} />,    color: 'bg-emerald-600', count: undefined },
@@ -100,7 +112,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose }: Pl
     // toque y evita un anillo de 11 botones, que solapaba.
     { type: SAVE_TYPE_PICKER,           label: 'TIPO PARADA', icon: <Zap size={14} />,        color: 'bg-indigo-500', count: undefined },
     { type: ActionType.GOAL,            label: 'GOL',      icon: '⚽',                        color: 'bg-green-500',  count: player.stats.goals },
-    { type: ActionType.SHOT,            label: 'TIRO',     icon: <Target size={14} />,        color: 'bg-rose-500',   count: player.stats.shots },
+    { type: ActionType.SHOT,            label: 'TIRO',     icon: <Target size={14} />,        color: 'bg-rose-500',   count: shotCount },
     { type: ActionType.ASSIST,          label: 'ASIST',    icon: <Handshake size={14} />,     color: 'bg-yellow-500', count: player.stats.assists },
     { type: ActionType.LOSS,            label: 'PÉRD.',    icon: <RefreshCw size={14} />,     color: 'bg-red-500',    count: player.stats.losses },
     { type: ActionType.STEAL,           label: 'RECUP.',   icon: <Zap size={14} />,           color: 'bg-purple-600', count: player.stats.steals },

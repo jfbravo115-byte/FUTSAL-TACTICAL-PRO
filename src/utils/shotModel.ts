@@ -162,7 +162,7 @@ export type ShotTally = {
   resolvedByGoalkeeper: number;
 };
 
-const EMPTY_TALLY: ShotTally = {
+export const EMPTY_SHOT_TALLY: ShotTally = {
   shots: 0,
   goals: 0,
   onTarget: 0,
@@ -182,7 +182,7 @@ const EMPTY_TALLY: ShotTally = {
  */
 export function summarizeShots(events: GameEvent[]): ShotTally {
   const attempts = (events || []).filter(isShotAttempt);
-  const tally = { ...EMPTY_TALLY, shots: attempts.length };
+  const tally = { ...EMPTY_SHOT_TALLY, shots: attempts.length };
 
   for (const e of attempts) {
     switch (shotResolution(e)) {
@@ -212,4 +212,80 @@ export function summarizeShots(events: GameEvent[]): ShotTally {
 /** Recuento acotado al bando indicado, para quien parte del partido entero. */
 export function summarizeTeamShots(events: GameEvent[], opponent: boolean): ShotTally {
   return summarizeShots((events || []).filter((e) => !!e.metadata?.isOpponent === opponent));
+}
+
+// ── ATRIBUCIÓN A UN JUGADOR ────────────────────────────────────────────
+//
+// POR QUÉ NO SE LEE `PlayerStats`
+// -------------------------------
+// `PlayerStats` solo tiene dos cubos para finalización —`shots` y
+// `shotsOffTarget`— y un tiro bloqueado no cabe en ninguno: no fue entre los
+// tres palos y tampoco se marchó fuera. Al caer en `shots`, la columna «Tiros
+// p.» lo presentaba como tiro a portería.
+//
+// La salida no es un tercer contador persistente. Los eventos ya lo saben
+// todo, y son la fuente semántica: `PlayerStats` es un acumulador de captura
+// en vivo, no la verdad sobre lo que ocurrió.
+//
+// LA MISMA REGLA DE ATRIBUCIÓN QUE USA LA CAPTURA
+// -----------------------------------------------
+// `handleAction` suma la estadística al jugador que está en `playerIds` y no
+// es el portero objetivo. Aquí se reproduce esa regla exactamente, para que
+// derivar y acumular no puedan dar resultados distintos:
+//
+//   1. el evento es un intento de remate;
+//   2. el jugador aparece en `playerIds`;
+//   3. no es el portero al que iba dirigido;
+//   4. es del bando que ejecuta la acción.
+//
+// La cuarta condición cubre los eventos anteriores a Fase 4, que no llevan
+// `targetGoalkeeperId`: sin ella, un tiro rival se le atribuiría a NUESTRO
+// portero, que está en `playerIds` por ser el que lo encaró.
+
+export type ShotActor = { id: string; isOpponent: boolean };
+
+export function isShotByPlayer(e: GameEvent, player: ShotActor): boolean {
+  if (!isShotAttempt(e)) return false;
+  if (!e.playerIds?.includes(player.id)) return false;
+  if (e.metadata?.targetGoalkeeperId === player.id) return false;
+  return !!e.metadata?.isOpponent === !!player.isOpponent;
+}
+
+/** Los intentos de un jugador concreto. */
+export function playerShots(events: GameEvent[], player: ShotActor): GameEvent[] {
+  return (events || []).filter((e) => isShotByPlayer(e, player));
+}
+
+/** Recuento de finalización de UN jugador, derivado de sus eventos. */
+export function summarizePlayerShots(events: GameEvent[], player: ShotActor): ShotTally {
+  return summarizeShots(playerShots(events, player));
+}
+
+/**
+ * Recuento por jugador en una sola pasada.
+ *
+ * Existe para que una tabla de 16 filas no recorra los eventos 16 veces, y
+ * para que todas las columnas de una misma pantalla salgan del mismo cálculo.
+ * Un jugador sin intentos devuelve un recuento a cero, no `undefined`.
+ */
+export function playerShotTallies(
+  events: GameEvent[],
+  players: ShotActor[],
+): Map<string, ShotTally> {
+  const porJugador = new Map<string, GameEvent[]>();
+  for (const p of players || []) porJugador.set(p.id, []);
+  for (const e of events || []) {
+    if (!isShotAttempt(e)) continue;
+    for (const p of players || []) {
+      if (isShotByPlayer(e, p)) porJugador.get(p.id)!.push(e);
+    }
+  }
+  const salida = new Map<string, ShotTally>();
+  for (const [id, evs] of porJugador) salida.set(id, summarizeShots(evs));
+  return salida;
+}
+
+/** Recuento de un jugador dentro de un mapa, o ceros si no está. */
+export function tallyOf(tallies: Map<string, ShotTally>, playerId: string): ShotTally {
+  return tallies.get(playerId) ?? EMPTY_SHOT_TALLY;
 }

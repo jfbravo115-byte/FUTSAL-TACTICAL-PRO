@@ -14,14 +14,19 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ActionType, GameEvent, GameState, GoalieAction, Period, Role } from "../types/futsal";
 import {
+  EMPTY_SHOT_TALLY,
   SHOT_OUTCOME_BLOCKED,
   blockedShotMetadata,
   isShotAttempt,
+  isShotByPlayer,
   isShotOutcome,
+  playerShotTallies,
   shotOutcomeOf,
   shotResolution,
+  summarizePlayerShots,
   summarizeShots,
   summarizeTeamShots,
+  tallyOf,
 } from "./shotModel";
 import { goalieStatsDelta, isAnySave, isUnspecifiedSave } from "./goalkeeperActions";
 
@@ -409,5 +414,195 @@ describe("los mapas por parte llegan a las superficies de informe", () => {
       expect(tipos).not.toContain(prohibido);
     }
     expect(tipos).toContain("period: Period;");
+  });
+});
+
+// ── FINALIZACIÓN INDIVIDUAL ────────────────────────────────────────────
+//
+// El contrato de la revisión de la PR #17. `PlayerStats` solo tiene dos
+// cubos —`shots` y `shotsOffTarget`— y un tiro bloqueado no cabe en ninguno:
+// acababa sumando a `shots` y presentándose como tiro a portería. La salida
+// no es un tercer contador persistente, sino derivarlo de los eventos.
+
+describe("el recuento de un jugador sale de sus eventos", () => {
+  const jugador = { id: "p7", isOpponent: false };
+  const portero = { id: "gkRival", isOpponent: true };
+
+  /** El fixture del encargo: 8 = 3 + 3 + 2. */
+  const ochoIntentos = () => [
+    ev(ActionType.SHOT, {
+      destinationGrid: "G5",
+      playerIds: ["p7", "gkRival"],
+      metadata: { goalieResponse: GoalieAction.SAVE, targetGoalkeeperId: "gkRival" },
+    }),
+    ev(ActionType.SHOT, {
+      destinationGrid: "G2",
+      playerIds: ["p7", "gkRival"],
+      metadata: { goalieResponse: GoalieAction.SAVE_CATCH, targetGoalkeeperId: "gkRival" },
+    }),
+    ev(ActionType.GOAL, { destinationGrid: "G1", playerIds: ["p7", "gkRival"] }),
+    ...Array.from({ length: 3 }, () =>
+      ev(ActionType.SHOT, { destinationGrid: "OUT", playerIds: ["p7", "gkRival"] }),
+    ),
+    ...Array.from({ length: 2 }, () =>
+      ev(ActionType.SHOT, { playerIds: ["p7", "gkRival"], metadata: blockedShotMetadata() }),
+    ),
+  ];
+
+  it("2 paradas + 1 gol + 3 fuera + 2 bloqueados = 8 · 3 · 3 · 2", () => {
+    const t = summarizePlayerShots(ochoIntentos(), jugador);
+    expect(t.shots).toBe(8);
+    expect(t.onTarget).toBe(3);
+    expect(t.offTarget).toBe(3);
+    expect(t.blocked).toBe(2);
+  });
+
+  it("los bloqueados NUNCA inflan la columna de tiros a portería", () => {
+    expect(summarizePlayerShots(ochoIntentos(), jugador).onTarget).not.toBe(5);
+  });
+
+  it("con todo clasificado, portería + fuera + bloqueados = total", () => {
+    const t = summarizePlayerShots(ochoIntentos(), jugador);
+    expect(t.onTarget + t.offTarget + t.blocked).toBe(t.shots);
+    expect(t.unrecorded).toBe(0);
+  });
+
+  it("el portero que encara los tiros no se lleva ninguno", () => {
+    // Está en playerIds por ser el objetivo. Antes de Fase 4 no había
+    // targetGoalkeeperId, así que también se comprueba por bando.
+    expect(summarizePlayerShots(ochoIntentos(), portero).shots).toBe(0);
+    const sinIdExplicito = ev(ActionType.SHOT, {
+      isOpponent: true,
+      destinationGrid: "G5",
+      playerIds: ["riv", "gkPropio"],
+    });
+    expect(summarizePlayerShots([sinIdExplicito], { id: "gkPropio", isOpponent: false }).shots).toBe(0);
+  });
+
+  it("un jugador sin intentos devuelve ceros, no undefined", () => {
+    const tallies = playerShotTallies(ochoIntentos(), [jugador, { id: "p9", isOpponent: false }]);
+    expect(tallyOf(tallies, "p9")).toEqual(EMPTY_SHOT_TALLY);
+    expect(tallyOf(tallies, "no-existe").shots).toBe(0);
+  });
+
+  it("la pasada por lotes da lo mismo que jugador a jugador", () => {
+    const eventos = ochoIntentos();
+    const tallies = playerShotTallies(eventos, [jugador, portero]);
+    expect(tallyOf(tallies, "p7")).toEqual(summarizePlayerShots(eventos, jugador));
+    expect(tallyOf(tallies, "gkRival")).toEqual(summarizePlayerShots(eventos, portero));
+  });
+
+  it("un tiro del rival no se le atribuye a un jugador nuestro con el mismo id", () => {
+    const tiroRival = ev(ActionType.SHOT, {
+      isOpponent: true,
+      destinationGrid: "G5",
+      playerIds: ["p7"],
+    });
+    expect(summarizePlayerShots([tiroRival], jugador).shots).toBe(0);
+    expect(summarizePlayerShots([tiroRival], { id: "p7", isOpponent: true }).shots).toBe(1);
+  });
+});
+
+describe("un jugador de un partido histórico conserva su lectura", () => {
+  const jugador = { id: "p3", isOpponent: false };
+
+  it("sin shotOutcome: OUT sigue siendo fuera y Gx sigue siendo a portería", () => {
+    const historico = [
+      ev(ActionType.SHOT, { destinationGrid: "G4", playerIds: ["p3"] }),
+      ev(ActionType.SHOT, { destinationGrid: "OUT", playerIds: ["p3"] }),
+      ev(ActionType.GOAL, { destinationGrid: "G7", playerIds: ["p3"] }),
+    ];
+    const t = summarizePlayerShots(historico, jugador);
+    expect(t.shots).toBe(3);
+    expect(t.onTarget).toBe(2);
+    expect(t.offTarget).toBe(1);
+    expect(t.blocked).toBe(0);
+    expect(historico.every((e) => shotOutcomeOf(e) === null)).toBe(true);
+  });
+
+  it("no se infiere 'blocked' en un tiro antiguo sin destino", () => {
+    const sinDestino = ev(ActionType.SHOT, { playerIds: ["p3"] });
+    expect(shotResolution(sinDestino)).toBe("unrecorded");
+    const t = summarizePlayerShots([sinDestino], jugador);
+    expect(t.blocked).toBe(0);
+    expect(t.unrecorded).toBe(1);
+  });
+});
+
+describe("ninguna superficie individual vuelve a restar los dos cubos", () => {
+  const SUPERFICIES = [
+    "../pages/MatchTracker.tsx",
+    "../pages/MatchAnalysis.tsx",
+    "../lib/exportUtils.ts",
+    "../services/matchReportService.ts",
+    "../services/pdfExportService.tsx",
+    "../services/matchExportService.ts",
+    "../components/PlayerActionRadialMenu.tsx",
+    "../components/TacticalAnalyst.tsx",
+  ];
+
+  it("no queda ningún `shots - shotsOffTarget`", () => {
+    for (const rel of SUPERFICIES) {
+      const codigo = fs
+        .readFileSync(path.resolve(__dirname, rel), "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      expect(codigo).not.toMatch(/shots\s*-\s*[\w.]*shotsOffTarget/);
+    }
+  });
+
+  it("ninguna presenta una cifra de tiros leyendo PlayerStats", () => {
+    for (const rel of SUPERFICIES) {
+      const lineas = fs
+        .readFileSync(path.resolve(__dirname, rel), "utf-8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//"))
+        // `stats?.shots` con encadenamiento opcional cuenta igual.
+        .filter((l) => /stats\??\.shots(?!OffTarget)|stats\??\.shotsOffTarget/.test(l));
+
+      for (const linea of lineas) {
+        // Lo único que puede seguir tocando esos dos cubos es el acumulador
+        // de captura en vivo —sumar la acción y deshacerla—, que es lo que
+        // mantiene el contador mientras se registra el partido. Cualquier
+        // otra línea estaría PRESENTANDO la cifra, y ahí la fuente son los
+        // eventos.
+        expect(linea).toMatch(/\+= 1;|Math\.max\(0,/);
+      }
+    }
+  });
+
+  it("el informe determinista deriva las filas de los eventos", () => {
+    const fuente = fs.readFileSync(
+      path.resolve(__dirname, "../services/matchReportService.ts"),
+      "utf-8",
+    );
+    expect(fuente).toContain("playerShotTallies(matchData.events || [], usados)");
+    expect(fuente).toContain("attempts: tiros.shots,");
+    expect(fuente).toContain("shotsOnTarget: tiros.onTarget,");
+    expect(fuente).toContain("shotsBlocked: tiros.blocked,");
+  });
+});
+
+describe("la exclusión del portero objetivo es una guardia, no un adorno", () => {
+  // Por construcción el portero objetivo siempre es del bando contrario al
+  // del evento, así que la comprobación de bando ya lo dejaría fuera. Esta
+  // guardia cubre el caso en que el evento se contradice a sí mismo: un
+  // `targetGoalkeeperId` del MISMO bando que ejecuta. Sin ella, ese portero
+  // aparecería como rematador en su propia tabla.
+  const contradictorio = ev(ActionType.SHOT, {
+    isOpponent: false,
+    destinationGrid: "G5",
+    playerIds: ["p7", "gkPropio"],
+    metadata: { targetGoalkeeperId: "gkPropio" },
+  });
+
+  it("un portero marcado como objetivo nunca cuenta como rematador", () => {
+    expect(isShotByPlayer(contradictorio, { id: "gkPropio", isOpponent: false })).toBe(false);
+    expect(summarizePlayerShots([contradictorio], { id: "gkPropio", isOpponent: false }).shots).toBe(0);
+  });
+
+  it("y el rematador real sigue contando", () => {
+    expect(isShotByPlayer(contradictorio, { id: "p7", isOpponent: false })).toBe(true);
   });
 });

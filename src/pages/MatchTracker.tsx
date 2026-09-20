@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Play,
   Pause,
@@ -86,9 +86,13 @@ import { ZoneMapBoard, ZONE_MAP_PAGE } from "../components/export/ZoneMapBoard";
 import { PeriodShotMapsBoard } from "../components/export/PeriodShotMaps";
 import { DisciplinaryAura, DisciplinaryCards } from "../components/DisciplinaryAura";
 import {
+  ShotTally,
   blockedShotMetadata,
   isShotAttempt,
+  playerShotTallies,
   summarizeShots,
+  summarizeTeamShots,
+  tallyOf,
 } from "../utils/shotModel";
 import {
   ACTION_NOUN,
@@ -663,7 +667,16 @@ const StatsExportTemplate = React.forwardRef<
   StatsExportTemplateProps
 >(({ matchData, goals, opponentGoals, formatTime, reportType = "TEAM" }, ref) => {
   const isGoalkeeperReport = reportType === Role.GOALKEEPER;
-  
+
+  // Finalización por jugador derivada de los eventos, igual que en la
+  // pantalla: este informe no puede decir una cifra distinta de la que el
+  // usuario acaba de ver.
+  const shotTallies = useMemo(
+    () => playerShotTallies(matchData.events, matchData.players),
+    [matchData.events, matchData.players],
+  );
+  const tiros = (p: { id: string }): ShotTally => tallyOf(shotTallies, p.id);
+
   const relevantPlayers = matchData.players.filter(p => 
     p.role !== Role.COACH && 
     p.role !== Role.DELEGATE &&
@@ -904,8 +917,9 @@ const StatsExportTemplate = React.forwardRef<
 
           const ITEMS = [
             { key: 'goals', label: 'Goles', color: '#22c55e', fn: (p: Player) => p.stats.goals || 0 },
-            { key: 'shots', label: 'Tiros tot.', color: '#f59e0b', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.shotsOffTarget || 0) + (p.stats.goals || 0) },
-            { key: 'shotsOT', label: 'Tiros p.', color: '#fb923c', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
+            { key: 'shots', label: 'Tiros tot.', color: '#f59e0b', fn: (p: Player) => tiros(p).shots },
+            { key: 'shotsOT', label: 'Tiros p.', color: '#fb923c', fn: (p: Player) => tiros(p).onTarget },
+            { key: 'shotsBlocked', label: 'Tiros bloq.', color: '#fdba74', fn: (p: Player) => tiros(p).blocked },
             { key: 'losses', label: 'Pérdidas', color: '#ef4444', fn: (p: Player) => p.stats.losses || 0 },
             { key: 'recoveries', label: 'Recuperac.', color: '#a855f7', fn: (p: Player) => p.stats.steals || 0 },
             { key: 'foulsC', label: 'Faltas com.', color: '#f97316', fn: (p: Player) => p.stats.fouls || 0 },
@@ -998,7 +1012,7 @@ const StatsExportTemplate = React.forwardRef<
           const renderSpiders = (players: Player[]) => {
             const SPIDER_ITEMS = [
               { label: 'Goles', fn: (p: Player) => p.stats.goals || 0, isRed: false },
-              { label: 'Tiros', fn: (p: Player) => p.stats.shots || 0, isRed: true },
+              { label: 'Tiros', fn: (p: Player) => tiros(p).shots, isRed: true },
               { label: 'Pérd.', fn: (p: Player) => p.stats.losses || 0, isRed: true },
               { label: 'Recup.', fn: (p: Player) => p.stats.steals || 0, isRed: false },
               { label: 'Min.', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60), isRed: true },
@@ -1018,7 +1032,7 @@ const StatsExportTemplate = React.forwardRef<
 
             const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
 
-            const maxAtkVal = Math.max(...players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
+            const maxAtkVal = Math.max(...players.map(p => (p.stats.goals || 0) * 2 + tiros(p).shots), 1);
             const maxDefVal = Math.max(...players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
 
             return (
@@ -1031,7 +1045,7 @@ const StatsExportTemplate = React.forwardRef<
                   const dataR = normVals.map(v => (v / 5) * R);
                   const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
 
-                  const atkScore = (p.stats.goals || 0) * 2 + (p.stats.shots || 0);
+                  const atkScore = (p.stats.goals || 0) * 2 + tiros(p).shots;
                   const defScore = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
                   const atkPct = Math.round((atkScore / maxAtkVal) * 100);
                   const defPct = Math.round((defScore / maxDefVal) * 100);
@@ -1221,6 +1235,22 @@ export default function MatchTracker() {
   };
 
   const [matchData, setMatchData] = useState<MatchData>(getInitialMatchData);
+
+  /**
+   * Finalización por jugador, derivada de los EVENTOS.
+   *
+   * `PlayerStats` solo tiene dos cubos —`shots` y `shotsOffTarget`— y un tiro
+   * bloqueado no cabe en ninguno: acababa sumando a `shots` y por tanto
+   * presentándose como tiro a portería. Los eventos sí saben distinguirlo.
+   *
+   * Una sola pasada para todas las tablas y gráficas de la pantalla, así que
+   * ninguna puede discrepar de otra.
+   */
+  const shotTallies = useMemo(
+    () => playerShotTallies(matchData.events, matchData.players),
+    [matchData.events, matchData.players],
+  );
+  const tiros = (p: { id: string }): ShotTally => tallyOf(shotTallies, p.id);
 
   // ── GUARDADO LOCAL ROBUSTO (red de seguridad, independiente del backend) ──
   // Al montar: si hay un snapshot recuperable de una sesión anterior, se
@@ -1719,7 +1749,9 @@ export default function MatchTracker() {
       });
 
     const localStats = {
-      shots: matchData.players.filter(p => !p.isOpponent).reduce((acc, p) => acc + (p.stats.shots || 0), 0),
+      // Intentos reales del equipo. Sumar `stats.shots` dejaba fuera los
+      // tiros fuera, así que «Remates Totales» iba corto.
+      shots: summarizeTeamShots(matchData.events, false).shots,
       steals: matchData.players.filter(p => !p.isOpponent).reduce((acc, p) => acc + (p.stats.steals || 0), 0),
       losses: matchData.players.filter(p => !p.isOpponent).reduce((acc, p) => acc + (p.stats.losses || 0), 0),
       yellowCards: matchData.players.filter(p => !p.isOpponent).reduce((acc, p) => acc + (p.stats.yellowCards || 0), 0),
@@ -3130,8 +3162,9 @@ export default function MatchTracker() {
 
         const ITEMS = [
           { label: 'Goles', color: '#16a34a', fn: (p: Player) => p.stats.goals || 0 },
-          { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.shotsOffTarget || 0) + (p.stats.goals || 0) },
-          { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => (p.stats.shots || 0) + (p.stats.goals || 0) },
+          { label: 'Tiros tot.', color: '#d97706', fn: (p: Player) => tiros(p).shots },
+          { label: 'Tiros p.', color: '#ea580c', fn: (p: Player) => tiros(p).onTarget },
+          { label: 'Tiros bloq.', color: '#fb923c', fn: (p: Player) => tiros(p).blocked },
           { label: 'Pérd.', color: '#dc2626', fn: (p: Player) => p.stats.losses || 0 },
           { label: '↳ Pase', color: '#f87171', fn: (p: Player) => p.stats.lossesBadPass || 0 },
           { label: '↳ Regate', color: '#f87171', fn: (p: Player) => p.stats.lossesBadDribble || 0 },
@@ -3146,7 +3179,7 @@ export default function MatchTracker() {
 
         const SPIDER_ITEMS = [
           { label: 'Goles', fn: (p: Player) => p.stats.goals || 0, isRed: false },
-          { label: 'Tiros', fn: (p: Player) => p.stats.shots || 0, isRed: true },
+          { label: 'Tiros', fn: (p: Player) => tiros(p).shots, isRed: true },
           { label: 'Pérd.', fn: (p: Player) => p.stats.losses || 0, isRed: true },
           { label: 'Recup.', fn: (p: Player) => p.stats.steals || 0, isRed: false },
           { label: 'Min.', fn: (p: Player) => Math.round((p.individualTimeSeconds || 0) / 60), isRed: true },
@@ -3293,7 +3326,7 @@ export default function MatchTracker() {
                 const DonutChart = ({ p, accent }: { p: Player, accent: string }) => {
                   const slices = [
                     { label: 'Goles',  v: p.stats.goals  || 0 },
-                    { label: 'Tiros',  v: p.stats.shots  || 0 },
+                    { label: 'Tiros',  v: tiros(p).shots },
                     { label: 'Recup.', v: p.stats.steals || 0 },
                     { label: 'Perd.',  v: p.stats.losses || 0 },
                   ];
@@ -3433,7 +3466,7 @@ export default function MatchTracker() {
                 const team = allTeamsForPDF[1];
                 if (!team) return null;
                 const maxVals = SPIDER_ITEMS.map(it => Math.max(...team.players.map(p => it.fn(p)), 1));
-                const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + (p.stats.shots || 0)), 1);
+                const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + tiros(p).shots), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
                 const W = 140, H = 140, cx = 70, cy = 70, R = 50;
                 const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
@@ -3449,7 +3482,7 @@ export default function MatchTracker() {
                         const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
                         const dataR = normV.map(v => (v / 5) * R);
                         const dataPts = angles.map((a, i) => `${cx + dataR[i] * Math.cos(a)},${cy + dataR[i] * Math.sin(a)}`).join(' ');
-                        const atk = (p.stats.goals || 0) * 2 + (p.stats.shots || 0); const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
+                        const atk = (p.stats.goals || 0) * 2 + tiros(p).shots; const def = Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5);
                         const atkPct = Math.round((atk / maxAtkV) * 100); const defPct = Math.round((def / maxDefV) * 100);
                         const diff = atkPct - defPct; const verdict = diff > 15 ? 'Perfil atacante' : diff < -15 ? 'Perfil defensivo' : 'Equilibrado';
                         const vc = diff > 15 ? '#dc2626' : diff < -15 ? '#16a34a' : '#64748b'; const vbg = diff > 15 ? '#fef2f2' : diff < -15 ? '#f0fdf4' : '#f8fafc';
@@ -4714,7 +4747,7 @@ export default function MatchTracker() {
                           (acc, p) => ({
                             goals: acc.goals + p.stats.goals,
                             assists: acc.assists + p.stats.assists,
-                            shots: acc.shots + p.stats.shots,
+                            shots: acc.shots + tiros(p).shots,
                             interceptions:
                               acc.interceptions + p.stats.interceptions,
                             losses: acc.losses + p.stats.losses,
@@ -5222,7 +5255,7 @@ export default function MatchTracker() {
                                         if (statsSortKey === "plusMinus")
                                           return acc + p.plusMinus;
                                         if (statsSortKey === "shots")
-                                          return acc + p.stats.shots + p.stats.goals;
+                                          return acc + tiros(p).shots;
                                         if (
                                           statsSortKey ===
                                           "individualTimeSeconds"
@@ -5268,7 +5301,7 @@ export default function MatchTracker() {
                                   a.individualTimeSeconds
                                 );
                               if (statsSortKey === "shots")
-                                return (b.stats.shots + b.stats.goals) - (a.stats.shots + a.stats.goals);
+                                return tiros(b).shots - tiros(a).shots;
                               if (statsSortKey === "saves")
                                 return (
                                   b.stats.saves +
@@ -5336,11 +5369,17 @@ export default function MatchTracker() {
                                     <span className={`text-[10px] font-black ${p.stats.assists > 0 ? "text-blue-400" : "text-slate-600"}`}>{p.stats.assists}</span>
                                   </div>
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[6px] font-black text-slate-500 uppercase">TIR (P/F)</span>
-                                    <span className={`text-[9px] font-black ${p.stats.shots + p.stats.goals > 0 ? "text-amber-400" : "text-slate-600"} flex items-baseline gap-0.5`}>
-                                      <span>{(p.stats.shots - p.stats.shotsOffTarget) + p.stats.goals}</span>
+                                    {/* Portería / Fuera / Bloqueados. Antes
+                                        calculaba `shots - shotsOffTarget`, y
+                                        esos dos cubos son disjuntos: la resta
+                                        no daba los tiros a portería. */}
+                                    <span className="text-[6px] font-black text-slate-500 uppercase">TIR (P/F/B)</span>
+                                    <span className={`text-[9px] font-black ${tiros(p).shots > 0 ? "text-amber-400" : "text-slate-600"} flex items-baseline gap-0.5`}>
+                                      <span>{tiros(p).onTarget}</span>
                                       <span className="text-[7px] text-slate-500">/</span>
-                                      <span className="text-[8px] text-slate-400 font-normal">{p.stats.shotsOffTarget}</span>
+                                      <span className="text-[8px] text-slate-400 font-normal">{tiros(p).offTarget}</span>
+                                      <span className="text-[7px] text-slate-500">/</span>
+                                      <span className="text-[8px] text-slate-400 font-normal">{tiros(p).blocked}</span>
                                     </span>
                                   </div>
                                   <div className="flex flex-col items-center">
@@ -7184,6 +7223,7 @@ export default function MatchTracker() {
             onAction={handleAction}
             onSwap={(id) => executeSwap(id, true)}
             onClose={() => setActiveActionPlayerId(null)}
+            shotCount={tallyOf(shotTallies, activeActionPlayerId).shots}
           />
         )}
       </AnimatePresence>

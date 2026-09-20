@@ -365,3 +365,120 @@ describe("jugadas de falta en el resumen determinista", () => {
     expect(r.teamTotals.shots).toBe(1);
   });
 });
+
+// ── FINALIZACIÓN INDIVIDUAL ────────────────────────────────────────────
+//
+// La línea de jugador salía de `PlayerStats`, que solo tiene dos cubos
+// —`shots` y `shotsOffTarget`—. Un tiro bloqueado no cabe en ninguno y
+// acababa sumando a `shots`, es decir presentándose como tiro a portería.
+// Ahora se deriva de los eventos, que sí saben distinguirlo.
+
+describe("las filas de jugador se derivan de los eventos, no de PlayerStats", () => {
+  const P7 = "p7";
+  const GK = "gkRival";
+
+  /** El fixture del encargo: 8 intentos = 3 a portería + 3 fuera + 2 bloqueados. */
+  const partidoDeP7 = () =>
+    matchData({
+      players: [
+        player({
+          id: P7,
+          number: 7,
+          individualTimeSeconds: 600,
+          // Deliberadamente MENTIROSO. Si la línea leyera PlayerStats en vez
+          // de los eventos, estos números aparecerían en el informe.
+          stats: {
+            goals: 1, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
+            fouls: 0, yellowCards: 0, redCards: 0, shots: 99, shotsOffTarget: 99,
+            saves: 0, conceded: 0,
+          },
+        }),
+      ],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: [P7, GK], destinationGrid: "G5",
+                metadata: { goalieResponse: GoalieAction.SAVE, targetGoalkeeperId: GK } }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK], destinationGrid: "G2",
+                metadata: { goalieResponse: GoalieAction.SAVE_CATCH, targetGoalkeeperId: GK } }),
+        event({ type: ActionType.GOAL, playerIds: [P7, GK], destinationGrid: "G1" }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK], destinationGrid: "OUT" }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK], destinationGrid: "OUT" }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK], destinationGrid: "OUT" }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK],
+                metadata: { shotOutcome: "blocked", goalieResponse: "UNSPECIFIED" } }),
+        event({ type: ActionType.SHOT, playerIds: [P7, GK],
+                metadata: { shotOutcome: "blocked", goalieResponse: "UNSPECIFIED" } }),
+      ],
+    });
+
+  const linea = () => generateMatchReport(partidoDeP7()).playersUsed.find((p) => p.id === P7)!;
+
+  it("8 intentos = 3 a portería + 3 fuera + 2 bloqueados", () => {
+    const p = linea();
+    expect(p.attempts).toBe(8);
+    expect(p.shotsOnTarget).toBe(3);
+    expect(p.shotsOffTarget).toBe(3);
+    expect(p.shotsBlocked).toBe(2);
+  });
+
+  it("los bloqueados no inflan los tiros a portería", () => {
+    expect(linea().shotsOnTarget).not.toBe(5);
+  });
+
+  it("con todo clasificado, las tres categorías suman el total", () => {
+    const p = linea();
+    expect(p.shotsOnTarget + p.shotsOffTarget + p.shotsBlocked).toBe(p.attempts);
+    expect(p.shotsUnrecorded).toBe(0);
+  });
+
+  it("ignora unas PlayerStats que dicen otra cosa", () => {
+    expect(linea().attempts).not.toBe(199);
+  });
+
+  it("el total del equipo cuadra con la suma de los suyos", () => {
+    const r = generateMatchReport(partidoDeP7());
+    expect(r.teamTotals.shots).toBe(8);
+    expect(r.teamTotals.shotsOnTarget).toBe(3);
+    expect(r.teamTotals.shotsOffTarget).toBe(3);
+    expect(r.teamTotals.shotsBlocked).toBe(2);
+    expect(r.teamTotals.shotsUnknownTarget).toBe(0);
+  });
+
+  it("los bloqueados salen de «destino no registrado»: no es que no lo sepamos", () => {
+    expect(generateMatchReport(partidoDeP7()).teamTotals.shotsUnknownTarget).toBe(0);
+  });
+
+  it("la precisión no cuenta los bloqueados en ninguno de los dos lados", () => {
+    // 3 a portería sobre 3 + 3 fuera. Un bloqueo no dice si iba dentro.
+    expect(generateMatchReport(partidoDeP7()).teamTotals.shotAccuracyPct).toBe(50);
+  });
+});
+
+describe("un partido histórico sin shotOutcome conserva su interpretación", () => {
+  it("OUT sigue siendo fuera y Gx sigue siendo a portería", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 300 })],
+      events: [
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G3" }),
+        event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "OUT" }),
+        event({ type: ActionType.GOAL, playerIds: ["p1"], destinationGrid: "G8" }),
+      ],
+    });
+    const p = generateMatchReport(md).playersUsed[0];
+    expect(p.attempts).toBe(3);
+    expect(p.shotsOnTarget).toBe(2);
+    expect(p.shotsOffTarget).toBe(1);
+    // No se infiere ningún bloqueo retroactivo.
+    expect(p.shotsBlocked).toBe(0);
+  });
+
+  it("un tiro antiguo sin destino queda declarado, no repartido", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 300 })],
+      events: [event({ type: ActionType.SHOT, playerIds: ["p1"] })],
+    });
+    const p = generateMatchReport(md).playersUsed[0];
+    expect(p.attempts).toBe(1);
+    expect(p.shotsUnrecorded).toBe(1);
+    expect(p.shotsOnTarget + p.shotsOffTarget + p.shotsBlocked).toBe(0);
+  });
+});

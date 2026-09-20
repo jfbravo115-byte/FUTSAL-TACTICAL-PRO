@@ -13,6 +13,12 @@ import {
 } from "../types/futsal";
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import {
+  isShotAttempt,
+  playerShotTallies,
+  summarizeShots,
+  tallyOf,
+} from "../utils/shotModel";
+import {
   SetPieceOutcomeSummary,
   SetPieceRestartSummary,
   countShotsFromSetPiece,
@@ -33,9 +39,22 @@ export type MatchReportPlayerLine = {
   rotLabel: string | null;
   rotationsCount: number;
   goals: number;
-  shots: number;
-  shotsOffTarget: number;
+  /**
+   * Finalización del jugador, derivada de SUS eventos y no de `PlayerStats`.
+   *
+   * `PlayerStats` solo tiene dos cubos —`shots` y `shotsOffTarget`— y un tiro
+   * bloqueado no cabe en ninguno, así que acababa contándose como tiro a
+   * portería. Estas cuatro cifras salen del contrato único de
+   * `src/utils/shotModel.ts`.
+   */
   attempts: number;
+  /** Entre los tres palos. INCLUYE los goles del jugador. */
+  shotsOnTarget: number;
+  shotsOffTarget: number;
+  /** Bloqueado o desviado antes de llegar. Ni dentro ni fuera. */
+  shotsBlocked: number;
+  /** Intentos cuyo desenlace no consta. No se reparten ni se suponen. */
+  shotsUnrecorded: number;
   steals: number;
   interceptions: number;
   losses: number;
@@ -101,10 +120,12 @@ export type MatchReport = {
   setPieces: MatchReportSetPieces;
   teamTotals: {
     goals: number;
-    /** Intentos totales: gol + tiro a portería + tiro fuera. */
+    /** Intentos totales: a portería + fuera + bloqueados + sin declarar. */
     shots: number;
     shotsOnTarget: number;
     shotsOffTarget: number;
+    /** Bloqueados o desviados antes de llegar. No son «fuera». */
+    shotsBlocked: number;
     shotsUnknownTarget: number;
     shotAccuracyPct: number | null;
     goalConversionPct: number | null;
@@ -177,8 +198,6 @@ const ACTION_LABEL: Record<string, string> = {
 const isGoalEvent = (e: GameEvent) =>
   e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED;
 
-const isShotAttempt = (e: GameEvent) =>
-  e.type === ActionType.SHOT || isGoalEvent(e);
 
 function countRotations(events: GameEvent[], playerId: string): number {
   return events.filter(
@@ -207,10 +226,15 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       matchData.events.some((e) => e.playerIds.includes(p.id)),
   );
 
+  // Una sola pasada sobre los eventos para todas las filas de la tabla.
+  const tallies = playerShotTallies(matchData.events || [], usados);
+
   const playersUsed: MatchReportPlayerLine[] = usados
     .slice()
     .sort((a, b) => a.number - b.number)
-    .map((p) => ({
+    .map((p) => {
+      const tiros = tallyOf(tallies, p.id);
+      return {
       id: p.id,
       number: p.number,
       name: p.name,
@@ -222,9 +246,11 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       rotLabel: p.isOnPitch ? fmtSeconds(p.rotationTimeSeconds ?? 0) : null,
       rotationsCount: countRotations(matchData.events, p.id),
       goals: p.stats.goals,
-      shots: p.stats.shots,
-      shotsOffTarget: p.stats.shotsOffTarget,
-      attempts: p.stats.goals + p.stats.shots + p.stats.shotsOffTarget,
+      attempts: tiros.shots,
+      shotsOnTarget: tiros.onTarget,
+      shotsOffTarget: tiros.offTarget,
+      shotsBlocked: tiros.blocked,
+      shotsUnrecorded: tiros.unrecorded,
       steals: p.stats.steals,
       interceptions: p.stats.interceptions,
       losses: p.stats.losses,
@@ -232,7 +258,8 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       fouls: p.stats.fouls,
       yellowCards: p.stats.yellowCards,
       redCards: p.stats.redCards,
-    }));
+      };
+    });
 
   const enPistaAhora = propios.filter((p) => p.isOnPitch);
   const rotsActuales = enPistaAhora.map((p) => p.rotationTimeSeconds ?? 0);
@@ -248,15 +275,14 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   const sumStat = (key: keyof Player["stats"]) =>
     propios.reduce((acc, p) => acc + Number(p.stats[key] ?? 0), 0);
 
+  // Mismo contrato que las filas de jugador: si el equipo y la suma de los
+  // suyos discreparan, sería porque dos sitios clasifican distinto.
+  const teamTally = summarizeShots(eventosPropios);
   const shotEvents = eventosPropios.filter(isShotAttempt);
-  const shotsOffTarget = shotEvents.filter(
-    (e) => e.type === ActionType.SHOT && e.destinationGrid?.toUpperCase() === "OUT",
-  ).length;
-  const shotsOnTarget = shotEvents.filter((e) => {
-    const destination = e.destinationGrid?.toUpperCase();
-    return destination ? destination !== "OUT" : isGoalEvent(e);
-  }).length;
-  const shotsUnknownTarget = Math.max(0, shotEvents.length - shotsOnTarget - shotsOffTarget);
+  const shotsOffTarget = teamTally.offTarget;
+  const shotsOnTarget = teamTally.onTarget;
+  const shotsBlocked = teamTally.blocked;
+  const shotsUnknownTarget = teamTally.unrecorded;
   const recoveries = sumStat("steals") + sumStat("interceptions");
   const lossesAndErrors = sumStat("losses") + sumStat("errors");
 
@@ -265,6 +291,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     shots: shotEvents.length,
     shotsOnTarget,
     shotsOffTarget,
+    shotsBlocked,
     shotsUnknownTarget,
     shotAccuracyPct: pct(shotsOnTarget, shotsOnTarget + shotsOffTarget),
     goalConversionPct: pct(score.team, shotEvents.length),
@@ -411,6 +438,7 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   lines.push("## Datos clave");
   lines.push(
     `Tiros totales **${r.teamTotals.shots}** · a portería **${r.teamTotals.shotsOnTarget}** · fuera **${r.teamTotals.shotsOffTarget}** · ` +
+      `bloqueados **${r.teamTotals.shotsBlocked}** · ` +
       `precisión registrada **${r.teamTotals.shotAccuracyPct ?? "—"}%** · conversión **${r.teamTotals.goalConversionPct ?? "—"}%**`,
   );
   lines.push(
@@ -483,11 +511,14 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   lines.push("## Jugadores utilizados");
   lines.push("");
-  lines.push("| # | Jugador | Estado | TOT | ROT | Rotac. | G | Tiros | Rec | Pér+Err | F |");
-  lines.push("|---|---|---|---|---|---|---|---|---|---|---|");
+  // Las tres columnas de desenlace van separadas a propósito: un bloqueado no
+  // es un tiro a portería ni un tiro fuera, y sumarlo a cualquiera de los dos
+  // diría algo que no ocurrió.
+  lines.push("| # | Jugador | Estado | TOT | ROT | Rotac. | G | Tiros | A port. | Fuera | Bloq. | Rec | Pér+Err | F |");
+  lines.push("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   r.playersUsed.forEach((p) => {
     lines.push(
-      `| ${p.number} | ${p.name} | ${p.isOnPitch ? "En pista" : "Banquillo"} | ${p.totLabel} | ${p.rotLabel ?? "—"} | ${p.rotationsCount} | ${p.goals} | ${p.attempts} | ${p.steals + p.interceptions} | ${p.losses + p.errors} | ${p.fouls} |`,
+      `| ${p.number} | ${p.name} | ${p.isOnPitch ? "En pista" : "Banquillo"} | ${p.totLabel} | ${p.rotLabel ?? "—"} | ${p.rotationsCount} | ${p.goals} | ${p.attempts} | ${p.shotsOnTarget} | ${p.shotsOffTarget} | ${p.shotsBlocked} | ${p.steals + p.interceptions} | ${p.losses + p.errors} | ${p.fouls} |`,
     );
   });
   lines.push("");

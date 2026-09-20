@@ -1,6 +1,7 @@
 import { MatchData, ActionType, GoalieAction, Role } from '../types/futsal';
 import { formatAnyZoneLabel } from '../utils/legacyZoneMap';
 import { formatDestinationLabel } from '../utils/goalZones';
+import { playerShotTallies, summarizePlayerShots, tallyOf } from '../utils/shotModel';
 
 const formatPlayerTime = (totalSeconds: number) => {
   const mins = Math.floor(totalSeconds / 60);
@@ -33,11 +34,19 @@ export function exportToCSV(matchData: MatchData) {
 
   // Player stats
   rows.push(['ESTADÍSTICAS DE JUGADORES']);
-  rows.push(['Equipo', '#', 'Nombre', 'Puesto', 'Tiempo', '+/-', 'Goles', 'Asistencias', 'Tiros', 'Tiros Portería', 'Tiros Fuera', 'Recuperaciones', 'Intercepciones', 'Pérdidas', 'Faltas', 'Amarillas', 'Rojas', 'Paradas', 'Encajados']);
+  rows.push(['Equipo', '#', 'Nombre', 'Puesto', 'Tiempo', '+/-', 'Goles', 'Asistencias', 'Tiros', 'Tiros Portería', 'Tiros Fuera', 'Tiros Bloqueados', 'Recuperaciones', 'Intercepciones', 'Pérdidas', 'Faltas', 'Amarillas', 'Rojas', 'Paradas', 'Encajados']);
+
+  // Finalización derivada de los eventos. La columna «Tiros Portería» salía
+  // de `shots - shotsOffTarget`, y esos dos cubos de PlayerStats son
+  // disjuntos: la resta no daba los tiros a portería, y un tiro bloqueado
+  // —que no cabe en ninguno de los dos— acababa contándose como tiro a
+  // portería.
+  const tallies = playerShotTallies(matchData.events, matchData.players);
 
   matchData.players
     .filter(p => p.role !== Role.COACH && p.role !== Role.DELEGATE)
     .forEach(p => {
+      const tiros = tallyOf(tallies, p.id);
       rows.push([
         p.isOpponent ? matchData.opponentName : matchData.teamName,
         String(p.number),
@@ -47,9 +56,10 @@ export function exportToCSV(matchData: MatchData) {
         String(p.plusMinus),
         String(p.stats.goals),
         String(p.stats.assists),
-        String(p.stats.shots + p.stats.goals),
-        String((p.stats.shots - p.stats.shotsOffTarget) + p.stats.goals),
-        String(p.stats.shotsOffTarget),
+        String(tiros.shots),
+        String(tiros.onTarget),
+        String(tiros.offTarget),
+        String(tiros.blocked),
         String(p.stats.steals),
         String(p.stats.interceptions),
         String(p.stats.losses),
@@ -117,13 +127,13 @@ ${matchData.teamName} ${goals} - ${opponentGoals} ${matchData.opponentName}
 ## Estadísticas de Equipo Local
 ${matchData.players
   .filter(p => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE)
-  .map(p => `- ${p.name} (#${p.number}): ${p.stats.goals}G ${p.stats.assists}A ${p.stats.shots + p.stats.goals}T en ${formatPlayerTime(p.individualTimeSeconds)}`)
+  .map(p => `- ${p.name} (#${p.number}): ${p.stats.goals}G ${p.stats.assists}A ${summarizePlayerShots(matchData.events, p).shots}T en ${formatPlayerTime(p.individualTimeSeconds)}`)
   .join('\n')}
 
 ## Estadísticas de Equipo Rival
 ${matchData.players
   .filter(p => p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE)
-  .map(p => `- ${p.name} (#${p.number}): ${p.stats.goals}G ${p.stats.assists}A ${p.stats.shots + p.stats.goals}T`)
+  .map(p => `- ${p.name} (#${p.number}): ${p.stats.goals}G ${p.stats.assists}A ${summarizePlayerShots(matchData.events, p).shots}T`)
   .join('\n')}
 
 ## Línea Temporal

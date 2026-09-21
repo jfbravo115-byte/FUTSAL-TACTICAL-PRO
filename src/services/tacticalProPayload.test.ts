@@ -232,7 +232,10 @@ describe("Fase 5 · balón parado, sin fusionar métricas", () => {
 
   it("la falta cometida, la jugada de falta y el tiro de falta van por separado", () => {
     const payload = buildTacticalProPayload(partido());
-    expect(payload.deterministicReport.teamTotals.fouls).toBe(2); // contador reglamentario
+    // Faltas COMETIDAS por nuestro equipo en todo el partido, desde eventos.
+    expect(payload.deterministicReport.teamTotals.fouls).toBe(
+      partido().events.filter((e) => e.type === ActionType.FOUL && !e.metadata?.isOpponent).length,
+    );
     expect(payload.deterministicReport.setPieces.freeKickPlays.team.total).toBe(1);
     expect(payload.deterministicReport.teamTotals.shotsFromFreeKick).toBe(0);
     expect(ctx().zones.team.setPieces.freeKickPlays.total).toBe(1);
@@ -455,11 +458,22 @@ describe("objetivo 6 · las tres cifras de faltas, declaradas", () => {
   });
 
   it("no introduce un cuarto cálculo de faltas", () => {
-    // El glosario es texto. Ningún campo nuevo de faltas en el payload.
+    // El glosario es texto. Ningún campo nuevo de faltas en el contexto.
     const payload = buildTacticalProPayload(partidoGrande()) as any;
     expect(payload.deterministicReport.foulsMatch).toBeUndefined();
     expect(payload.tacticalContext.fouls).toBeUndefined();
-    expect(payload.deterministicReport.fouls).toEqual(partidoGrande().fouls);
+  });
+
+  it("el informe envía el TOTAL del partido, no el contador del periodo", () => {
+    // La contradicción que veía el modelo: el resumen decía 2 propias
+    // mientras el desglose por jugador sumaba 7.
+    const md = partidoGrande();
+    const payload = buildTacticalProPayload(md);
+    const propias = md.events.filter(
+      (e) => e.type === ActionType.FOUL && !e.metadata?.isOpponent,
+    ).length;
+    expect(payload.deterministicReport.fouls.team).toBe(propias);
+    expect(payload.deterministicReport.periodFoulCounter).toEqual(md.fouls);
   });
 });
 

@@ -20,6 +20,12 @@ import {
 } from "../utils/shotModel";
 import { chronological } from "../utils/eventOrder";
 import {
+  FoulPeriodLine,
+  FoulSummary,
+  foulsInPeriod,
+  summarizeFouls,
+} from "../utils/foulModel";
+import {
   MATCH_CONTEXT_LABEL,
   MatchContext,
   MatchContextGroup,
@@ -81,7 +87,10 @@ export type MatchReportPeriodStats = {
   shots: number;
   steals: number;
   losses: number;
+  /** Faltas COMETIDAS por nuestro equipo en ese periodo. */
   fouls: number;
+  /** Faltas cometidas por el rival en ese periodo. */
+  opponentFouls: number;
 };
 
 export type MatchReportRelevantEvent = {
@@ -118,7 +127,31 @@ export type MatchReport = {
   period: Period;
   periodLabel: string;
   matchClockLabel: string;
+  /**
+   * Faltas de TODO el partido, derivadas de los eventos FOUL.
+   *
+   * Antes era `matchData.fouls`, el contador reglamentario, que se reinicia
+   * en el descanso: al acabar el partido valía lo de la segunda parte y la
+   * portada lo imprimía como si fuera el total del encuentro.
+   */
   fouls: { team: number; opponent: number };
+  /**
+   * Contador reglamentario del PERIODO EN CURSO — el que dispara la sanción
+   * de la 6ª falta. Se reinicia en el descanso, y eso es correcto: es su
+   * trabajo. Se conserva aquí, con su nombre, para quien necesite ese dato
+   * concreto; NUNCA es el total del partido.
+   */
+  periodFoulCounter: { team: number; opponent: number };
+  /**
+   * Faltas por parte y por bando, derivadas de los eventos. Una línea por
+   * periodo con faltas; una prórroga tiene la suya y no se mezcla con la 2ª.
+   */
+  foulsByPeriod: FoulPeriodLine[];
+  /**
+   * ¿Hay eventos FOUL de los que derivar? Sin ellos el desglose no existe y
+   * hay que decirlo, no rellenarlo con el contador.
+   */
+  hasFoulEvents: boolean;
   playersUsed: MatchReportPlayerLine[];
   rotationSummary: {
     avgRotSeconds: number | null;
@@ -237,6 +270,11 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   );
   const eventosPropios = matchData.events.filter((e) => !e.metadata?.isOpponent);
 
+  // Faltas del partido: una sola pasada sobre los eventos, compartida por el
+  // total, el desglose por parte y las líneas de `periodStats`. Ver
+  // utils/foulModel — ninguna de las tres las vuelve a contar por su cuenta.
+  const foulSummary: FoulSummary = summarizeFouls(matchData.events);
+
   const score = {
     team: matchData.events.filter((e) => isGoalEvent(e) && !e.metadata?.isOpponent).length,
     opponent: matchData.events.filter((e) => isGoalEvent(e) && !!e.metadata?.isOpponent).length,
@@ -324,7 +362,9 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     errors: sumStat("errors"),
     lossesAndErrors,
     recoveryLossBalance: recoveries - lossesAndErrors,
-    fouls: matchData.fouls.team,
+    // Faltas COMETIDAS por nuestro equipo en TODO el partido, desde los
+    // eventos. No el contador del periodo en curso.
+    fouls: foulSummary.total.team,
     // Tiros que el PROPIO tiro declara procedentes de balón parado. No tienen
     // nada que ver con las faltas cometidas: esas son infracciones nuestras.
     shotsFromFreeKick: countShotsFromSetPiece(matchData.events, "free_kick", false),
@@ -380,7 +420,8 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
         shots: evs.filter(isShotAttempt).length,
         steals: evs.filter((e) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
         losses: evs.filter((e) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
-        fouls: evs.filter((e) => e.type === ActionType.FOUL).length,
+        fouls: foulsInPeriod(foulSummary, period, false),
+        opponentFouls: foulsInPeriod(foulSummary, period, true),
       };
     });
 
@@ -424,7 +465,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     period: matchData.period,
     periodLabel: PERIOD_LABEL[matchData.period] ?? String(matchData.period),
     matchClockLabel: fmtMilliseconds(matchData.matchClock),
-    fouls: matchData.fouls,
+    fouls: { ...foulSummary.total },
+    periodFoulCounter: { ...matchData.fouls },
+    foulsByPeriod: foulSummary.byPeriod,
+    hasFoulEvents: foulSummary.hasFoulEvents,
     playersUsed,
     rotationSummary: {
       avgRotSeconds,
@@ -465,7 +509,23 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   lines.push("");
   lines.push(`**Marcador:** ${r.score.team} - ${r.score.opponent}  `);
   lines.push(`**Periodo:** ${r.periodLabel} · ${r.matchClockLabel}  `);
-  lines.push(`**Faltas:** ${r.fouls.team} (propias) / ${r.fouls.opponent} (rival)`);
+  // Faltas del PARTIDO, desde los eventos. El contador reglamentario se
+  // reinicia en el descanso y no sirve como total.
+  if (r.hasFoulEvents) {
+    lines.push(`**Faltas:** ${r.fouls.team} (propias) / ${r.fouls.opponent} (rival)`);
+    if (r.foulsByPeriod.length > 0) {
+      const porParte = r.foulsByPeriod
+        .map((l) => `${PERIOD_LABEL[l.period] ?? `Periodo ${l.period}`} ${l.team}–${l.opponent}`)
+        .join(" · ");
+      lines.push(`Faltas por parte (propias–rival): ${porParte}`);
+    }
+  } else {
+    lines.push(
+      `**Faltas:** desglose no disponible — este partido no guarda las faltas como ` +
+        `acciones. Último contador reglamentario: ${r.periodFoulCounter.team} (propias) / ` +
+        `${r.periodFoulCounter.opponent} (rival).`,
+    );
+  }
   lines.push("");
 
   lines.push("## Datos clave");
@@ -606,7 +666,8 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
     lines.push("## Estadísticas por periodo");
     r.periodStats.forEach((ps) => {
       lines.push(
-        `**${ps.label}:** ${ps.goals} goles · ${ps.shots} tiros · ${ps.steals} recuperaciones · ${ps.losses} pérdidas/errores · ${ps.fouls} faltas`,
+        `**${ps.label}:** ${ps.goals} goles · ${ps.shots} tiros · ${ps.steals} recuperaciones · ` +
+          `${ps.losses} pérdidas/errores · ${ps.fouls} faltas propias · ${ps.opponentFouls} del rival`,
       );
     });
     lines.push("");

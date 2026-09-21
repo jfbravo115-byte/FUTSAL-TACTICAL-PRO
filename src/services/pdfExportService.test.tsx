@@ -40,6 +40,7 @@ vi.mock("./tacticalAnalysisService", () => ({
 }));
 
 import { exportMatchReportPdf, exportGoalkeeperReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
+import { generateMatchReport } from "./matchReportService";
 
 function player(overrides: Partial<Player> = {}): Player {
   return {
@@ -1089,5 +1090,81 @@ describe("PDF del informe · balón parado", () => {
     // 4 córners registrados; el SHOT con setPiece 'corner' no crea ninguno.
     expect(texto).toContain("Córners: 4");
     expect(texto).not.toContain("Córners: 5");
+  });
+});
+
+// ── FALTAS Y DISCIPLINA EN LA PORTADA ──────────────────────────────────
+//
+// La portada imprimía el contador reglamentario —que se reinicia en el
+// descanso— bajo la etiqueta «Faltas», y «Tarjetas» sin decir que solo
+// cuenta las de los jugadores.
+
+describe("portada · faltas del partido y tarjetas rotuladas", () => {
+  /** Texto de la PRIMERA página del informe completo: la del resumen. */
+  async function textoDelPdf(md: MatchData): Promise<string> {
+    await exportMatchReportPdf(md);
+    return ((toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "").replace(/\s+/g, " ");
+  }
+
+  const falta = (period: Period, opponent = false) =>
+    event({ type: ActionType.FOUL, period, metadata: { isOpponent: opponent } });
+
+  const conFaltas = () =>
+    matchData({
+      fouls: { team: 2, opponent: 6 }, // contador ya reiniciado
+      events: [
+        ...Array.from({ length: 5 }, () => falta(Period.FIRST)),
+        ...Array.from({ length: 2 }, () => falta(Period.SECOND)),
+        ...Array.from({ length: 3 }, () => falta(Period.FIRST, true)),
+        ...Array.from({ length: 6 }, () => falta(Period.SECOND, true)),
+      ],
+    });
+
+  it("4 · la portada muestra el TOTAL, no el contador de la 2ª parte", async () => {
+    const t = await textoDelPdf(conFaltas());
+    expect(t).toContain("7 propias / 9 rival");
+    expect(t).not.toContain("2 propias / 6 rival");
+  });
+
+  it("5 · y el desglose 1P / 2P / total", async () => {
+    const t = await textoDelPdf(conFaltas());
+    expect(t).toContain("Faltas acumuladas");
+    expect(t).toContain("1ª Parte");
+    expect(t).toContain("2ª Parte");
+    expect(t).toContain("Total");
+  });
+
+  it("14 · un partido sin faltas registradas lo dice, no lo rellena", async () => {
+    const t = await textoDelPdf(matchData({ fouls: { team: 4, opponent: 3 }, events: [] }));
+    expect(t).toContain("desglose no disponible");
+    expect(t).toContain("4 propias / 3 rival");
+    expect(t).toContain("Último contador reglamentario");
+  });
+
+  it("un partido sin faltas y sin contador no añade ningún aviso", async () => {
+    const t = await textoDelPdf(matchData({ fouls: { team: 0, opponent: 0 }, events: [] }));
+    expect(t).not.toContain("Último contador reglamentario");
+  });
+
+  it("20 · la etiqueta de tarjetas dice que son de jugadores", async () => {
+    const t = await textoDelPdf(conFaltas());
+    expect(t).toContain("Tarjetas · jugadores");
+  });
+
+  it("19 · la roja del entrenador no entra en las tarjetas de jugadores", async () => {
+    const md = matchData({
+      players: [
+        player({ id: "p1", individualTimeSeconds: 600 }),
+        player({ id: "coach", name: "ENTRENADOR LOCAL", role: Role.COACH,
+                 individualTimeSeconds: 0, stats: { ...player().stats, redCards: 1 } }),
+      ],
+      events: [
+        event({ type: ActionType.RED_CARD, playerIds: ["coach"], metadata: { isOpponent: false } }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.teamTotals.redCards).toBe(0);
+    // Pero el hecho sigue en los eventos relevantes del mismo documento.
+    expect(r.relevantEvents.some((e) => e.type === "Tarjeta roja")).toBe(true);
   });
 });

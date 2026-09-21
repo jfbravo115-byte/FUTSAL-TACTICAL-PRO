@@ -33,6 +33,7 @@ import { jsPDF } from "jspdf";
 import { ActionType, MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
+import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
 import {
   buildZoneDashboard,
   mirrorTally,
@@ -134,9 +135,87 @@ function SummaryKpis({ report }: { report: MatchReport }) {
         {cell("Recuperaciones", report.teamTotals.recoveries)}
         {cell("Pérdidas + errores", report.teamTotals.lossesAndErrors)}
         {cell("Balance Rec-(P+E)", `${report.teamTotals.recoveryLossBalance >= 0 ? "+" : ""}${report.teamTotals.recoveryLossBalance}`)}
-        {cell("Faltas", `${report.teamTotals.fouls} propias / ${report.fouls.opponent} rival`)}
-        {cell("Tarjetas", `🟨 ${report.teamTotals.yellowCards} · 🟥 ${report.teamTotals.redCards}`)}
+        {/* Faltas del PARTIDO, derivadas de los eventos. El contador
+            reglamentario —el de la 6ª falta— se reinicia en el descanso y no
+            sirve como total; se muestra aparte solo cuando es lo único que
+            hay. */}
+        {cell(
+          "Faltas",
+          report.hasFoulEvents
+            ? `${report.fouls.team} propias / ${report.fouls.opponent} rival`
+            : "desglose no disponible",
+        )}
+        {/* El resumen cuenta tarjetas de JUGADORES: el cuerpo técnico queda
+            fuera por diseño. Sus expulsiones siguen en Eventos relevantes. */}
+        {cell("Tarjetas · jugadores", `🟨 ${report.teamTotals.yellowCards} · 🟥 ${report.teamTotals.redCards}`)}
       </div>
+
+      <FoulsByPeriod report={report} />
+    </div>
+  );
+}
+
+/**
+ * Faltas acumuladas por parte. Lo que la portada no podía decir con una sola
+ * cifra: dónde se gastaron, y si se llegó al bonus antes del descanso.
+ *
+ * Todos los números salen de los eventos FOUL. Un partido sin ellos no
+ * inventa un reparto: dice que no está disponible y enseña el contador con
+ * su nombre.
+ */
+function FoulsByPeriod({ report }: { report: MatchReport }) {
+  if (!report.hasFoulEvents) {
+    const c = report.periodFoulCounter;
+    if (c.team === 0 && c.opponent === 0) return null;
+    return (
+      <div style={{ fontSize: 9, color: "#6b7280", marginTop: 8 }}>
+        Faltas: este partido no guarda las faltas como acciones, así que no hay
+        desglose por parte. Último contador reglamentario registrado:{" "}
+        {c.team} propias / {c.opponent} rival.
+      </div>
+    );
+  }
+  if (report.foulsByPeriod.length === 0) return null;
+
+  const celda: React.CSSProperties = {
+    borderBottom: "1px solid #e5e7eb",
+    padding: "4px 8px",
+    textAlign: "center",
+  };
+  const cabecera: React.CSSProperties = { ...celda, color: "#6b7280", fontSize: 9 };
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+        Faltas acumuladas
+      </div>
+      <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr>
+            <th style={{ ...cabecera, textAlign: "left" }} />
+            {report.foulsByPeriod.map((l) => (
+              <th key={l.period} style={cabecera}>
+                {PERIOD_PDF_LABEL[l.period] ?? `Periodo ${l.period}`}
+              </th>
+            ))}
+            <th style={{ ...cabecera, fontWeight: 700, color: "#0f172a" }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {([
+            ["team", report.teamName, report.fouls.team] as const,
+            ["opponent", report.opponentName, report.fouls.opponent] as const,
+          ]).map(([key, nombre, total]) => (
+            <tr key={key}>
+              <td style={{ ...celda, textAlign: "left", fontWeight: 700 }}>{nombre}</td>
+              {report.foulsByPeriod.map((l) => (
+                <td key={l.period} style={celda}>{l[key]}</td>
+              ))}
+              <td style={{ ...celda, fontWeight: 900 }}>{total}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

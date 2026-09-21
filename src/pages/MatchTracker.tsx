@@ -129,7 +129,8 @@ import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterve
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
-import { teamReportPageCount } from "../utils/reportPagination";
+import { paginateContextReport, teamReportPageCount } from "../utils/reportPagination";
+import { MatchContextBoard } from "../components/export/MatchContextBoard";
 import { capturePagesToPdf } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
@@ -1237,6 +1238,20 @@ export default function MatchTracker() {
   const [matchData, setMatchData] = useState<MatchData>(getInitialMatchData);
 
   /**
+   * Informe determinista del partido para las plantillas del PDF.
+   *
+   * El PDF NO recalcula nada: las situaciones especiales y la secuencia de
+   * goles salen de aquí, exactamente igual que la pantalla de informe y que
+   * el contexto que recibe TACTICAL PRO.
+   */
+  const pdfReport = useMemo(() => generateMatchReport(matchData), [matchData]);
+  /** Reparto en páginas sin cortar ninguna tarjeta. Vacío = ninguna página. */
+  const contextPages = useMemo(
+    () => paginateContextReport(pdfReport.matchContexts, pdfReport.goalSequence),
+    [pdfReport],
+  );
+
+  /**
    * Finalización por jugador, derivada de los EVENTOS.
    *
    * `PlayerStats` solo tiene dos cubos —`shots` y `shotsOffTarget`— y un tiro
@@ -1447,6 +1462,13 @@ export default function MatchTracker() {
   const pdfPage8Ref = useRef<HTMLDivElement>(null);
   // Página de balón parado: córners, faltas y tiros procedentes de una u otro.
   const pdfPage9Ref = useRef<HTMLDivElement>(null);
+  /**
+   * Páginas de contexto táctico. Su número NO es fijo: depende de cuántas
+   * ventanas y cuántos goles tenga el partido, y es cero cuando no hay
+   * ninguna de las dos cosas. Por eso se recogen con refs de callback en vez
+   * de declarar una constante por página.
+   */
+  const pdfContextRefs = useRef<HTMLDivElement[]>([]);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1888,11 +1910,16 @@ export default function MatchTracker() {
         };
 
         const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref, pdfPage9Ref];
+        // Las de contexto táctico van al final y son tantas como haga falta:
+        // cero en un partido sin situaciones especiales ni goles.
+        const nodes: HTMLDivElement[] = [
+          ...refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n),
+          ...pdfContextRefs.current.filter(Boolean),
+        ];
         const images: string[] = [];
 
-        for (const ref of refs) {
-          if (!ref.current) continue;
-          const url = await toJpeg(ref.current, { ...captureOpts, width: ref.current.offsetWidth });
+        for (const node of nodes) {
+          const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });
           if (url && url.length > 1000) images.push(url);
         }
 
@@ -3248,7 +3275,14 @@ export default function MatchTracker() {
         );
 
         // 3 páginas por equipo + mapas de zona + balón parado.
-        const totalPages = teamReportPageCount(allTeamsForPDF.length);
+        const totalPages = teamReportPageCount(allTeamsForPDF.length, contextPages.length);
+        /**
+         * Número de la n-ésima página común fija (1 mapas, 2 tiros por parte,
+         * 3 balón parado). Antes se escribía `totalPages - 1` y `totalPages`,
+         * que dejó de valer en cuanto el total pasó a depender de cuántas
+         * páginas de contexto tenga el partido.
+         */
+        const fixedPage = (n: number) => totalPages - contextPages.length - (3 - n);
         let pageCounter = 0;
 
         return (
@@ -3523,7 +3557,7 @@ export default function MatchTracker() {
               style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
             >
               <Header
-                page={totalPages - 2}
+                page={fixedPage(1)}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3532,7 +3566,7 @@ export default function MatchTracker() {
               <div style={{ flex: 1 }}>
                 <ZoneMapBoard events={matchData.events} />
               </div>
-              <Footer page={totalPages - 2} total={totalPages} />
+              <Footer page={fixedPage(1)} total={totalPages} />
             </div>
 
             {/* ── TIROS POR PARTE ───────────────────────────────────────
@@ -3550,7 +3584,7 @@ export default function MatchTracker() {
               style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
             >
               <Header
-                page={totalPages - 1}
+                page={fixedPage(2)}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3570,7 +3604,7 @@ export default function MatchTracker() {
                   <PeriodShotMapsBoard events={matchData.events} opponent={true} />
                 </div>
               </div>
-              <Footer page={totalPages - 1} total={totalPages} />
+              <Footer page={fixedPage(2)} total={totalPages} />
             </div>
 
             {/* ── BALÓN PARADO ─────────────────────────────────────────
@@ -3584,7 +3618,7 @@ export default function MatchTracker() {
                 llegaban al PDF que genera el botón. */}
             <div ref={pdfPage9Ref} style={pageStyle}>
               <Header
-                page={totalPages}
+                page={fixedPage(3)}
                 total={totalPages}
                 mainTeam={matchData.teamName}
                 vsTeam={matchData.opponentName}
@@ -3594,8 +3628,53 @@ export default function MatchTracker() {
                 balón parado — córners, faltas y tiros procedentes
               </div>
               <SetPieceSummaryBoard matchData={matchData} />
-              <Footer page={totalPages} total={totalPages} />
+              <Footer page={fixedPage(3)} total={totalPages} />
             </div>
+
+            {/* ── CONTEXTO TÁCTICO Y SECUENCIA DE GOLES ─────────────────
+                El PDF Global es el documento que se entrega al cuerpo
+                técnico, así que las situaciones especiales y la secuencia de
+                goles tienen que llegar aquí y no quedarse en la pantalla.
+
+                Ni una sola cifra se calcula en esta plantilla: salen de
+                `pdfReport`, el mismo informe determinista que lee la pantalla
+                y que recibe TACTICAL PRO.
+
+                El número de páginas lo decide `paginateContextReport`, que
+                reparte sin cortar ninguna tarjeta. Un partido sin situaciones
+                especiales y sin goles no genera ninguna: una página en blanco
+                dentro de un informe no dice nada. */}
+            {contextPages.map((pagina, i) => (
+              <div
+                key={`pdf-context-${i}`}
+                ref={(el) => {
+                  if (el) pdfContextRefs.current[i] = el;
+                }}
+                style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
+              >
+                <Header
+                  page={totalPages - contextPages.length + i + 1}
+                  total={totalPages}
+                  mainTeam={matchData.teamName}
+                  vsTeam={matchData.opponentName}
+                  accent="#3b82f6"
+                />
+                <div style={{ flex: 1 }}>
+                  <MatchContextBoard
+                    contexts={pagina.contexts}
+                    goals={pagina.goals}
+                    teamName={matchData.teamName}
+                    opponentName={matchData.opponentName}
+                    opensContexts={pagina.opensContexts}
+                    opensGoals={pagina.opensGoals}
+                  />
+                </div>
+                <Footer
+                  page={totalPages - contextPages.length + i + 1}
+                  total={totalPages}
+                />
+              </div>
+            ))}
           </>
         );
       })()}

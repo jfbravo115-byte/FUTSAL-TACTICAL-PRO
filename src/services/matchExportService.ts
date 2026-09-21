@@ -3,7 +3,9 @@ import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { formatDestinationLabel } from "../utils/goalZones";
 import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../utils/goalkeeperActions";
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
-import { formatSetPieceOrigin, formatSetPieceOutcome } from "../utils/setPieceModel";
+import { formatSetPieceOrigin, formatSetPieceOutcome, formatShotOriginLabel } from "../utils/setPieceModel";
+import { formatMatchTime } from "../utils/goalSequence";
+import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { generateMatchReport } from "./matchReportService";
@@ -59,7 +61,8 @@ export function buildActionsCsv(matchData: MatchData): string {
         md.x ?? md.originX ?? "",
         md.y ?? md.originY ?? "",
         e.originGrid || md.zone || "",
-        formatAnyZoneLabel(e.originGrid),
+        // Un penalti dice «Punto de penalti», no «sin ubicación registrada».
+        formatShotOriginLabel(e),
         e.destinationGrid || "",
         formatDestinationLabel(e.destinationGrid ?? md.zone),
         // goalkeeperZone es un campo PROPIO (GK1-GK5): nunca se mezcla con la
@@ -139,6 +142,31 @@ export function buildPrintableReportHtml(matchData: MatchData): string {
   const zones = report.zoneDistribution.length
     ? report.zoneDistribution.map((z) => `<span class="pill">${esc(z.label)}: ${z.count}</span>`).join("")
     : "<span>Sin acciones con zona registrada.</span>";
+  // Situaciones especiales y secuencia de goles: los mismos bloques
+  // deterministas que imprime el informe, sin recalcular nada.
+  const contextos = report.matchContextGroups.length
+    ? report.matchContextGroups
+        .map(
+          (g) => `<div class="card"><b style="font-size:13px">${esc(g.label)}</b>` +
+            `<div class="muted">Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}</div>` +
+            `<div>Tiros ${g.tally.shots} · a portería ${g.tally.onTarget} · fuera ${g.tally.offTarget} · bloqueados ${g.tally.blocked} · goles ${g.tally.goals}</div>` +
+            `<div class="muted">Recuperaciones ${g.tally.recoveries} · pérdidas ${g.tally.turnovers} · faltas ${g.tally.fouls} · córners ${g.tally.corners}</div></div>`,
+        )
+        .join("")
+    : "";
+  const goles = report.goalSequence.length
+    ? report.goalSequence
+        .map((g) => {
+          const quien = g.playerName ?? (g.scoringTeam === "team" ? report.teamName : report.opponentName);
+          const respuesta =
+            g.secondsSinceOpponentPreviousGoal !== null
+              ? ` · ${g.scoringTeam === "opponent" ? "respuesta rival" : "respuesta propia"} ${g.secondsSinceOpponentPreviousGoal} s`
+              : "";
+          return `<tr><td>${esc(g.matchTimeLabel)}</td><td>${g.scoreAfter.team}-${g.scoreAfter.opponent}</td>` +
+            `<td>${esc(quien)}</td><td>${esc(g.sourceLabel)}</td><td class="muted">${esc(respuesta)}</td></tr>`;
+        })
+        .join("")
+    : "";
   const conversion = report.teamTotals.goalConversionPct === null ? "—" : `${report.teamTotals.goalConversionPct}%`;
   const accuracy = report.teamTotals.shotAccuracyPct === null ? "—" : `${report.teamTotals.shotAccuracyPct}%`;
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe ${esc(matchData.teamName)} - ${esc(matchData.opponentName)}</title>
@@ -149,6 +177,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:2
 <div class="grid"><div class="card">Tiros<br><b>${report.teamTotals.shots}</b></div><div class="card">Conversión<br><b>${conversion}</b></div><div class="card">Recuperaciones<br><b>${report.teamTotals.recoveries}</b></div><div class="card">Balance Rec-(P+E)<br><b>${report.teamTotals.recoveryLossBalance >= 0 ? "+" : ""}${report.teamTotals.recoveryLossBalance}</b></div></div>
 <p class="muted">A portería ${report.teamTotals.shotsOnTarget} · fuera ${report.teamTotals.shotsOffTarget} · destino no registrado ${report.teamTotals.shotsUnknownTarget} · precisión registrada ${accuracy} · pérdidas + errores ${report.teamTotals.lossesAndErrors}.</p>
 <h2>Tiempos y rendimiento de jugadores</h2><table><thead><tr><th>#</th><th>Jugador</th><th>TOT</th><th>ROT</th><th>Rot.</th><th>G</th><th>Tiros</th><th>Rec.</th><th>Pér+Err</th></tr></thead><tbody>${players}</tbody></table>
+${contextos ? `<h2>Situaciones especiales</h2><div class="grid" style="grid-template-columns:repeat(2,1fr)">${contextos}</div>` : ""}
+${goles ? `<h2>Secuencia de goles</h2><table><thead><tr><th>Tiempo</th><th>Marcador</th><th>Quién</th><th>Procedencia</th><th></th></tr></thead><tbody>${goles}</tbody></table>` : ""}
 <h2>Zonas de origen</h2><div>${zones}</div>
 <h2>Resumen</h2><p>Goles ${report.teamTotals.goals} · tiros ${report.teamTotals.shots} · recuperaciones ${report.teamTotals.recoveries} · pérdidas + errores ${report.teamTotals.lossesAndErrors} · faltas ${report.teamTotals.fouls}.</p>
 <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),150));</script></body></html>`;

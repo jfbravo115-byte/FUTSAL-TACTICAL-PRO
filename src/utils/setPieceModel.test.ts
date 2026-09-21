@@ -19,6 +19,7 @@ import {
   declaredSetPieceOrigin,
   describeSetPieceOutcomes,
   formatSetPieceOrigin,
+  formatSetPieceOriginOrUnrecorded,
   formatSetPieceOutcome,
   SET_PIECE_OUTCOME_LABEL,
   SET_PIECE_OUTCOME_LABEL_PLURAL,
@@ -136,11 +137,27 @@ describe("procedencia del tiro", () => {
   it("una jugada normal o un tiro sin campo no llevan etiqueta", () => {
     expect(formatSetPieceOrigin(event({ type: ActionType.SHOT, metadata: { setPiece: "normal" } }))).toBeNull();
     expect(formatSetPieceOrigin(event({ type: ActionType.SHOT }))).toBeNull();
-    expect(setPieceOriginOf(event({ type: ActionType.SHOT }))).toBe("normal");
   });
 
-  it("un valor desconocido se lee como jugada, no rompe la lectura", () => {
-    expect(setPieceOriginOf(event({ type: ActionType.SHOT, metadata: { setPiece: "saque_banda" } }))).toBe("normal");
+  it("AUSENCIA NO ES JUGADA: un tiro sin el campo no consta", () => {
+    // Era el único sitio de la aplicación donde la falta de un dato se
+    // convertía en una afirmación. Un penalti de un partido anterior a Fase 5
+    // quedaba declarado «de jugada» sin que nadie lo hubiera observado.
+    const sinCampo = event({ type: ActionType.SHOT });
+    expect(setPieceOriginOf(sinCampo)).toBeNull();
+    expect(formatSetPieceOriginOrUnrecorded(sinCampo)).toBe("No registrado");
+  });
+
+  it("un `normal` escrito SÍ es una declaración", () => {
+    const declarado = event({ type: ActionType.SHOT, metadata: { setPiece: "normal" } });
+    expect(setPieceOriginOf(declarado)).toBe("normal");
+    expect(formatSetPieceOriginOrUnrecorded(declarado)).toBe("Jugada");
+  });
+
+  it("un valor desconocido tampoco se convierte en jugada", () => {
+    const raro = event({ type: ActionType.SHOT, metadata: { setPiece: "saque_banda" } });
+    expect(setPieceOriginOf(raro)).toBeNull();
+    expect(formatSetPieceOriginOrUnrecorded(raro)).toBe("No registrado");
   });
 });
 
@@ -218,10 +235,16 @@ describe("tiros procedentes de balón parado", () => {
     });
 
   it("cuenta los tiros que declaran venir de una falta", () => {
-    const eventos = [tiro("free_kick"), tiro("free_kick"), tiro("corner"), tiro(), foul("shot" as any)];
+    const eventos = [tiro("free_kick"), tiro("free_kick"), tiro("corner"), tiro("normal"), foul("shot" as any)];
     expect(countShotsFromSetPiece(eventos, "free_kick")).toBe(2);
     expect(countShotsFromSetPiece(eventos, "corner")).toBe(1);
     expect(countShotsFromSetPiece(eventos, "normal")).toBe(1);
+  });
+
+  it("un tiro histórico sin procedencia no se cuenta como de jugada", () => {
+    // Antes caía en "normal" por la coerción de la lectura, así que los
+    // agregados de jugada incluían tiros cuya procedencia nadie registró.
+    expect(countShotsFromSetPiece([tiro(), tiro()], "normal")).toBe(0);
   });
 
   it("no cuenta faltas: una infracción no es un tiro", () => {

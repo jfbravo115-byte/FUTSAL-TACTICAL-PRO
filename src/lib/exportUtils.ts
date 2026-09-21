@@ -1,12 +1,22 @@
 import { MatchData, ActionType, GoalieAction, Role } from '../types/futsal';
-import { formatAnyZoneLabel } from '../utils/legacyZoneMap';
+import { formatShotOriginLabel } from '../utils/setPieceModel';
 import { formatDestinationLabel } from '../utils/goalZones';
 import { playerShotTallies, summarizePlayerShots, tallyOf } from '../utils/shotModel';
+import { chronological } from '../utils/eventOrder';
 
 const formatPlayerTime = (totalSeconds: number) => {
   const mins = Math.floor(totalSeconds / 60);
   const secs = Math.floor(totalSeconds % 60);
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+/** Nombre de la parte para las exportaciones. Nunca el número interno. */
+const PERIOD_CSV_LABEL: Record<number, string> = {
+  0: '1ª Parte',
+  1: '2ª Parte',
+  2: 'Prórroga 1',
+  3: 'Prórroga 2',
+  4: 'Finalizado',
 };
 
 const formatTime = (ms: number) => {
@@ -75,21 +85,24 @@ export function exportToCSV(matchData: MatchData) {
 
   // Events timeline
   rows.push(['LÍNEA TEMPORAL DE EVENTOS']);
-  rows.push(['Tiempo', 'Tipo', 'Jugador', '#', 'Equipo', 'Origen', 'Destino', 'Marcador']);
+  // El periodo va en su propia columna: `timestamp` se reinicia en el
+  // descanso, así que "05:12" aparece dos veces en un partido y sin la parte
+  // no hay forma de saber cuál es cuál.
+  rows.push(['Parte', 'Tiempo', 'Tipo', 'Jugador', '#', 'Equipo', 'Origen', 'Destino', 'Marcador']);
 
-  matchData.events
-    .slice()
-    .sort((a, b) => a.timestamp - b.timestamp)
+  chronological(matchData.events)
     .forEach(e => {
       const player = matchData.players.find(p => p.id === e.playerIds[0]);
       const score = e.scoreAtEvent ? `${e.scoreAtEvent.team}-${e.scoreAtEvent.opponent}` : '';
       rows.push([
+        PERIOD_CSV_LABEL[e.period] ?? String(e.period),
         formatTime(e.timestamp),
         e.type,
         player?.name || 'Equipo',
         String(player?.number || ''),
         e.metadata?.isOpponent ? matchData.opponentName : matchData.teamName,
-        formatAnyZoneLabel(e.originGrid),
+        // Un penalti dice «Punto de penalti», no «sin ubicación registrada».
+        formatShotOriginLabel(e),
         formatDestinationLabel(e.destinationGrid),
         score,
       ]);
@@ -137,14 +150,13 @@ ${matchData.players
   .join('\n')}
 
 ## Línea Temporal
-${matchData.events
+${chronological(matchData.events)
   .filter(e => e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED)
-  .slice()
-  .sort((a, b) => a.timestamp - b.timestamp)
   .map(e => {
     const p = matchData.players.find(pl => pl.id === e.playerIds[0]);
     const team = e.metadata?.isOpponent ? matchData.opponentName : matchData.teamName;
-    return `- ${formatTime(e.timestamp)}: GOL de ${p?.name || 'Desconocido'} (${team})`;
+    const parte = PERIOD_CSV_LABEL[e.period] ?? String(e.period);
+    return `- ${parte} ${formatTime(e.timestamp)}: GOL de ${p?.name || 'Desconocido'} (${team})`;
   })
   .join('\n')}
 `;

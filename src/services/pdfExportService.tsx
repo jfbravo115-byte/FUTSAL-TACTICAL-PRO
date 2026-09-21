@@ -32,6 +32,7 @@ import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { ActionType, MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
+import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import {
   buildZoneDashboard,
   mirrorTally,
@@ -75,6 +76,12 @@ const sectionTitleStyle: React.CSSProperties = {
   margin: "8px 0 4px",
   color: "#111827",
 };
+
+/** `mm:ss` a partir de milisegundos de juego. */
+function fmtDuration(milliseconds: number): string {
+  const total = Math.floor(Math.max(0, milliseconds) / 1000);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
 
 function safeName(value: string): string {
   return value.replace(/[^a-z0-9áéíóúüñ_-]+/gi, "_").replace(/^_+|_+$/g, "") || "partido";
@@ -274,6 +281,12 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         </div>
       )}
 
+      {zones.ruleDetermined > 0 && (
+        <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
+          {zones.ruleDetermined} lanzamiento(s) desde el punto de penalti.
+        </div>
+      )}
+
       {zones.unlocated > 0 && (
         <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
           {zones.unlocated} acción(es) sin ubicación registrada.
@@ -330,6 +343,78 @@ function PlayersTable({ report }: { report: MatchReport }) {
   );
 }
 
+
+/**
+ * Situaciones especiales y secuencia de goles.
+ *
+ * Dos lecturas que el informe no daba y que el cuerpo técnico pedía: qué se
+ * hizo mientras se jugaba con ventaja o en desventaja, y cuánto tardó cada
+ * equipo en responder a un gol.
+ *
+ * Ninguna se estima. Una ventana sin cierre declarado dice «duración no
+ * disponible», y un gol cuya procedencia nadie registró dice «No registrado».
+ */
+function SpecialContextsSection({ report }: { report: MatchReport }) {
+  if (report.matchContextGroups.length === 0 && report.goalSequence.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {report.matchContextGroups.length > 0 && (
+        <div>
+          <div style={sectionTitleStyle}>Situaciones especiales</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {report.matchContextGroups.map((g) => (
+              <div key={g.type} style={{ ...cardStyle, padding: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700 }}>
+                  {g.label}
+                  {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+                </div>
+                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+                  Duración:{" "}
+                  {g.totalDuration !== null
+                    ? fmtDuration(g.totalDuration)
+                    : UNKNOWN_DURATION_LABEL}
+                </div>
+                <div style={{ fontSize: 11 }}>
+                  Tiros {g.tally.shots} · a portería {g.tally.onTarget} · fuera{" "}
+                  {g.tally.offTarget} · bloqueados {g.tally.blocked} · goles {g.tally.goals}
+                </div>
+                <div style={{ fontSize: 11, color: "#6b7280" }}>
+                  Recuperaciones {g.tally.recoveries} · pérdidas {g.tally.turnovers} · faltas{" "}
+                  {g.tally.fouls} · córners {g.tally.corners}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {report.goalSequence.length > 0 && (
+        <div>
+          <div style={sectionTitleStyle}>Secuencia de goles</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {report.goalSequence.map((g) => (
+              <div key={g.eventId} style={{ fontSize: 11, display: "flex", gap: 8 }}>
+                <span style={{ color: "#6b7280", minWidth: 42 }}>{g.matchTimeLabel}</span>
+                <span style={{ fontWeight: 700, minWidth: 30 }}>
+                  {g.scoreAfter.team}-{g.scoreAfter.opponent}
+                </span>
+                <span>
+                  {g.playerName ??
+                    (g.scoringTeam === "team" ? report.teamName : report.opponentName)}
+                  {" · "}
+                  {g.sourceLabel}
+                  {g.secondsSinceOpponentPreviousGoal !== null
+                    ? ` · ${g.scoringTeam === "opponent" ? "respuesta rival" : "respuesta propia"} ${g.secondsSinceOpponentPreviousGoal} s`
+                    : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function EventsSection({ report }: { report: MatchReport }) {
   if (report.relevantEvents.length === 0) return null;
@@ -513,6 +598,18 @@ function buildMatchReportPages(
           </>
         ),
       });
+    });
+  }
+
+  if (report.matchContextGroups.length > 0 || report.goalSequence.length > 0) {
+    pages.push({
+      key: "contexts",
+      content: (
+        <>
+          <ReportHeader matchData={matchData} report={report} />
+          <SpecialContextsSection report={report} />
+        </>
+      ),
     });
   }
 

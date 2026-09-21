@@ -18,6 +18,16 @@ import {
   summarizeShots,
   tallyOf,
 } from "../utils/shotModel";
+import { chronological } from "../utils/eventOrder";
+import {
+  MATCH_CONTEXT_LABEL,
+  MatchContext,
+  MatchContextGroup,
+  buildMatchContexts,
+  groupMatchContexts,
+} from "../utils/matchContexts";
+import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/goalSequence";
+import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import {
   SetPieceOutcomeSummary,
   SetPieceRestartSummary,
@@ -159,6 +169,18 @@ export type MatchReport = {
   zoneDistribution: { zone: string; label: string; count: number }[];
   periodStats: MatchReportPeriodStats[];
   relevantEvents: MatchReportRelevantEvent[];
+  /**
+   * Goles en orden, con procedencia y tiempos de respuesta ya calculados.
+   * Determinista: ver src/utils/goalSequence.ts.
+   */
+  goalSequence: GoalSequenceEntry[];
+  /**
+   * Ventanas de superioridad, inferioridad y portero-jugador, declaradas por
+   * el operador y con sus agregados. Ver src/utils/matchContexts.ts.
+   */
+  matchContexts: MatchContext[];
+  /** Las mismas ventanas agrupadas por tipo, que es como se imprimen. */
+  matchContextGroups: MatchContextGroup[];
 };
 
 const fmtSeconds = (totalSeconds: number): string => {
@@ -362,15 +384,23 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       };
     });
 
+  // Capas deterministas compartidas. El informe, los PDF y TACTICAL PRO leen
+  // estas mismas cifras: ninguna se recalcula por su cuenta.
+  const goalSequence = buildGoalSequence(matchData);
+  const matchContexts = buildMatchContexts(matchData);
+
   const relevantTypes = new Set<string>([
     ActionType.GOAL,
     ActionType.RED_CARD,
     GoalieAction.GOAL_CONCEDED,
   ]);
-  const relevantEvents: MatchReportRelevantEvent[] = matchData.events
-    .filter((e) => relevantTypes.has(e.type))
-    .slice()
-    .sort((a, b) => a.timestamp - b.timestamp)
+  // Orden cronológico real: por parte y después por tiempo. Ordenar solo por
+  // `timestamp` colocaba un gol del minuto 1 de la segunda parte ANTES que
+  // uno del minuto 19 de la primera, porque el reloj se reinicia en el
+  // descanso. Ver src/utils/eventOrder.ts.
+  const relevantEvents: MatchReportRelevantEvent[] = chronological(
+    matchData.events.filter((e) => relevantTypes.has(e.type)),
+  )
     .map((e) => {
       const isOpponent = !!e.metadata?.isOpponent;
       const player = !isOpponent
@@ -423,6 +453,9 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     zoneDistribution,
     periodStats,
     relevantEvents,
+    goalSequence,
+    matchContexts,
+    matchContextGroups: groupMatchContexts(matchContexts),
   };
 }
 
@@ -522,6 +555,52 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
     );
   });
   lines.push("");
+
+  // ── SITUACIONES ESPECIALES ───────────────────────────────────────────
+  //
+  // Solo aparecen las ventanas que el operador declaró. Una expulsión sin
+  // cambio de formación declarado NO crea ninguna superioridad aquí: no
+  // consta, y suponerla sería inventar el dato.
+  if (r.matchContextGroups.length) {
+    lines.push("## Situaciones especiales");
+    r.matchContextGroups.forEach((g) => {
+      const veces = g.windows.length > 1 ? ` · ${g.windows.length} tramos` : "";
+      lines.push(`**${g.label}**${veces}`);
+      lines.push(
+        `Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}`,
+      );
+      lines.push(
+        `Tiros **${g.tally.shots}** · a portería **${g.tally.onTarget}** · fuera **${g.tally.offTarget}** · ` +
+          `bloqueados **${g.tally.blocked}** · goles **${g.tally.goals}**`,
+      );
+      lines.push(
+        `Recuperaciones **${g.tally.recoveries}** · pérdidas **${g.tally.turnovers}** · ` +
+          `faltas **${g.tally.fouls}** · córners **${g.tally.corners}**`,
+      );
+      lines.push("");
+    });
+  }
+
+  // ── SECUENCIA DE GOLES ───────────────────────────────────────────────
+  if (r.goalSequence.length) {
+    lines.push("## Secuencia de goles");
+    r.goalSequence.forEach((g) => {
+      const quien =
+        g.playerName ?? (g.scoringTeam === "team" ? r.teamName : r.opponentName);
+      const parte = PERIOD_LABEL[g.period] ?? String(g.period);
+      lines.push(
+        `- ${parte} ${g.matchTimeLabel} · ${g.scoreAfter.team}-${g.scoreAfter.opponent} · ` +
+          `${quien} · ${g.sourceLabel}`,
+      );
+      // El tiempo de respuesta es null cuando el gol anterior del otro equipo
+      // fue en otra parte: el reloj se reinicia y el dato no existe.
+      if (g.secondsSinceOpponentPreviousGoal !== null) {
+        const etiqueta = g.scoringTeam === "opponent" ? "Respuesta rival" : "Respuesta propia";
+        lines.push(`  - ${etiqueta}: ${g.secondsSinceOpponentPreviousGoal} s`);
+      }
+    });
+    lines.push("");
+  }
 
   if (r.periodStats.length) {
     lines.push("## Estadísticas por periodo");

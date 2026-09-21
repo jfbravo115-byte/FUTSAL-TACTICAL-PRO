@@ -405,6 +405,14 @@ export default function MatchAnalysis() {
                   )}
                 </div>
               )}
+              {/* Un penalti no está sin ubicar: se lanza desde el punto de
+                  penalti, que no es ninguno de los doce sectores. Se cuenta
+                  aparte para que la suma cuadre a la vista. */}
+              {zones.ruleDetermined > 0 && (
+                <div className="mt-1 text-[9px] text-slate-500">
+                  {zones.ruleDetermined} lanzamiento(s) desde el punto de penalti.
+                </div>
+              )}
               {zones.unlocated > 0 && (
                 <div className="mt-1 text-[9px] text-slate-500">
                   {zones.unlocated} acción(es) registradas sin ubicación.

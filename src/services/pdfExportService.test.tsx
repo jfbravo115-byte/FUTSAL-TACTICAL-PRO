@@ -148,7 +148,8 @@ describe("exportMatchReportPdf", () => {
     await exportMatchReportPdf(md);
     expect(pdfSaveMock).toHaveBeenCalledTimes(1);
     expect(pdfSaveMock.mock.calls[0][0]).toMatch(/^informe_Mi_Equipo_\d+\.pdf$/);
-    expect(toJpegMock).toHaveBeenCalledTimes(4); // resumen/zonas + jugadores + 1 portero + eventos (hay un GOAL relevante)
+    // resumen/zonas + jugadores + situaciones especiales + eventos.
+    expect(toJpegMock).toHaveBeenCalledTimes(5);
   });
 
   // 3. sin Tactical Pro

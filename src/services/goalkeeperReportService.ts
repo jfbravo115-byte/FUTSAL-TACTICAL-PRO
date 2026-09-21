@@ -13,6 +13,7 @@
  */
 import { GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../types/futsal";
 import { GkZoneTally, tallyGoalkeeperZones } from "../utils/goalkeeperZones";
+import { chronological } from "../utils/eventOrder";
 import {
   effectiveGoalieAction,
   hasUndeclaredIntervention,
@@ -230,10 +231,12 @@ function buildEntry(matchData: MatchData, p: Player): GoalkeeperReportEntry {
 
       // Mismos predicados que las estadísticas: si una intervención cuenta
       // arriba, aparece también aquí.
-      const timeline: GoalkeeperTimelineEntry[] = ownEvents
-        .filter((e) => isAnySave(e) || isConcededGoal(e) || isExit(e))
-        .slice()
-        .sort((a, b) => a.timestamp - b.timestamp)
+      // Orden cronológico real (utils/eventOrder): por parte y después por
+      // tiempo. Ordenar solo por `timestamp` ponía una parada del minuto 1 de
+      // la segunda parte antes que una del minuto 19 de la primera.
+      const timeline: GoalkeeperTimelineEntry[] = chronological(
+        ownEvents.filter((e) => isAnySave(e) || isConcededGoal(e) || isExit(e)),
+      )
         .map((e) => ({
           timeLabel: fmtMilliseconds(e.timestamp),
           period: e.period,

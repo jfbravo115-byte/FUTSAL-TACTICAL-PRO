@@ -29,6 +29,7 @@ import { ActionType, GameEvent, GoalieAction } from "../../types/futsal";
 import { FutsalPitch, GoalCaptionTexts } from "../field/FutsalPitch";
 import { isZone12Id } from "../../utils/fieldZones";
 import { LEGACY_DISCLAIMER, classifyZone, isLegacyZoneId } from "../../utils/legacyZoneMap";
+import { hasRuleDeterminedOrigin } from "../../utils/setPieceModel";
 
 // ── PRESUPUESTO DE LA PÁGINA ────────────────────────────────────────────
 // A4 a 96 dpi. La captura se inserta con addImage(..., pdfW, imgH) donde
@@ -234,6 +235,11 @@ export function ZoneMapBoard({ events }: { events: GameEvent[] }) {
         {maps.map((def) => {
           const counts = countZones(def.events);
           const located = Object.values(counts).reduce((a, b) => a + b, 0);
+          // Un penalti no está «sin ubicar»: se lanza desde el punto de
+          // penalti, que no es ninguno de los doce sectores. Se declara
+          // aparte para no afirmar que falta un dato.
+          const reglamentarios = def.events.filter(hasRuleDeterminedOrigin).length;
+          const sinUbicacion = Math.max(0, def.events.length - located - reglamentarios);
           return (
             <div key={def.key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <div
@@ -249,7 +255,8 @@ export function ZoneMapBoard({ events }: { events: GameEvent[] }) {
               </div>
               <div style={{ fontSize: 8, color: "#94a3b8" }}>
                 {def.events.length} eventos
-                {def.events.length > located ? ` · ${def.events.length - located} sin ubicación` : ""}
+                {reglamentarios > 0 ? ` · ${reglamentarios} desde el punto de penalti` : ""}
+                {sinUbicacion > 0 ? ` · ${sinUbicacion} sin ubicación` : ""}
               </div>
               <FutsalPitch
                 mode={legacy ? "legacy3x3" : "zone12"}

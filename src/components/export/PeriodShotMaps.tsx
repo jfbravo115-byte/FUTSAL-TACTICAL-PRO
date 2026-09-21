@@ -32,6 +32,7 @@ import React from "react";
 import { GameEvent, Period } from "../../types/futsal";
 import { FutsalPitch } from "../field/FutsalPitch";
 import { isShotAttempt, isShotGoal } from "../../utils/shotModel";
+import { hasRuleDeterminedOrigin } from "../../utils/setPieceModel";
 import { captionsForRival, countZones, isLegacyMatch } from "./ZoneMapBoard";
 
 /** Las partes que se nombran. FINISHED no es una parte, es un estado. */
@@ -93,10 +94,20 @@ export function buildPeriodShotMaps(events: GameEvent[], opponent: boolean): Per
   }));
 }
 
-/** Tiros de un mapa que no se pudieron ubicar. Se declara, no se esconde. */
+/** Penaltis y dobles penaltis: su origen lo fija el reglamento. */
+export function ruleDeterminedCount(map: PeriodShotMap): number {
+  return map.events.filter(hasRuleDeterminedOrigin).length;
+}
+
+/**
+ * Tiros de un mapa que no se pudieron ubicar. Se declara, no se esconde.
+ *
+ * Los penaltis NO cuentan aquí: no les falta la ubicación, es que su sitio
+ * no se observa —se sabe— y no pertenece a ninguno de los doce sectores.
+ */
 export function unlocatedCount(map: PeriodShotMap): number {
   const located = Object.values(countZones(map.events)).reduce((a, b) => a + b, 0);
-  return Math.max(0, map.events.length - located);
+  return Math.max(0, map.events.length - located - ruleDeterminedCount(map));
 }
 
 /** Línea de reconciliación: la suma de las partes tiene que dar el total. */
@@ -146,6 +157,7 @@ export function PeriodShotMapsBoard({
       >
         {maps.map((def) => {
           const sinUbicacion = unlocatedCount(def);
+          const reglamentarios = ruleDeterminedCount(def);
           const goles = def.events.filter(isShotGoal).length;
           return (
             <div key={def.key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -162,6 +174,7 @@ export function PeriodShotMapsBoard({
               </div>
               <div style={{ fontSize: 8, color: muted }}>
                 {def.events.length} tiros · {goles} gol{goles === 1 ? "" : "es"}
+                {reglamentarios > 0 ? ` · ${reglamentarios} desde el punto de penalti` : ""}
                 {sinUbicacion > 0 ? ` · ${sinUbicacion} sin ubicación` : ""}
               </div>
               <FutsalPitch

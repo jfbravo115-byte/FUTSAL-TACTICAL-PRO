@@ -35,6 +35,7 @@ import {
 import { GOAL_ZONE_IDS, GoalZoneId, formatGoalZoneLabel } from "../utils/goalZones";
 import { CornerSummary, summarizeCorners } from "../utils/cornerModel";
 import { summarizeShots } from "../utils/shotModel";
+import { hasRuleDeterminedOrigin } from "../utils/setPieceModel";
 import {
   SetPieceOutcomeSummary,
   SetPieceRestartSummary,
@@ -102,6 +103,11 @@ export type ZoneDashboard = {
   };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
+  /**
+   * Lanzamientos cuyo origen fija el reglamento: penaltis y dobles penaltis.
+   * No son acciones sin ubicar — su sitio no se observa, se sabe.
+   */
+  ruleDetermined: number;
   totals: {
     zonedActions: number;
     attempts: number;
@@ -141,9 +147,15 @@ const isFreeKickPlay = (e: GameEvent) => isSetPieceRestart(e);
 /**
  * Acciones con capacidad de llevar ubicación. Se usa para contar cuántas se
  * quedaron sin ella — dato que se declara en vez de esconderse.
+ *
+ * Un penalti y un doble penalti quedan FUERA: su origen lo fija el
+ * reglamento, no la observación, así que no llevan sector y contarlos como
+ * «sin ubicación» diría que falta un dato que nunca tuvo que existir. Se
+ * cuentan aparte, en `ruleDetermined`.
  */
 const isLocatable = (e: GameEvent) =>
-  isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e);
+  !hasRuleDeterminedOrigin(e) &&
+  (isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e));
 
 export function scopedEvents(
   matchData: MatchData,
@@ -310,6 +322,7 @@ export function buildZoneDashboard(
   const zone12 = buildZone12Bucket(events);
   const legacy = buildLegacyBucket(events);
   const unlocated = events.filter((e) => isLocatable(e) && classifyZone(e.originGrid) === null).length;
+  const ruleDetermined = events.filter(hasRuleDeterminedOrigin).length;
 
   // summarizeCorners aplica por su cuenta el filtro de equipo, así que aquí
   // solo se acota el período — si no, el resumen de córners ignoraría el
@@ -339,6 +352,7 @@ export function buildZoneDashboard(
     corners,
     setPieces,
     unlocated,
+    ruleDetermined,
     totals: {
       zonedActions: (zone12?.total ?? 0) + (legacy?.total ?? 0),
       attempts: attempts.length,

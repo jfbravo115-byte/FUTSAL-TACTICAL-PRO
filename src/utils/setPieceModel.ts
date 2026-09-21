@@ -47,6 +47,8 @@
  * Guardar un marcador explícito habría obligado a migrar los históricos.
  */
 import { ActionType, GameEvent, GoalieAction } from "../types/futsal";
+import { formatAnyZoneLabel } from "./legacyZoneMap";
+import { acceptsOrigin, originIsOptional } from "./fieldZones";
 
 // ── CÓMO SE EJECUTA UN CÓRNER O UNA FALTA ───────────────────────────────
 
@@ -151,9 +153,11 @@ export function isSetPieceOrigin(raw: unknown): raw is SetPieceOrigin {
 }
 
 /**
- * Procedencia declarada del tiro. `normal` y la ausencia son lo mismo a
- * efectos de lectura — un tiro de jugada —, así que devuelve null en ambos
- * casos y quien quiera el valor crudo lo pide con `setPieceOriginOf`.
+ * Procedencia declarada del tiro, SIN `normal`.
+ *
+ * Existe para el chip del Historial, que solo aparece cuando hay algo que
+ * destacar: un tiro de jugada no lleva chip, y uno cuya procedencia no se
+ * registró tampoco —no se sabe qué poner—.
  */
 export function declaredSetPieceOrigin(event: GameEvent): SetPieceOrigin | null {
   const raw = event.metadata?.setPiece;
@@ -161,10 +165,105 @@ export function declaredSetPieceOrigin(event: GameEvent): SetPieceOrigin | null 
   return raw;
 }
 
-/** Procedencia cruda, con `normal` incluido. */
-export function setPieceOriginOf(event: GameEvent): SetPieceOrigin {
+/**
+ * Procedencia registrada, o null si NO consta.
+ *
+ * AUSENCIA ≠ JUGADA NORMAL
+ * ------------------------
+ * Esto devolvía `"normal"` cuando el campo no estaba, y era el único sitio
+ * de toda la aplicación donde la ausencia de un dato se convertía en una
+ * afirmación. Un gol de un partido anterior a Fase 5 —cuando el selector de
+ * procedencia ni siquiera existía— quedaba declarado «de jugada» sin que
+ * nadie lo hubiera observado, y un penalti histórico era indistinguible de
+ * una jugada.
+ *
+ * Los eventos NUEVOS sí traen `normal` escrito: el selector está en pantalla
+ * con «Jugada» activa y el operador puede cambiarlo, así que dejarlo es una
+ * declaración. Aquí no se migra nada: lo que no está, no está.
+ */
+export function setPieceOriginOf(event: GameEvent): SetPieceOrigin | null {
   const raw = event.metadata?.setPiece;
-  return isSetPieceOrigin(raw) ? raw : "normal";
+  return isSetPieceOrigin(raw) ? raw : null;
+}
+
+// ── LANZAMIENTOS CON ORIGEN REGLAMENTARIO ───────────────────────────────
+//
+// Un penalti se lanza desde el punto de penalti y un doble penalti desde el
+// segundo punto. No hay nada que preguntarle al operador: el origen lo fija
+// el reglamento, no la observación.
+//
+// Por eso estos dos lanzamientos NO llevan `originGrid`. Asignarles un
+// sector de los doce sería inventar un dato —y además uno falso, porque el
+// punto de penalti no pertenece a ninguna de las zonas del sistema—, y
+// contarlos como «sin ubicación» sería igual de engañoso: no falta el dato,
+// es que el dato es de otra naturaleza y ya está en `metadata.setPiece`.
+
+export const RULE_DETERMINED_ORIGINS: readonly SetPieceOrigin[] = [
+  "penalty",
+  "double_penalty",
+];
+
+export function isRuleDeterminedOrigin(origin: SetPieceOrigin | null): boolean {
+  return origin !== null && RULE_DETERMINED_ORIGINS.includes(origin);
+}
+
+/** Acciones cuyo sector de pista lo fija el reglamento y no se pregunta. */
+export function hasRuleDeterminedOrigin(event: GameEvent): boolean {
+  if (
+    event.type !== ActionType.SHOT &&
+    event.type !== ActionType.GOAL &&
+    event.type !== GoalieAction.GOAL_CONCEDED
+  ) {
+    return false;
+  }
+  return isRuleDeterminedOrigin(setPieceOriginOf(event));
+}
+
+/**
+ * ¿Hay que pedirle al operador el sector de pista de esta acción?
+ *
+ * Punto ÚNICO de decisión, y por eso es una función pura y probada: lo
+ * consultan tanto el paso de captura —para saltarse la pantalla de zonas—
+ * como `handleAction` —para no volver a abrir el modal cuando el evento
+ * llega ya completo—. Si solo lo supiera uno de los dos, un penalti
+ * quedaría atrapado en un bucle: la pantalla lo registraría sin sector y
+ * `handleAction` lo devolvería a pedir sector.
+ */
+export function shouldAskOriginZone(
+  type: ActionType | GoalieAction,
+  setPiece: SetPieceOrigin | null | undefined,
+): boolean {
+  if (!acceptsOrigin(type) || originIsOptional(type)) return false;
+  return !isRuleDeterminedOrigin(setPiece ?? null);
+}
+
+export const RULE_DETERMINED_ORIGIN_LABEL: Record<string, string> = {
+  penalty: "Punto de penalti",
+  double_penalty: "Segundo punto de penalti",
+};
+
+/**
+ * Etiqueta del ORIGEN de una acción para listados y exportaciones.
+ *
+ * Un penalti dice de dónde se lanzó —el punto de penalti— en vez de «sin
+ * ubicación registrada», que afirmaría que falta un dato que nunca tuvo que
+ * existir.
+ */
+export function formatShotOriginLabel(event: GameEvent): string {
+  if (hasRuleDeterminedOrigin(event)) {
+    const origin = setPieceOriginOf(event)!;
+    return RULE_DETERMINED_ORIGIN_LABEL[origin] ?? formatAnyZoneLabel(event.originGrid);
+  }
+  return formatAnyZoneLabel(event.originGrid);
+}
+
+/** Texto para la procedencia que no consta. Nunca se infiere ni se reparte. */
+export const SET_PIECE_ORIGIN_UNRECORDED_LABEL = "No registrado";
+
+/** `"Penalti"`, `"Jugada"`… o `"No registrado"`. Nunca un código interno. */
+export function formatSetPieceOriginOrUnrecorded(event: GameEvent): string {
+  const origin = setPieceOriginOf(event);
+  return origin ? SET_PIECE_ORIGIN_LABEL[origin] : SET_PIECE_ORIGIN_UNRECORDED_LABEL;
 }
 
 /** Etiqueta del chip de procedencia, o null cuando fue jugada normal. */
@@ -252,6 +351,8 @@ export function countShotsFromSetPiece(
     (e) =>
       (e.type === ActionType.SHOT || e.type === ActionType.GOAL) &&
       !!e.metadata?.isOpponent === opponent &&
+      // `origin === "normal"` ya no captura los eventos sin el campo: un
+      // histórico sin procedencia no se cuenta como tiro de jugada.
       setPieceOriginOf(e) === origin,
   ).length;
 }

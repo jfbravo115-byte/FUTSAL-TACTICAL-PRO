@@ -482,3 +482,138 @@ describe("un partido histórico sin shotOutcome conserva su interpretación", ()
     expect(p.shotsOnTarget + p.shotsOffTarget + p.shotsBlocked).toBe(0);
   });
 });
+
+// ── SITUACIONES ESPECIALES Y SECUENCIA DE GOLES ────────────────────────
+//
+// El informe no decía nada de los cinco tiros registrados durante una
+// superioridad, ni del tiempo que tardó el rival en responder a un gol. Las
+// dos cosas estaban en los eventos; faltaba la capa que las lee.
+
+describe("el informe incorpora las situaciones especiales", () => {
+  const formacion = (timestamp: number, gameState: string, isOpponent = false) =>
+    event({
+      type: ActionType.FORMATION_CHANGE,
+      timestamp,
+      gameState: gameState as any,
+      metadata: { isOpponent },
+      scoreAtEvent: { team: 0, opponent: 0 },
+    });
+
+  const md = () =>
+    matchData({
+      players: [player({ id: "p1", number: 7, name: "Carlos", individualTimeSeconds: 600 })],
+      events: [
+        formacion(60_000, "Superioridad"),
+        event({ type: ActionType.SHOT, timestamp: 70_000, playerIds: ["p1"], destinationGrid: "G5" }),
+        event({ type: ActionType.SHOT, timestamp: 80_000, playerIds: ["p1"], destinationGrid: "G2" }),
+        event({ type: ActionType.GOAL, timestamp: 90_000, playerIds: ["p1"], destinationGrid: "G1",
+                metadata: { setPiece: "penalty" } }),
+        event({ type: ActionType.SHOT, timestamp: 100_000, playerIds: ["p1"], destinationGrid: "OUT" }),
+        event({ type: ActionType.SHOT, timestamp: 110_000, playerIds: ["p1"],
+                metadata: { shotOutcome: "blocked", goalieResponse: "UNSPECIFIED" } }),
+        formacion(162_000, "4vs4"),
+      ],
+    });
+
+  it("publica las ventanas, agrupadas y con etiqueta humana", () => {
+    const r = generateMatchReport(md());
+    expect(r.matchContexts).toHaveLength(1);
+    expect(r.matchContextGroups[0].label).toBe("Superioridad por expulsión rival");
+  });
+
+  it("con los cinco tiros de la ventana: 5 · 3 · 1 · 1 · 1", () => {
+    const t = generateMatchReport(md()).matchContextGroups[0].tally;
+    expect([t.shots, t.onTarget, t.offTarget, t.blocked, t.goals]).toEqual([5, 3, 1, 1, 1]);
+  });
+
+  it("el markdown imprime la sección con la duración real", () => {
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(md()));
+    expect(texto).toContain("## Situaciones especiales");
+    expect(texto).toContain("Superioridad por expulsión rival");
+    expect(texto).toContain("01:42");
+    expect(texto).toContain("Tiros **5**");
+  });
+
+  it("nunca imprime el código interno del estado", () => {
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(md()));
+    for (const codigo of ["SUPERIORITY", "PJ_ATTACK", "FORMATION_CHANGE", "GameState"]) {
+      expect(texto).not.toContain(codigo);
+    }
+  });
+
+  it("una ventana sin cierre dice que la duración no está disponible", () => {
+    const sinCierre = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [
+        formacion(60_000, "Superioridad"),
+        event({ type: ActionType.SHOT, timestamp: 70_000, playerIds: ["p1"], destinationGrid: "G5" }),
+      ],
+    });
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(sinCierre));
+    expect(texto).toContain("duración no disponible");
+  });
+
+  it("un partido sin declaraciones no imprime la sección", () => {
+    const simple = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [event({ type: ActionType.SHOT, playerIds: ["p1"], destinationGrid: "G5" })],
+    });
+    expect(formatMatchReportAsMarkdown(generateMatchReport(simple))).not.toContain(
+      "## Situaciones especiales",
+    );
+  });
+});
+
+describe("el informe incorpora la secuencia de goles", () => {
+  const md = () =>
+    matchData({
+      players: [player({ id: "p1", number: 7, name: "Carlos", individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.GOAL, timestamp: 600_000, playerIds: ["p1"],
+                destinationGrid: "G1", metadata: { setPiece: "penalty" } }),
+        event({ type: ActionType.GOAL, timestamp: 647_000, destinationGrid: "G3",
+                metadata: { isOpponent: true } }),
+      ],
+    });
+
+  it("publica los goles con procedencia y respuesta", () => {
+    const s = generateMatchReport(md()).goalSequence;
+    expect(s).toHaveLength(2);
+    expect(s[0].sourceLabel).toBe("Penalti");
+    expect(s[1].secondsSinceOpponentPreviousGoal).toBe(47);
+  });
+
+  it("el markdown lo escribe en lenguaje de cuerpo técnico", () => {
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(md()));
+    expect(texto).toContain("## Secuencia de goles");
+    expect(texto).toContain("Penalti");
+    expect(texto).toContain("Respuesta rival: 47 s");
+  });
+
+  it("un gol sin procedencia registrada dice 'No registrado'", () => {
+    const historico = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [event({ type: ActionType.GOAL, timestamp: 1000, playerIds: ["p1"], destinationGrid: "G1" })],
+    });
+    const r = generateMatchReport(historico);
+    expect(r.goalSequence[0].source).toBe("unknown");
+    expect(formatMatchReportAsMarkdown(r)).toContain("No registrado");
+  });
+});
+
+describe("L · los eventos relevantes salen en orden cronológico real", () => {
+  it("un gol de la 1ª al 19 va antes que uno de la 2ª al 1", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [
+        event({ id: "segunda", type: ActionType.GOAL, timestamp: 60_000,
+                period: Period.SECOND, playerIds: ["p1"], destinationGrid: "G1" }),
+        event({ id: "primera", type: ActionType.GOAL, timestamp: 19 * 60_000,
+                period: Period.FIRST, playerIds: ["p1"], destinationGrid: "G1" }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.relevantEvents.map((e) => e.period)).toEqual([Period.FIRST, Period.SECOND]);
+    expect(r.goalSequence.map((g) => g.period)).toEqual([Period.FIRST, Period.SECOND]);
+  });
+});

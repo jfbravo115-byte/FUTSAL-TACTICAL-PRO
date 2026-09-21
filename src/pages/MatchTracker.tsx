@@ -96,12 +96,10 @@ import {
 } from "../utils/shotModel";
 import {
   ACTION_NOUN,
-  acceptsOrigin,
   acceptsTarget,
   describeAllBands,
   formatZoneLabel,
   isZone12Id,
-  originIsOptional,
 } from "../utils/fieldZones";
 import { attackDirection } from "../utils/attackDirection";
 import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
@@ -123,6 +121,8 @@ import {
   SetPieceOrigin,
   SetPieceOutcome,
   formatSetPieceOrigin,
+  isRuleDeterminedOrigin,
+  shouldAskOriginZone,
 } from "../utils/setPieceModel";
 import { formatAnyZoneLabel, isLegacyZoneId } from "../utils/legacyZoneMap";
 import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterventionMap";
@@ -2240,8 +2240,13 @@ export default function MatchTracker() {
     setPendingAction(null); // se limpia ya, para que un doble toque no duplique
     const destinationGrid = opts.destinationGrid ?? current.destinationGrid;
     const goalieResponse = opts.goalieResponse ?? current.goalieResponse;
+    // Un penalti se lanza desde el punto de penalti y un doble penalti desde
+    // el segundo: el origen lo fija el reglamento, no la observación. No se
+    // guarda sector aunque el operador hubiera elegido uno antes de declarar
+    // el tipo de lanzamiento — sería un dato falso.
+    const origenReglamentario = isRuleDeterminedOrigin(current.setPiece ?? null);
     handleAction(current.type, current.playerId, {
-      originGrid: current.originGrid,
+      ...(origenReglamentario ? {} : { originGrid: current.originGrid }),
       ...(!opts.blocked && destinationGrid ? { destinationGrid } : {}),
       metadata: {
         isOpponent: current.isOpponent,
@@ -2280,7 +2285,11 @@ export default function MatchTracker() {
     // Catálogo único en src/utils/fieldZones.ts. Antes esta lista estaba
     // duplicada aquí, en el paso de origen y en el selector de "acción desde",
     // y es por donde se colaba FOUL sin llegar nunca a pedir ubicación.
-    const needsOrigin = acceptsOrigin(type) && !originIsOptional(type);
+    //
+    // Un penalti llega SIN sector a propósito, así que sin esta comprobación
+    // quedaría atrapado: la pantalla lo registraría y `handleAction` lo
+    // devolvería a pedir sector, una y otra vez.
+    const needsOrigin = shouldAskOriginZone(type, metadata?.metadata?.setPiece);
 
     if (needsOrigin && !metadata?.originGrid) {
       setPendingAction({
@@ -6797,10 +6806,28 @@ export default function MatchTracker() {
                         <button
                           key={opt.id}
                           onClick={() =>
-                            setPendingAction((prev) => ({
-                              ...prev!,
-                              setPiece: opt.id as any,
-                            }))
+                            setPendingAction((prev) => {
+                              if (!prev) return prev;
+                              const reglamentario = isRuleDeterminedOrigin(opt.id);
+                              // Penalti y doble penalti se saltan el paso de
+                              // origen: no hay sector que preguntar. Y si el
+                              // operador se corrige y vuelve a un lanzamiento
+                              // normal, el paso reaparece, porque entonces el
+                              // sector sí hace falta y aún no se ha elegido.
+                              const step = reglamentario
+                                ? prev.step === "origin"
+                                  ? "target"
+                                  : prev.step
+                                : prev.step === "target" && !prev.originGrid
+                                  ? "origin"
+                                  : prev.step;
+                              return {
+                                ...prev,
+                                setPiece: opt.id as any,
+                                ...(reglamentario ? { originGrid: undefined } : {}),
+                                step,
+                              };
+                            })
                           }
                           className={`py-2 px-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center justify-center gap-1.5 ${
                             isSel
@@ -6821,6 +6848,9 @@ export default function MatchTracker() {
                 <div className="flex items-center justify-between px-2">
                   {["Jugador", "Origen", "Portería"].map((label, i) => {
                     if (label === "Portería" && !acceptsTarget(pendingAction.type)) return null;
+                    // Un lanzamiento reglamentario no tiene paso de origen.
+                    if (label === "Origen" && isRuleDeterminedOrigin(pendingAction.setPiece ?? null))
+                      return null;
 
                     const steps: any[] = ["player", "origin", "target"];
                     const currentIdx = steps.indexOf(pendingAction.step);
@@ -6878,7 +6908,11 @@ export default function MatchTracker() {
                           setPendingAction((prev) => ({
                             ...prev!,
                             playerId: id,
-                            step: "origin",
+                            // Con un penalti ya declarado no hay sector que
+                            // preguntar: se pasa directamente a la portería.
+                            step: isRuleDeterminedOrigin(prev?.setPiece ?? null)
+                              ? "target"
+                              : "origin",
                           }))
                         }
                         selectedId={pendingAction.playerId}
@@ -7083,7 +7117,9 @@ export default function MatchTracker() {
                             ...prev!,
                             step:
                               prev?.step === "target"
-                                ? "origin"
+                                ? isRuleDeterminedOrigin(prev?.setPiece ?? null)
+                                  ? "player"
+                                  : "origin"
                                 : prev?.step === "response" || prev?.step === "exitOutcome"
                                   ? "target"
                                   : "player",

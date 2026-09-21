@@ -47,6 +47,8 @@
  * Guardar un marcador explícito habría obligado a migrar los históricos.
  */
 import { ActionType, GameEvent, GoalieAction } from "../types/futsal";
+import { formatAnyZoneLabel } from "./legacyZoneMap";
+import { acceptsOrigin, originIsOptional } from "./fieldZones";
 
 // ── CÓMO SE EJECUTA UN CÓRNER O UNA FALTA ───────────────────────────────
 
@@ -182,6 +184,77 @@ export function declaredSetPieceOrigin(event: GameEvent): SetPieceOrigin | null 
 export function setPieceOriginOf(event: GameEvent): SetPieceOrigin | null {
   const raw = event.metadata?.setPiece;
   return isSetPieceOrigin(raw) ? raw : null;
+}
+
+// ── LANZAMIENTOS CON ORIGEN REGLAMENTARIO ───────────────────────────────
+//
+// Un penalti se lanza desde el punto de penalti y un doble penalti desde el
+// segundo punto. No hay nada que preguntarle al operador: el origen lo fija
+// el reglamento, no la observación.
+//
+// Por eso estos dos lanzamientos NO llevan `originGrid`. Asignarles un
+// sector de los doce sería inventar un dato —y además uno falso, porque el
+// punto de penalti no pertenece a ninguna de las zonas del sistema—, y
+// contarlos como «sin ubicación» sería igual de engañoso: no falta el dato,
+// es que el dato es de otra naturaleza y ya está en `metadata.setPiece`.
+
+export const RULE_DETERMINED_ORIGINS: readonly SetPieceOrigin[] = [
+  "penalty",
+  "double_penalty",
+];
+
+export function isRuleDeterminedOrigin(origin: SetPieceOrigin | null): boolean {
+  return origin !== null && RULE_DETERMINED_ORIGINS.includes(origin);
+}
+
+/** Acciones cuyo sector de pista lo fija el reglamento y no se pregunta. */
+export function hasRuleDeterminedOrigin(event: GameEvent): boolean {
+  if (
+    event.type !== ActionType.SHOT &&
+    event.type !== ActionType.GOAL &&
+    event.type !== GoalieAction.GOAL_CONCEDED
+  ) {
+    return false;
+  }
+  return isRuleDeterminedOrigin(setPieceOriginOf(event));
+}
+
+/**
+ * ¿Hay que pedirle al operador el sector de pista de esta acción?
+ *
+ * Punto ÚNICO de decisión, y por eso es una función pura y probada: lo
+ * consultan tanto el paso de captura —para saltarse la pantalla de zonas—
+ * como `handleAction` —para no volver a abrir el modal cuando el evento
+ * llega ya completo—. Si solo lo supiera uno de los dos, un penalti
+ * quedaría atrapado en un bucle: la pantalla lo registraría sin sector y
+ * `handleAction` lo devolvería a pedir sector.
+ */
+export function shouldAskOriginZone(
+  type: ActionType | GoalieAction,
+  setPiece: SetPieceOrigin | null | undefined,
+): boolean {
+  if (!acceptsOrigin(type) || originIsOptional(type)) return false;
+  return !isRuleDeterminedOrigin(setPiece ?? null);
+}
+
+export const RULE_DETERMINED_ORIGIN_LABEL: Record<string, string> = {
+  penalty: "Punto de penalti",
+  double_penalty: "Segundo punto de penalti",
+};
+
+/**
+ * Etiqueta del ORIGEN de una acción para listados y exportaciones.
+ *
+ * Un penalti dice de dónde se lanzó —el punto de penalti— en vez de «sin
+ * ubicación registrada», que afirmaría que falta un dato que nunca tuvo que
+ * existir.
+ */
+export function formatShotOriginLabel(event: GameEvent): string {
+  if (hasRuleDeterminedOrigin(event)) {
+    const origin = setPieceOriginOf(event)!;
+    return RULE_DETERMINED_ORIGIN_LABEL[origin] ?? formatAnyZoneLabel(event.originGrid);
+  }
+  return formatAnyZoneLabel(event.originGrid);
 }
 
 /** Texto para la procedencia que no consta. Nunca se infiere ni se reparte. */

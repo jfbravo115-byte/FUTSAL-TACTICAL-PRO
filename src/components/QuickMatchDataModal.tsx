@@ -103,6 +103,11 @@ export function QuickMatchDataModal({ isOpen, onClose, matchData }: Props) {
               {describeCorners(dashboard.corners)}
             </div>
           )}
+          {dashboard.ruleDetermined > 0 && (
+            <div className="mt-2 text-center text-[9px] text-slate-500 font-bold">
+              {dashboard.ruleDetermined} lanzamiento(s) desde el punto de penalti
+            </div>
+          )}
           {dashboard.unlocated > 0 && (
             <div className="mt-2 text-center text-[9px] text-slate-500 font-bold">
               {dashboard.unlocated} acción(es) sin ubicación registrada

@@ -1,5 +1,5 @@
 import { MatchData, ActionType, GoalieAction, Role } from '../types/futsal';
-import { formatAnyZoneLabel } from '../utils/legacyZoneMap';
+import { formatShotOriginLabel } from '../utils/setPieceModel';
 import { formatDestinationLabel } from '../utils/goalZones';
 import { playerShotTallies, summarizePlayerShots, tallyOf } from '../utils/shotModel';
 import { chronological } from '../utils/eventOrder';
@@ -101,7 +101,8 @@ export function exportToCSV(matchData: MatchData) {
         player?.name || 'Equipo',
         String(player?.number || ''),
         e.metadata?.isOpponent ? matchData.opponentName : matchData.teamName,
-        formatAnyZoneLabel(e.originGrid),
+        // Un penalti dice «Punto de penalti», no «sin ubicación registrada».
+        formatShotOriginLabel(e),
         formatDestinationLabel(e.destinationGrid),
         score,
       ]);

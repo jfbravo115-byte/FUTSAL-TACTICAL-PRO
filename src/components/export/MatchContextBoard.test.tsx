@@ -346,3 +346,47 @@ describe("casos límite del reparto", () => {
     expect(formatContextScore(inf)).not.toContain("→");
   });
 });
+
+// ── PENALTI Y DOBLE PENALTI SIN SECTOR ─────────────────────────────────
+//
+// Su origen lo fija el reglamento, así que no llevan `originGrid`. El PDF
+// tiene que seguir diciendo de dónde vienen.
+
+describe("el PDF sigue mostrando la procedencia sin sector de pista", () => {
+  function partidoSoloPenaltis(): MatchData {
+    return {
+      ...partidoReal(),
+      events: [
+        ev({ timestamp: 13_000, period: Period.SECOND, type: ActionType.GOAL,
+             playerIds: ["p3"], destinationGrid: "G1",
+             metadata: { isOpponent: false, setPiece: "penalty" } }),
+        ev({ timestamp: 25_000, period: Period.SECOND, type: ActionType.GOAL,
+             playerIds: ["p4"], destinationGrid: "G2",
+             metadata: { isOpponent: false, setPiece: "double_penalty" } }),
+      ],
+    };
+  }
+
+  it("imprime Penalti y Doble penalti aunque el evento no tenga originGrid", () => {
+    const md = partidoSoloPenaltis();
+    expect(md.events.every((e) => e.originGrid === undefined)).toBe(true);
+    const { host } = render(md);
+    const t = texto(host);
+    expect(t).toContain("Penalti");
+    expect(t).toContain("Doble penalti");
+  });
+
+  it("y siguen contando como goles en el marcador de la secuencia", () => {
+    const { report } = render(partidoSoloPenaltis());
+    expect(report.goalSequence.map((g) => `${g.scoreAfter.team}-${g.scoreAfter.opponent}`))
+      .toEqual(["1-0", "2-0"]);
+    expect(report.teamTotals.goals).toBe(2);
+    expect(report.teamTotals.shots).toBe(2);
+    expect(report.teamTotals.shotsOnTarget).toBe(2);
+  });
+
+  it("no se etiquetan como acción sin ubicación en ninguna parte del PDF", () => {
+    const { host } = render(partidoSoloPenaltis());
+    expect(texto(host)).not.toContain("sin ubicación");
+  });
+});

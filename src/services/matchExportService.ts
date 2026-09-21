@@ -3,7 +3,7 @@ import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { formatDestinationLabel } from "../utils/goalZones";
 import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../utils/goalkeeperActions";
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
-import { formatSetPieceOrigin, formatSetPieceOutcome } from "../utils/setPieceModel";
+import { formatSetPieceOrigin, formatSetPieceOutcome, formatShotOriginLabel } from "../utils/setPieceModel";
 import { formatMatchTime } from "../utils/goalSequence";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
@@ -61,7 +61,8 @@ export function buildActionsCsv(matchData: MatchData): string {
         md.x ?? md.originX ?? "",
         md.y ?? md.originY ?? "",
         e.originGrid || md.zone || "",
-        formatAnyZoneLabel(e.originGrid),
+        // Un penalti dice «Punto de penalti», no «sin ubicación registrada».
+        formatShotOriginLabel(e),
         e.destinationGrid || "",
         formatDestinationLabel(e.destinationGrid ?? md.zone),
         // goalkeeperZone es un campo PROPIO (GK1-GK5): nunca se mezcla con la

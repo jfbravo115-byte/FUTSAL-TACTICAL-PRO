@@ -281,6 +281,12 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         </div>
       )}
 
+      {zones.ruleDetermined > 0 && (
+        <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
+          {zones.ruleDetermined} lanzamiento(s) desde el punto de penalti.
+        </div>
+      )}
+
       {zones.unlocated > 0 && (
         <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
           {zones.unlocated} acción(es) sin ubicación registrada.

@@ -131,7 +131,8 @@ import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
 import { paginateContextReport, teamReportPageCount } from "../utils/reportPagination";
 import { MatchContextBoard } from "../components/export/MatchContextBoard";
-import { capturePagesToPdf } from "../services/pdfExportService";
+import { TacticalProBoard } from "../components/export/TacticalProBoard";
+import { capturePagesToPdf, splitTacticalProIntoPages } from "../services/pdfExportService";
 import { buildGoalkeeperReport } from "../services/goalkeeperReportService";
 import {
   acceptsGoalkeeperZone,
@@ -1250,6 +1251,20 @@ export default function MatchTracker() {
     () => paginateContextReport(pdfReport.matchContexts, pdfReport.goalSequence),
     [pdfReport],
   );
+  /**
+   * El análisis interpretativo YA GUARDADO, repartido en páginas.
+   *
+   * Se lee de `matchData.tacticalAnalysis`, que solo se escribe cuando la
+   * generación termina entera. Aquí no se pide nada a nadie: exportar o
+   * reimprimir el PDF no provoca ni una llamada.
+   *
+   * Sin análisis guardado, cero páginas: un informe no imprime una hoja para
+   * anunciar que algo falta.
+   */
+  const tacticalProPages = useMemo(() => {
+    const texto = matchData.tacticalAnalysis;
+    return texto && texto.trim() ? splitTacticalProIntoPages(texto) : [];
+  }, [matchData.tacticalAnalysis]);
 
   /**
    * Finalización por jugador, derivada de los EVENTOS.
@@ -1469,6 +1484,11 @@ export default function MatchTracker() {
    * de declarar una constante por página.
    */
   const pdfContextRefs = useRef<HTMLDivElement[]>([]);
+  /**
+   * Páginas del análisis interpretativo de TACTICAL PRO. Cero cuando el
+   * partido no tiene ninguno guardado.
+   */
+  const pdfTacticalRefs = useRef<HTMLDivElement[]>([]);
   const pdfGkPage1Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage2Ref = useRef<HTMLDivElement>(null);
   const pdfGkPage3Ref = useRef<HTMLDivElement>(null);
@@ -1915,6 +1935,8 @@ export default function MatchTracker() {
         const nodes: HTMLDivElement[] = [
           ...refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n),
           ...pdfContextRefs.current.filter(Boolean),
+          // El análisis interpretativo cierra el informe.
+          ...pdfTacticalRefs.current.filter(Boolean),
         ];
         const images: string[] = [];
 
@@ -3284,14 +3306,22 @@ export default function MatchTracker() {
         );
 
         // 3 páginas por equipo + mapas de zona + balón parado.
-        const totalPages = teamReportPageCount(allTeamsForPDF.length, contextPages.length);
+        const totalPages = teamReportPageCount(
+          allTeamsForPDF.length,
+          contextPages.length,
+          tacticalProPages.length,
+        );
         /**
          * Número de la n-ésima página común fija (1 mapas, 2 tiros por parte,
          * 3 balón parado). Antes se escribía `totalPages - 1` y `totalPages`,
          * que dejó de valer en cuanto el total pasó a depender de cuántas
          * páginas de contexto tenga el partido.
          */
-        const fixedPage = (n: number) => totalPages - contextPages.length - (3 - n);
+        const fixedPage = (n: number) =>
+          totalPages - tacticalProPages.length - contextPages.length - (3 - n);
+        /** Número de la i-ésima página de contexto táctico (0-based). */
+        const contextPage = (i: number) =>
+          totalPages - tacticalProPages.length - contextPages.length + i + 1;
         let pageCounter = 0;
 
         return (
@@ -3662,7 +3692,7 @@ export default function MatchTracker() {
                 style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
               >
                 <Header
-                  page={totalPages - contextPages.length + i + 1}
+                  page={contextPage(i)}
                   total={totalPages}
                   mainTeam={matchData.teamName}
                   vsTeam={matchData.opponentName}
@@ -3678,8 +3708,46 @@ export default function MatchTracker() {
                     opensGoals={pagina.opensGoals}
                   />
                 </div>
+                <Footer page={contextPage(i)} total={totalPages} />
+              </div>
+            ))}
+
+            {/* ── ANÁLISIS TÁCTICO · TACTICAL PRO ──────────────────────
+                Cierra el informe, después de todo lo determinista, porque es
+                una lectura de esos datos y no un dato más.
+
+                Solo texto YA GUARDADO: se lee de `matchData.tacticalAnalysis`,
+                que únicamente se escribe cuando la generación termina entera.
+                Ni esta plantilla ni la exportación piden nada — reimprimir el
+                informe no provoca ninguna llamada.
+
+                El reparto lo hace `splitTacticalProIntoPages`, que ya existía
+                para el PDF del informe: divide por párrafos, nunca parte una
+                palabra y nunca trunca. Sin análisis, cero páginas. */}
+            {tacticalProPages.map((chunk, i) => (
+              <div
+                key={`pdf-tactical-${i}`}
+                ref={(el) => {
+                  if (el) pdfTacticalRefs.current[i] = el;
+                }}
+                style={{ ...pageStyle, minHeight: ZONE_MAP_PAGE.PAGE_H, display: 'flex', flexDirection: 'column' }}
+              >
+                <Header
+                  page={totalPages - tacticalProPages.length + i + 1}
+                  total={totalPages}
+                  mainTeam={matchData.teamName}
+                  vsTeam={matchData.opponentName}
+                  accent="#3b82f6"
+                />
+                <div style={{ flex: 1 }}>
+                  <TacticalProBoard
+                    chunk={chunk}
+                    chunkIndex={i}
+                    chunkCount={tacticalProPages.length}
+                  />
+                </div>
                 <Footer
-                  page={totalPages - contextPages.length + i + 1}
+                  page={totalPages - tacticalProPages.length + i + 1}
                   total={totalPages}
                 />
               </div>

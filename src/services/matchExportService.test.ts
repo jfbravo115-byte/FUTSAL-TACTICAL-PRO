@@ -167,3 +167,32 @@ describe("CSV · jugada de falta", () => {
     expect(parsed.events[0].originGrid).toBe("Z2L");
   });
 });
+
+// ── 18 · BACKUP JSON Y EL ANÁLISIS ─────────────────────────────────────
+//
+// El respaldo es `JSON.stringify(matchData)` entero, así que el análisis
+// viaja porque es parte del partido. No hace falta lógica adicional: estos
+// tests existen para que nadie la añada, y para que nadie empiece a filtrar
+// campos sin darse cuenta de lo que se lleva por delante.
+
+describe("respaldo JSON — conserva el análisis de TACTICAL PRO", () => {
+  it("el análisis guardado viaja en el respaldo", () => {
+    const conAnalisis = { ...match, tacticalAnalysis: "## Análisis\nEl equipo dominó." };
+    const parsed = JSON.parse(buildMatchJson(conAnalisis));
+    expect(parsed.tacticalAnalysis).toBe("## Análisis\nEl equipo dominó.");
+  });
+
+  it("un partido sin análisis se respalda igual, sin inventar el campo", () => {
+    const parsed = JSON.parse(buildMatchJson(match));
+    expect(parsed.tacticalAnalysis).toBeUndefined();
+    expect(parsed.teamName).toBeTruthy();
+  });
+
+  it("restaurar ese JSON devuelve el análisis intacto", () => {
+    // El respaldo es MatchData completo: volver a leerlo reconstruye el
+    // partido tal cual, análisis incluido.
+    const texto = "Línea uno.\n\nLínea dos con **negrita** y acentuación: ñ á é.";
+    const restaurado = JSON.parse(buildMatchJson({ ...match, tacticalAnalysis: texto }));
+    expect(restaurado.tacticalAnalysis).toBe(texto);
+  });
+});

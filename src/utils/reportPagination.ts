@@ -27,12 +27,21 @@ export const TEAM_REPORT_SHARED_PAGES = 3;
  * `contextPages` son las de contexto táctico, que NO son un número fijo:
  * dependen de cuántas ventanas y cuántos goles tenga el partido, y valen 0
  * cuando no hay ninguna de las dos cosas. Ver `paginateContextReport`.
+ *
+ * `tacticalProPages` son las del análisis interpretativo, que valen 0 cuando
+ * el partido no tiene ninguno guardado. Un informe sin análisis no imprime
+ * una hoja anunciando que falta.
  */
-export function teamReportPageCount(teamsWithPlayers: number, contextPages = 0): number {
+export function teamReportPageCount(
+  teamsWithPlayers: number,
+  contextPages = 0,
+  tacticalProPages = 0,
+): number {
   return (
     Math.max(0, teamsWithPlayers) * TEAM_REPORT_PAGES_PER_TEAM +
     TEAM_REPORT_SHARED_PAGES +
-    Math.max(0, contextPages)
+    Math.max(0, contextPages) +
+    Math.max(0, tacticalProPages)
   );
 }
 

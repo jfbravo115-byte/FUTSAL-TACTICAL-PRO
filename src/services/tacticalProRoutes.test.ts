@@ -89,14 +89,39 @@ describe("persistencia solo con el informe entero", () => {
     expect(base).toBeLessThan(peticion);
   });
 
-  it("MatchAnalysis sigue sin persistir, como antes", () => {
+  it("MatchAnalysis guarda, y solo en la rama de éxito", () => {
+    // Antes esta pantalla no persistía nada: un análisis generado desde el
+    // Historial se perdía al salir. Ahora sí escribe, pero con la MISMA
+    // disciplina que MatchTracker — nunca desde el catch.
     const runAI = matchAnalysis.slice(
       matchAnalysis.indexOf("const runAI = async"),
       matchAnalysis.indexOf("const scrollTo ="),
     );
+    const exito = runAI.slice(
+      runAI.indexOf("await streamTacticalReport"),
+      runAI.indexOf("} catch (err: any)"),
+    );
+    // Sobre el CÓDIGO de la rama de error: su comentario cita la función a
+    // propósito, para explicar por qué NO está ahí.
+    const fallo = runAI
+      .slice(runAI.indexOf("} catch (err: any)"))
+      .replace(/^\s*\/\/.*$/gm, "");
+
     expect(runAI).toContain("streamTacticalReport");
-    expect(runAI).not.toContain("updateFinalLocalCopyMatchData");
-    expect(runAI).not.toContain("saveMatch");
+    expect(exito).toContain("updateFinalLocalCopyMatchData(localCopyId,");
+    expect(fallo).not.toContain("updateFinalLocalCopyMatchData");
+    expect(fallo).not.toContain("setMatch(");
+  });
+
+  it("MatchAnalysis solo escribe en la copia local de ESE partido", () => {
+    // `localCopyId` sale del propio identificador con el que se abrió el
+    // partido. Guardar en cualquier otro asociaría el análisis al equivocado.
+    expect(matchAnalysis).toContain("setLocalCopyId(local ? local.id : null);");
+    expect(matchAnalysis).toMatch(/updateFinalLocalCopyMatchData\(localCopyId,/);
+  });
+
+  it("un texto vacío no sustituye a un análisis anterior", () => {
+    expect(matchAnalysis).toContain("if (result.trim() && localCopyId) {");
   });
 });
 

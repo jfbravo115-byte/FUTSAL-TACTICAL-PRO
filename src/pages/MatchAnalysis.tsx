@@ -16,7 +16,10 @@ import {
 } from "lucide-react";
 import { ActionType, MatchData, SavedMatch, Role } from "../types/futsal";
 import { getPartido } from "../services/partidosService";
-import { getFinalLocalCopy } from "../services/matchSnapshotService";
+import {
+  getFinalLocalCopy,
+  updateFinalLocalCopyMatchData,
+} from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import {
   buildZoneDashboard,
@@ -64,6 +67,8 @@ export default function MatchAnalysis() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [match, setMatch] = useState<SavedMatch | null>(null);
+  /** Copia local de ESTE partido, la única a la que se escribe el análisis. */
+  const [localCopyId, setLocalCopyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ai, setAi] = useState<string>("");
@@ -91,6 +96,11 @@ export default function MatchAnalysis() {
       try {
         const decoded = decodeURIComponent(matchId);
         const local = getFinalLocalCopy(decoded);
+        // Id de la copia local de ESTE partido, o null si se abrió desde el
+        // historial remoto. Es la única a la que se le puede escribir el
+        // análisis: guardar en cualquier otra lo asociaría al partido
+        // equivocado.
+        setLocalCopyId(local ? local.id : null);
         let data: SavedMatch | null = local ? { ...local.matchData, id: local.id } : null;
         if (!data) {
           try {
@@ -135,8 +145,7 @@ export default function MatchAnalysis() {
     [match, zoneOpponent],
   );
 
-  // Mismo servicio y mismo protocolo que MatchTracker. Esta pantalla NO
-  // persiste el análisis —nunca lo hizo— y este paso no lo cambia.
+  // Mismo servicio y mismo protocolo que MatchTracker.
   // Salir de la pantalla corta la generación en curso.
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
@@ -155,11 +164,26 @@ export default function MatchAnalysis() {
         onDelta: (text) => setAi((prev) => prev + text),
       });
       setAi(result);
+      // Solo aquí, con el informe ENTERO, se toca el partido guardado.
+      //
+      // `streamTacticalReport` únicamente resuelve al recibir el fin de
+      // transmisión, así que llegar a esta línea significa que el análisis
+      // está completo. Un texto vacío no sustituye a uno anterior: sería
+      // borrar lo bueno sin haber traído nada mejor.
+      if (result.trim() && localCopyId) {
+        const actualizado: MatchData = { ...match, tacticalAnalysis: result };
+        updateFinalLocalCopyMatchData(localCopyId, actualizado);
+        // La copia en memoria también, para que exportar desde esta misma
+        // pantalla no siga usando la versión sin análisis.
+        setMatch((prev) => (prev ? { ...prev, tacticalAnalysis: result } : prev));
+      }
     } catch (err: any) {
       console.error(err);
       if (err?.name === "AbortError" && aiAbortRef.current !== controller) return;
-      // Lo recibido se queda a la vista marcado como incompleto; no se guarda
-      // en ningún sitio porque esta pantalla no guarda.
+      // Lo recibido se queda a la vista marcado como incompleto. NUNCA se
+      // persiste: `updateFinalLocalCopyMatchData` queda fuera de esta rama a
+      // propósito, igual que en MatchTracker. Cubre cancelación, tiempo de
+      // espera agotado y transmisión cortada.
       setAiPartial(true);
       setAiError("TACTICAL PRO no está disponible. El informe automático sigue completo.");
     } finally {

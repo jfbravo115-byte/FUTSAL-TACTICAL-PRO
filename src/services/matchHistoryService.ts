@@ -40,6 +40,21 @@ export function combineMatchHistory(remote: SavedMatch[], local: LocalFinalCopy[
       consumedRemote.add(remoteMatch.id);
       result.push({
         ...remoteMatch,
+        // El análisis de TACTICAL PRO se genera DESPUÉS de guardar el partido
+        // en el servidor, y no existe ninguna forma de actualizar el registro
+        // remoto: `partidosService` solo sabe crear, leer y borrar. Así que el
+        // texto vive únicamente en la copia local, y al preferir la versión
+        // remota se perdía en el Historial de todos los partidos sincronizados.
+        //
+        // Se rellena el HUECO, no se sustituye el dato: si la copia remota ya
+        // trae análisis, manda la remota. Y como el emparejamiento ya se ha
+        // hecho por `remoteId` o por firma, el texto solo puede venir del
+        // mismo partido.
+        ...(remoteMatch.tacticalAnalysis?.trim()
+          ? {}
+          : copy.matchData.tacticalAnalysis?.trim()
+            ? { tacticalAnalysis: copy.matchData.tacticalAnalysis }
+            : {}),
         historySource: "both",
         syncStatus: "synced",
         localStorageId: copy.id,

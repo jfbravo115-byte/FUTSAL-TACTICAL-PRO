@@ -68,8 +68,8 @@ function bloqueDelInforme(): string {
 describe("la plantilla no vuelve a fijar el denominador", () => {
   it("el total sale de teamReportPageCount y de ningún otro cálculo", () => {
     const bloque = bloqueDelInforme();
-    expect(bloque).toContain(
-      "teamReportPageCount(allTeamsForPDF.length, contextPages.length)",
+    expect(bloque).toMatch(
+      /teamReportPageCount\(\s*allTeamsForPDF\.length,\s*contextPages\.length,\s*tacticalProPages\.length,?\s*\)/,
     );
     // Cualquier aritmética paralela de páginas es justo lo que causó el fallo.
     expect(bloque).not.toMatch(/allTeamsForPDF\.length\s*\*\s*3/);
@@ -111,6 +111,25 @@ describe("la plantilla no vuelve a fijar el denominador", () => {
     expect(PLANTILLA).toContain("...pdfContextRefs.current.filter(Boolean),");
     expect(PLANTILLA).toMatch(/const nodes: HTMLDivElement\[\] = \[/);
     expect(PLANTILLA).toContain("for (const node of nodes) {");
+  });
+
+  it("las páginas del análisis se montan y se CAPTURAN al final", () => {
+    // Montarlas y olvidarse de capturarlas las dejaría fuera del PDF sin que
+    // nada fallara: el informe saldría con el mismo aspecto de siempre.
+    const bloque = bloqueDelInforme();
+    expect(bloque).toContain("tacticalProPages.map((chunk, i) =>");
+    expect(bloque).toContain("pdfTacticalRefs.current[i] = el;");
+    expect(bloque).toContain("<TacticalProBoard");
+    expect(PLANTILLA).toContain("...pdfTacticalRefs.current.filter(Boolean),");
+  });
+
+  it("11 · sin análisis guardado no se monta ninguna página", () => {
+    // El reparto parte de `matchData.tacticalAnalysis`: sin texto, la lista
+    // es vacía y `.map` no produce nada. No hay hoja en blanco.
+    expect(PLANTILLA).toContain("const texto = matchData.tacticalAnalysis;");
+    expect(PLANTILLA).toContain(
+      "return texto && texto.trim() ? splitTacticalProIntoPages(texto) : [];",
+    );
   });
 
   it("las páginas comunes fijas ya no se numeran contra el final del PDF", () => {

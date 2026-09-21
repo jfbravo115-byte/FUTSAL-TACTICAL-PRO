@@ -10,6 +10,7 @@ import {
   getFinalLocalCopy,
   markFinalLocalCopySynced,
   isMeaningfulActiveMatch,
+  updateFinalLocalCopyMatchData,
 } from "./matchSnapshotService";
 import { Period, Role, GameState, MatchData } from "../types/futsal";
 
@@ -195,5 +196,70 @@ describe("matchSnapshotService", () => {
       });
       expect(importantChangeSignature(a)).not.toBe(importantChangeSignature(b));
     });
+  });
+});
+
+// ── 1 / 9 · EL ANÁLISIS DE TACTICAL PRO EN LA COPIA LOCAL ──────────────
+//
+// Es el único sitio donde el análisis llega a persistirse: se genera DESPUÉS
+// del guardado remoto y `partidosService` no sabe actualizar un partido ya
+// creado. Si se pierde aquí, se pierde del todo.
+
+describe("copia local — persistencia del análisis de TACTICAL PRO", () => {
+  const conAnalisis = (texto: string): MatchData => ({
+    ...buildMatchData(),
+    tacticalAnalysis: texto,
+  });
+
+  it("1 · un análisis terminado permanece en la copia local", () => {
+    const id = saveFinalLocalCopy(buildMatchData());
+    updateFinalLocalCopyMatchData(id, conAnalisis("ANÁLISIS COMPLETO"));
+    expect(getFinalLocalCopy(id)!.matchData.tacticalAnalysis).toBe("ANÁLISIS COMPLETO");
+  });
+
+  it("sobrevive a releer el almacenamiento, no solo a la variable", () => {
+    const id = saveFinalLocalCopy(buildMatchData());
+    updateFinalLocalCopyMatchData(id, conAnalisis("TEXTO"));
+    // listFinalLocalCopies vuelve a parsear desde localStorage.
+    const releido = listFinalLocalCopies().find((c) => c.id === id)!;
+    expect(releido.matchData.tacticalAnalysis).toBe("TEXTO");
+  });
+
+  it("9 · regenerar sustituye el análisis anterior del MISMO partido", () => {
+    const id = saveFinalLocalCopy(buildMatchData());
+    updateFinalLocalCopyMatchData(id, conAnalisis("PRIMERA VERSIÓN"));
+    updateFinalLocalCopyMatchData(id, conAnalisis("SEGUNDA VERSIÓN"));
+    const copia = getFinalLocalCopy(id)!;
+    expect(copia.matchData.tacticalAnalysis).toBe("SEGUNDA VERSIÓN");
+    expect(JSON.stringify(copia.matchData)).not.toContain("PRIMERA VERSIÓN");
+  });
+
+  it("10 · el análisis del partido A nunca llega al partido B", () => {
+    const a = saveFinalLocalCopy({ ...buildMatchData(), teamName: "A" });
+    const b = saveFinalLocalCopy({ ...buildMatchData(), teamName: "B" });
+    updateFinalLocalCopyMatchData(a, { ...buildMatchData(), teamName: "A", tacticalAnalysis: "ANÁLISIS DE A" });
+    expect(getFinalLocalCopy(a)!.matchData.tacticalAnalysis).toBe("ANÁLISIS DE A");
+    expect(getFinalLocalCopy(b)!.matchData.tacticalAnalysis).toBeUndefined();
+  });
+
+  it("actualizar el análisis no altera el estado de sincronización", () => {
+    const id = saveFinalLocalCopy(buildMatchData());
+    markFinalLocalCopySynced(id, "remoto-1");
+    updateFinalLocalCopyMatchData(id, conAnalisis("TEXTO"));
+    const copia = getFinalLocalCopy(id)!;
+    expect(copia.syncStatus).toBe("synced");
+    expect(copia.remoteId).toBe("remoto-1");
+  });
+
+  it("escribir en una copia inexistente no crea nada", () => {
+    updateFinalLocalCopyMatchData("futsal_final_copy_v1_inventada", conAnalisis("X"));
+    expect(getFinalLocalCopy("futsal_final_copy_v1_inventada")).toBeNull();
+  });
+
+  it("17 · una copia sin análisis se lee perfectamente", () => {
+    const id = saveFinalLocalCopy(buildMatchData());
+    const copia = getFinalLocalCopy(id)!;
+    expect(copia.matchData.tacticalAnalysis).toBeUndefined();
+    expect(copia.matchData.teamName).toBeTruthy();
   });
 });

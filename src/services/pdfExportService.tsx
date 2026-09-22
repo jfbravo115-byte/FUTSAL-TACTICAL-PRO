@@ -30,7 +30,7 @@ import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
 import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
-import { ActionType, MatchData, Role, GameEvent } from "../types/futsal";
+import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
@@ -42,13 +42,14 @@ import {
   tallyActionZones,
   ZONE_OTHER_NOTE,
   ZONE_PREDICATES,
+  ZoneBucket,
   ZoneDashboard,
   zoneBreakdown,
   ZoneStats,
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
-import { ACTION_NOUN, describeAllBands } from "../utils/fieldZones";
+import { ZONE_BANDS, ZoneBand, bandTotal, formatBandLabel } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
 import { countShotsFromSetPiece, describeSetPieceOutcomes } from "../utils/setPieceModel";
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
@@ -274,6 +275,170 @@ function MostActiveZone({ zone }: { zone: ZoneStats }) {
   );
 }
 
+// ── LA MATRIZ DE 12 ZONAS ────────────────────────────────────
+//
+// LO QUE SUSTITUYE
+// ----------------
+// La página imprimía hasta 16 líneas del tipo «Zona 2: 9 pérdidas — 9
+// centro», una por banda y métrica. Se comprobó celda a celda que esas
+// cifras son EXACTAMENTE `bucket.zones[].losses|recoveries|shots|fouls`
+// —las mismas 60 celdas, calculadas dos veces— y que la prosa además
+// pierde los carriles a cero. La tabla las contiene todas.
+//
+// ALTURA CONSTANTE
+// ----------------
+// La prosa crecía con el partido: 135 px en un partido normal y 284 px con
+// las doce zonas activas, sobre una página que solo tiene ~34 px libres. La
+// tabla son siempre 12 filas, ocupe lo que ocupe el partido.
+//
+// DE DÓNDE SALEN LOS NÚMEROS
+// --------------------------
+// De `bucket.zones[]` y de nada más. Aquí no se filtran eventos ni se llama
+// a `tallyActionZones`: si la tabla tuviera su propio recuento, acabaría
+// diciendo una cifra distinta de la que pinta el mapa de al lado.
+
+/** Fila ya formateada. Presentación pura: recibe ZoneStats, no eventos. */
+export type ZoneMatrixRow = {
+  zone: string;
+  label: string;
+  losses: number;
+  recoveries: number;
+  /** Tiros, con los goles anunciados DENTRO cuando los hay. */
+  shots: string;
+  fouls: number;
+  total: number;
+  /** ¿Es la zona de mayor volumen? Solo puede serlo una. */
+  isMostActive: boolean;
+};
+
+/**
+ * Las doce filas, en el orden de `ZONE_12_IDS`.
+ *
+ * `bucket.zones` ya viene en ese orden porque `buildBucket` mapea sobre los
+ * ids; se conserva tal cual en vez de reordenar, para que la tabla y el mapa
+ * recorran la pista igual.
+ */
+export function zoneMatrixRows(bucket: ZoneBucket): ZoneMatrixRow[] {
+  return bucket.zones.map((z) => ({
+    zone: z.zone,
+    label: z.label,
+    losses: z.losses,
+    recoveries: z.recoveries,
+    // Nunca una columna «Goles»: `goals` está dentro de `shots` y dos cifras
+    // separadas invitan a sumarlas.
+    shots: z.goals > 0 ? `${z.shots} (${z.goals}G)` : String(z.shots),
+    fouls: z.fouls,
+    total: z.total,
+    isMostActive: !!bucket.mostActive && bucket.mostActive.zone === z.zone,
+  }));
+}
+
+/** ¿Alguna zona tiene acciones ubicadas sin categoría propia? */
+export function anyZoneHasOther(bucket: ZoneBucket): boolean {
+  return bucket.zones.some((z) => zoneBreakdown(z).other > 0);
+}
+
+const matrizCabecera: React.CSSProperties = {
+  padding: "1px 3px",
+  color: "#6b7280",
+  fontWeight: 700,
+  fontSize: 8,
+};
+
+function ZoneMatrix({ bucket, teamName }: { bucket: ZoneBucket; teamName: string }) {
+  const filas = zoneMatrixRows(bucket);
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, marginBottom: 2 }}>
+        Acciones por zona · {teamName}
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8 }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #d1d5db" }}>
+            <th style={{ ...matrizCabecera, textAlign: "left" }}>Zona</th>
+            {["Pérd.", "Recup.", "Tiros", "Faltas", "Total"].map((c) => (
+              <th key={c} style={{ ...matrizCabecera, textAlign: "center" }}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => {
+            // Azul neutro del propio informe. Es un LOCALIZADOR de la zona de
+            // mayor volumen: no dice que sea mejor, ni peor, ni más peligrosa.
+            const fondo = f.isMostActive ? "#eff6ff" : undefined;
+            // Sin relleno vertical y con interlineado explícito: doce filas
+            // tienen que caber en una página que ya va justa, y un padding
+            // implícito distinto entre motores movería el total.
+            const celda: React.CSSProperties = {
+              padding: "0 3px",
+              lineHeight: 1.35,
+              textAlign: "center",
+              fontWeight: f.isMostActive ? 700 : 400,
+            };
+            const apagado = (v: number | string) => (v === 0 || v === "0" ? "#cbd5e1" : "#111827");
+            return (
+              <tr
+                key={f.zone}
+                data-most-active={f.isMostActive ? "true" : undefined}
+                style={{ borderBottom: "0.5px solid #f1f5f9", background: fondo }}
+              >
+                <td style={{ ...celda, textAlign: "left", color: "#111827" }}>{f.label}</td>
+                <td style={{ ...celda, color: apagado(f.losses) }}>{f.losses}</td>
+                <td style={{ ...celda, color: apagado(f.recoveries) }}>{f.recoveries}</td>
+                <td style={{ ...celda, color: apagado(f.shots) }}>{f.shots}</td>
+                <td style={{ ...celda, color: apagado(f.fouls) }}>{f.fouls}</td>
+                <td style={{ ...celda, fontWeight: 700, color: apagado(f.total) }}>{f.total}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {/* El Total NO se redefine para cuadrar con las cuatro columnas: sigue
+          siendo `ZoneStats.total`, el mismo número de la celda del mapa. Cuando
+          hay acciones ubicadas sin categoría propia se dice, en vez de
+          inventar una columna que casi siempre valdría cero. */}
+      {anyZoneHasOther(bucket) && (
+        <div style={{ fontSize: 8, color: "#6b7280", marginTop: 3 }}>
+          Total puede incluir otras acciones localizadas ({ZONE_OTHER_NOTE}).
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Faltas RECIBIDAS, en una sola línea.
+ *
+ * Son eventos del RIVAL —`scopedEvents(md, true)`— espejados a nuestra
+ * perspectiva. NO pertenecen al mapa propio ni a la matriz, cuyas faltas son
+ * las que COMETEMOS: mezclarlas afirmaría que son acciones nuestras. Misma
+ * lógica que ya usaba la versión en prosa, sin recalcular de otra forma.
+ */
+function FoulsAgainstLine({ matchData }: { matchData: MatchData }) {
+  const espejo = mirrorTally(tallyActionZones(matchData, ZONE_PREDICATES.fouls, true));
+  const porBanda = ZONE_BANDS.map((band: ZoneBand) => ({
+    band,
+    total: bandTotal(espejo, band),
+  }));
+  const total = porBanda.reduce((acc, b) => acc + b.total, 0);
+  if (total === 0) return null;
+
+  return (
+    // Una sola línea: el rótulo, la aclaración y las cuatro bandas. Dos
+    // líneas costaban 11 px de una página que en un partido denso no los
+    // tiene.
+    <div style={{ fontSize: 8, color: "#374151", marginTop: 5, lineHeight: 1.45 }}>
+      <span style={{ fontWeight: 700 }}>Faltas recibidas</span>{" "}
+      <span style={{ color: "#6b7280" }}>
+        (las comete el rival, vistas desde nuestra perspectiva):
+      </span>{" "}
+      {porBanda.map((b) => `${formatBandLabel(b.band)} · ${b.total}`).join("   ")}
+      {"   —   total "}
+      {total}
+    </div>
+  );
+}
+
 function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
@@ -283,30 +448,11 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
   const hasOrigin = (bucket?.total ?? 0) > 0 || zones.corners.total > 0;
   const hasGoal = zones.goal.some((z) => z.attempts > 0) || zones.out > 0;
 
-  // Lectura textual: solo sobre el sistema nuevo. En un partido histórico la
-  // perspectiva del atacante no se registró, así que redactar "Zona 2 · centro"
-  // sería una precisión que el dato no permite.
-  const textual = !isLegacy
-    ? ([
-        ["losses", ActionType.LOSS],
-        ["recoveries", ActionType.STEAL],
-        ["shots", ActionType.SHOT],
-        ["fouls", ActionType.FOUL],
-      ] as const)
-        .flatMap(([key, action]) =>
-          describeAllBands(tallyActionZones(matchData, ZONE_PREDICATES[key]), ACTION_NOUN[action]!),
-        )
-    : [];
-
-  // Faltas RECIBIDAS: son las que comete el rival, espejadas a mi
-  // perspectiva. Transformación de presentación — no se guarda una segunda
-  // zona ni se toca el evento original.
-  const foulsAgainst = !isLegacy
-    ? describeAllBands(
-        mirrorTally(tallyActionZones(matchData, ZONE_PREDICATES.fouls, true)),
-        ACTION_NOUN[ActionType.FOUL]!,
-      )
-    : [];
+  // La matriz y las faltas recibidas solo se imprimen sobre el sistema nuevo.
+  // En un partido histórico la perspectiva del atacante no se registró, así
+  // que una fila «Zona 2 · centro» sería una precisión que el dato no permite:
+  // su rejilla es de 9 celdas y conserva su propio aviso.
+  const showMatrix = !isLegacy && !!bucket;
 
   return (
     <div>
@@ -368,22 +514,18 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         </div>
       </div>
 
-      {textual.length > 0 && (
-        <div style={{ fontSize: 9, color: "#374151", marginTop: 6, lineHeight: 1.5 }}>
-          {textual.map((line) => (
-            <div key={line}>{line}</div>
-          ))}
-        </div>
-      )}
+      {/* La zona más activa va AQUÍ, pegada a los mapas: es la lectura de un
+          segundo. La matriz queda debajo como respaldo, no como lo primero
+          que hay que interpretar. */}
+      {bucket?.mostActive && <MostActiveZone zone={bucket.mostActive} />}
 
-      {foulsAgainst.length > 0 && (
-        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
-          <div style={{ fontWeight: 700 }}>Faltas recibidas</div>
-          {foulsAgainst.map((line) => (
-            <div key={`against-${line}`}>{line}</div>
-          ))}
-        </div>
-      )}
+      {showMatrix && <ZoneMatrix bucket={bucket!} teamName={matchData.teamName} />}
+
+      {/* NO depende de `bucket`: son eventos del RIVAL. Un partido en el que
+          solo el rival tiene acciones ubicadas deja `bucket` a null y seguiría
+          teniendo faltas recibidas que contar — misma condición que tenía la
+          versión en prosa. */}
+      {!isLegacy && <FoulsAgainstLine matchData={matchData} />}
 
       {describeCorners(zones.corners) && (
         <div style={{ fontSize: 10, color: "#374151", marginTop: 4, fontWeight: 700 }}>
@@ -416,8 +558,6 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
           </div>
         </div>
       )}
-
-      {bucket?.mostActive && <MostActiveZone zone={bucket.mostActive} />}
 
       {zones.ruleDetermined > 0 && (
         <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>

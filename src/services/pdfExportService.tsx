@@ -36,11 +36,15 @@ import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
 import {
   buildZoneDashboard,
+  describeZoneBreakdown,
   mirrorTally,
   primaryBucket,
   tallyActionZones,
+  ZONE_OTHER_NOTE,
   ZONE_PREDICATES,
   ZoneDashboard,
+  zoneBreakdown,
+  ZoneStats,
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
@@ -220,6 +224,56 @@ function FoulsByPeriod({ report }: { report: MatchReport }) {
   );
 }
 
+// ── QUÉ SIGNIFICA EL MAPA ───────────────────────────────────
+//
+// El PDF imprimía una celda con «22» en azul oscuro y nada más. Quien lo
+// recibe no puede saber si son tiros, acciones, propias o del rival, ni qué
+// mide el color. Tres hechos que el código ya determina y que aquí se
+// escriben, sin cambiar ni un número:
+//
+//   1. el número cuenta acciones del equipo CON sector registrado;
+//   2. el azul se normaliza al máximo DE ESTE partido (FutsalPitch:
+//      `alpha = 0.18 + (count/max) * 0.55`), así que dos informes distintos
+//      no se comparan por color;
+//   3. el volumen no es rendimiento: la celda más oscura puede ser donde más
+//      se pierde el balón.
+
+function ZoneMapLegend() {
+  return (
+    <div style={{ fontSize: 8, color: "#6b7280", marginTop: 4, lineHeight: 1.35, maxWidth: 240 }}>
+      <div>Número = acciones del equipo registradas con origen en esa zona.</div>
+      <div>
+        Mayor intensidad = mayor volumen relativo dentro de este partido. No indica eficacia.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * La zona más activa con su composición.
+ *
+ * `zone.total` es EL MISMO objeto que alimenta la celda del mapa —no hay un
+ * segundo recuento—, y el desglose sale de `describeZoneBreakdown`, que es
+ * también quien decide que los goles se anuncian DENTRO de los tiros y que
+ * el resto ubicado se declara como «Otras» en vez de desaparecer.
+ */
+function MostActiveZone({ zone }: { zone: ZoneStats }) {
+  const filas = describeZoneBreakdown(zone);
+  const other = zoneBreakdown(zone).other;
+  return (
+    <div style={{ fontSize: 9, color: "#374151", marginTop: 6, lineHeight: 1.4 }}>
+      <div style={{ fontWeight: 700 }}>Zona más activa</div>
+      <div style={{ fontWeight: 900, fontSize: 10 }}>
+        {zone.label} — {zone.total} acciones
+      </div>
+      <div>{filas.map((f) => `${f.label} ${f.value}`).join(" · ")}</div>
+      {other > 0 && (
+        <div style={{ fontSize: 8, color: "#6b7280" }}>Otras: {ZONE_OTHER_NOTE}.</div>
+      )}
+    </div>
+  );
+}
+
 function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
@@ -259,17 +313,26 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
       <div style={sectionTitleStyle}>Mapas / Zonas</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Origen en pista</div>
+          {/* El título dice de QUIÉN es el mapa. El dashboard se construye con
+              `opponent = false`, así que son siempre las acciones del equipo
+              analizado — incluidas las faltas que COMETE, no las que recibe.
+              Sin el nombre al lado, «Origen en pista» no permitía saberlo. */}
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
+            Volumen de acciones por zona · {matchData.teamName}
+          </div>
           {hasOrigin ? (
-            <FutsalPitch
-              mode={isLegacy ? "legacy3x3" : "zone12"}
-              theme="light"
-              counts={Object.fromEntries((bucket?.zones ?? []).map((z) => [z.zone, z.total]))}
-              corners={{ left: zones.corners.left, right: zones.corners.right }}
-              accent="#2563eb"
-              compact
-              maxWidth={240}
-            />
+            <>
+              <FutsalPitch
+                mode={isLegacy ? "legacy3x3" : "zone12"}
+                theme="light"
+                counts={Object.fromEntries((bucket?.zones ?? []).map((z) => [z.zone, z.total]))}
+                corners={{ left: zones.corners.left, right: zones.corners.right }}
+                accent="#2563eb"
+                compact
+                maxWidth={240}
+              />
+              <ZoneMapLegend />
+            </>
           ) : (
             <div style={{ fontSize: 11, color: "#9ca3af" }}>Sin datos registrados.</div>
           )}
@@ -354,11 +417,7 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
         </div>
       )}
 
-      {bucket?.mostActive && (
-        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
-          Zona más activa: {bucket.mostActive.label} ({bucket.mostActive.total})
-        </div>
-      )}
+      {bucket?.mostActive && <MostActiveZone zone={bucket.mostActive} />}
 
       {zones.ruleDetermined > 0 && (
         <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>

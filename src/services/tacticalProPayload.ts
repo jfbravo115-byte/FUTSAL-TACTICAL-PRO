@@ -73,6 +73,31 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "pista ni destinos de tiro, y nunca se suman con ellos.",
   "Destino de tiro (portería): dónde termina el balón en el marco. Dominio propio, distinto " +
     "del sector de origen.",
+  // VOLUMEN POR ZONA. El PDF pintaba un «22» en una celda y nada explicaba
+  // qué agregaba. El modelo recibe además el desglose, pero nada le decía que
+  // `total` no es la suma de las categorías ni que los goles ya van dentro de
+  // los tiros. Se declara aquí, con el mismo detalle que el resto.
+  "Volumen por zona: 'tacticalContext.zones.<team|opponent>.zone12.zones[].total' (y su " +
+    "equivalente en 'legacy') es el número TOTAL de eventos de ESE equipo cuyo sector de " +
+    "origen el sistema reconoce en esa zona. Es un recuento de eventos ubicados, no una " +
+    "suma de categorías.",
+  "Volumen por zona, el resto: 'total' NO es necesariamente igual a " +
+    "shots + losses + recoveries + fouls + corners. Puede incluir otros eventos ubicados que " +
+    "no tienen categoría propia: jugadas de falta (SET_PIECE), paradas (SAVE, SAVE_CATCH, " +
+    "SAVE_DEFLECT, SAVE_PARRY) y salidas (EXIT) con sector registrado. Si te salen las " +
+    "cuentas cortas, es ese resto: no es un error ni una contradicción y no lo presentes " +
+    "como tal.",
+  "Volumen por zona, tiros y goles: 'goals' está INCLUIDO dentro de 'shots'. NO sumes " +
+    "shots + goals: contarías los goles dos veces. Dilo como «N tiros, de los que G fueron " +
+    "gol».",
+  "Volumen por zona, de quién: 'zones.team' y 'zones.opponent' son dashboards SEPARADOS y " +
+    "cada uno contiene solo las acciones de su propio equipo, con sus sectores normalizados " +
+    "a SU perspectiva. Las faltas de 'zones.team' son las que ese equipo COMETE, no las que " +
+    "recibe. No los sumes ni los compares celda a celda como si fueran el mismo campo.",
+  "Volumen por zona, el color: el PDF pinta cada celda con una intensidad relativa al " +
+    "máximo de ESE partido. Es solo presentación: no viaja en estos datos, no forma parte de " +
+    "ninguna métrica y no significa eficacia, rendimiento ni peligro. Un volumen alto puede " +
+    "ser la zona donde más balones se pierden.",
   "Tiro directo de córner: un evento CORNER con setPieceOutcome 'shot'. Significa que ese " +
     "córner se ejecutó directamente hacia portería. NO crea ningún tiro ni suma a los tiros.",
   "Tiro procedente de córner: un evento SHOT con setPiece 'corner'. Es un tiro que el " +

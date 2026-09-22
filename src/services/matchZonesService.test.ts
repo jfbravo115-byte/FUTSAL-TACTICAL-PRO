@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ZONE_OTHER_NOTE,
   ZONE_PREDICATES,
   buildZoneDashboard,
+  describeZoneBreakdown,
   mirrorTally,
   primaryBucket,
   tallyActionZones,
+  zoneBreakdown,
   zoneMetricValue,
 } from "./matchZonesService";
 import { ActionType, GameState, GoalieAction, MatchData, Period } from "../types/futsal";
@@ -413,5 +416,166 @@ describe("jugadas de falta en el cubo de zonas", () => {
     const zones = buildZoneDashboard({ ...base, events: [jugada()] }, false);
     expect(zones.unlocated).toBe(1);
     expect(zones.setPieces.freeKickPlays.unlocated).toBe(1);
+  });
+});
+
+// ── DESGLOSE DE LA CELDA ────────────────────────────────────────────────
+//
+// El PDF imprimía «22» sin decir de qué. Estos tests fijan las dos reglas
+// que hacían imposible descomponerlo bien:
+//
+//   1. `total` es un recuento de eventos ubicados, NO la suma de las seis
+//      categorías: jugadas de falta, paradas y salidas también cuentan;
+//   2. `goals` vive DENTRO de `shots`, así que sumarlos aparte cuenta los
+//      goles dos veces.
+//
+// El desglose debe cerrar SIEMPRE contra el número que ve el usuario.
+
+describe("desglose de la celda del mapa", () => {
+  const rep = (n: number, f: (i: number) => any) => Array.from({ length: n }, (_, i) => f(i));
+  const celda = (eventos: any[], zona = "Z2C") =>
+    primaryBucket(buildZoneDashboard({ ...base, events: eventos }, false))!.zones.find(
+      (z) => z.zone === zona,
+    )!;
+
+  /** El caso real auditado: 9 pérdidas + 6 recuperaciones + 5 tiros + 2 faltas. */
+  const z2cReal = () => [
+    ...rep(9, (i) => ev(`p${i}`, ActionType.LOSS, "Z2C")),
+    ...rep(6, (i) => ev(`r${i}`, ActionType.STEAL, "Z2C")),
+    ...rep(5, (i) => ev(`t${i}`, ActionType.SHOT, "Z2C")),
+    ...rep(2, (i) => ev(`f${i}`, ActionType.FOUL, "Z2C")),
+  ];
+
+  it("1 · el total de la celda = categorías principales + residuo", () => {
+    const z = celda([
+      ...z2cReal(),
+      ev("sp", ActionType.SET_PIECE, "Z2C", false, undefined, {
+        setPieceOrigin: "free_kick", setPieceOutcome: "play",
+      }),
+      ev("sv", GoalieAction.SAVE, "Z2C"),
+    ]);
+    const d = zoneBreakdown(z);
+    expect(d.shots + d.losses + d.recoveries + d.fouls + d.corners + d.other).toBe(z.total);
+    expect(d.total).toBe(z.total);
+  });
+
+  it("2 · los goles NO se suman aparte: ya están dentro de los tiros", () => {
+    const z = celda([
+      ...rep(3, (i) => ev(`t${i}`, ActionType.SHOT, "Z2C")),
+      ...rep(2, (i) => ev(`g${i}`, ActionType.GOAL, "Z2C")),
+    ]);
+    const d = zoneBreakdown(z);
+    expect(d.shots).toBe(5);
+    expect(d.goals).toBe(2);
+    expect(d.total).toBe(5);
+    // La resta que define «Otras» NO descuenta los goles.
+    expect(d.other).toBe(0);
+    expect(d.shots + d.goals).not.toBe(d.total);
+  });
+
+  it("3 · fixture real: 9 + 6 + 5 + 2 = 22 y «Otras» 0", () => {
+    const z = celda(z2cReal());
+    expect(z.label).toBe("Zona 2 · centro");
+    expect(z.total).toBe(22);
+    const d = zoneBreakdown(z);
+    expect(d).toMatchObject({
+      losses: 9, recoveries: 6, shots: 5, goals: 0, fouls: 2, corners: 0, other: 0,
+    });
+    expect(describeZoneBreakdown(z).some((f) => f.label === "Otras")).toBe(false);
+  });
+
+  it("4 · jugada de falta + parada + salida suben el total y caen en «Otras»", () => {
+    const z = celda([
+      ...z2cReal(),
+      ev("sp", ActionType.SET_PIECE, "Z2C", false, undefined, {
+        setPieceOrigin: "free_kick", setPieceOutcome: "play",
+      }),
+      ev("sv", GoalieAction.SAVE, "Z2C"),
+      ev("ex", GoalieAction.EXIT, "Z2C"),
+    ]);
+    expect(z.total).toBe(25);
+    const d = zoneBreakdown(z);
+    expect(d.other).toBe(3);
+    expect(d.shots).toBe(5); // ninguna de las tres se coló en tiros
+    expect(describeZoneBreakdown(z)).toContainEqual({ label: "Otras", value: "3" });
+    expect(ZONE_OTHER_NOTE).toMatch(/jugadas de falta|paradas|salidas/);
+  });
+
+  it("2b · el residuo se calcula SIN volver a descontar los goles", () => {
+    // El caso que hace falta para distinguir las dos fórmulas: goles Y resto
+    // a la vez. Si `other` restara también los goles, aquí saldría 0 y el
+    // desglose dejaría de cerrar contra el número de la celda.
+    const z = celda([
+      ...rep(3, (i) => ev(`t${i}`, ActionType.SHOT, "Z2C")),
+      ...rep(2, (i) => ev(`g${i}`, ActionType.GOAL, "Z2C")),
+      ev("sp", ActionType.SET_PIECE, "Z2C", false, undefined, {
+        setPieceOrigin: "free_kick", setPieceOutcome: "play",
+      }),
+    ]);
+    expect(z.total).toBe(6);
+    expect(z.shots).toBe(5);
+    expect(z.goals).toBe(2);
+    const d = zoneBreakdown(z);
+    expect(d.other).toBe(1);
+    expect(d.shots + d.losses + d.recoveries + d.fouls + d.corners + d.other).toBe(z.total);
+    expect(describeZoneBreakdown(z)).toContainEqual({ label: "Otras", value: "1" });
+  });
+
+  it("5 · un GOAL incrementa el total UNA vez y pertenece a tiros y a goles", () => {
+    const z = celda([ev("g1", ActionType.GOAL, "Z2C")]);
+    expect(z.total).toBe(1);
+    expect(z.shots).toBe(1);
+    expect(z.goals).toBe(1);
+    expect(zoneBreakdown(z).other).toBe(0);
+    expect(describeZoneBreakdown(z)).toContainEqual({ label: "Tiros", value: "1 (incluye 1 gol)" });
+  });
+
+  it("5b · con varios goles la redacción es plural y nunca dos cifras sumables", () => {
+    const z = celda(rep(2, (i) => ev(`g${i}`, ActionType.GOAL, "Z2C")));
+    const tiros = describeZoneBreakdown(z).find((f) => f.label === "Tiros")!;
+    expect(tiros.value).toBe("2 (incluye 2 goles)");
+    expect(describeZoneBreakdown(z).some((f) => f.label === "Goles")).toBe(false);
+  });
+
+  it("6 · córner + tiro desde ese córner: celda 2, córners 1, tiros 1", () => {
+    const z = celda([
+      ev("c1", ActionType.CORNER, "Z2C", false, undefined, { cornerSide: "left" }),
+      ev("s1", ActionType.SHOT, "Z2C", false, "G2", { setPiece: "corner" }),
+    ]);
+    expect(z.total).toBe(2);
+    expect(z.corners).toBe(1);
+    expect(z.shots).toBe(1);
+    expect(zoneBreakdown(z).other).toBe(0);
+  });
+
+  it("7 · «zona más activa» es EXACTAMENTE la misma cifra que pinta la celda", () => {
+    const bucket = primaryBucket(
+      buildZoneDashboard({ ...base, events: [...z2cReal(), ev("x", ActionType.SHOT, "Z4L")] }, false),
+    )!;
+    const counts = Object.fromEntries(bucket.zones.map((z) => [z.zone, z.total]));
+    expect(bucket.mostActive!.zone).toBe("Z2C");
+    expect(bucket.mostActive!.total).toBe(counts[bucket.mostActive!.zone]);
+    expect(bucket.mostActive!.total).toBe(22);
+  });
+
+  it("8 · un evento sin sector no entra en ninguna celda", () => {
+    const z = celda([...z2cReal(), ev("sinZona", ActionType.LOSS, undefined)]);
+    expect(z.total).toBe(22);
+    expect(zoneBreakdown(z).losses).toBe(9);
+    expect(buildZoneDashboard({ ...base, events: [...z2cReal(), ev("sinZona", ActionType.LOSS, undefined)] }, false).unlocated).toBe(1);
+  });
+
+  it("9 · un evento del rival no entra en el mapa propio", () => {
+    const eventos = [...z2cReal(), ev("riv", ActionType.LOSS, "Z2C", true)];
+    expect(celda(eventos).total).toBe(22);
+    const rival = primaryBucket(buildZoneDashboard({ ...base, events: eventos }, true))!;
+    expect(rival.zones.find((z) => z.zone === "Z2C")!.total).toBe(1);
+  });
+
+  it("una celda vacía se describe sin inventar nada", () => {
+    const z = celda([ev("x", ActionType.SHOT, "Z4L")]);
+    expect(z.total).toBe(0);
+    expect(zoneBreakdown(z).other).toBe(0);
+    expect(describeZoneBreakdown(z).map((f) => f.value)).toEqual(["0", "0", "0", "0", "0"]);
   });
 });

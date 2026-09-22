@@ -358,6 +358,19 @@ export default function MatchAnalysis() {
                 emptyLabel="Sin acciones ubicadas"
               />
 
+              {/* Misma semántica que el PDF. La intensidad se normaliza al
+                  máximo DE ESTE partido (FutsalPitch), así que no compara
+                  partidos entre sí y no mide eficacia. Y «T» ya incluye «G»:
+                  sin decirlo, la línea de abajo invita a sumarlos. */}
+              <div className="mt-2 text-[8px] text-slate-500 leading-relaxed max-w-md">
+                <div>Número = acciones del equipo registradas con origen en esa zona.</div>
+                <div>
+                  Mayor intensidad = mayor volumen relativo dentro de este partido. No indica
+                  eficacia.
+                </div>
+                <div>T = tiros (incluyen los goles) · G = goles · R = recuperaciones · P = pérdidas · F = faltas cometidas · C = córners.</div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2 max-w-md mt-3">
                 {bucketZones
                   .filter((z) => zoneMetricValue(z, zoneMetric) > 0)

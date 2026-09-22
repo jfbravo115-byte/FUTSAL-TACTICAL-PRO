@@ -79,8 +79,14 @@ const THEME: Record<PitchTheme, Tokens> = {
   },
 };
 
-/** Intensidad de relleno proporcional al recuento, sobre el color de acento. */
-function heatStyle(count: number, max: number, accent: string): React.CSSProperties {
+/**
+ * Intensidad de relleno proporcional al recuento, sobre el color de acento.
+ *
+ * Se EXPORTA solo para poder fijarla con tests. La fórmula no cambia: es
+ * relativa al máximo de las celdas que se estén pintando, de modo que dos
+ * informes distintos no son comparables por color y el tono no mide eficacia.
+ */
+export function heatStyle(count: number, max: number, accent: string): React.CSSProperties {
   if (count <= 0) return {};
   const intensity = max > 0 ? Math.min(1, count / max) : 0;
   return { backgroundColor: withAlpha(accent, 0.18 + intensity * 0.55) };

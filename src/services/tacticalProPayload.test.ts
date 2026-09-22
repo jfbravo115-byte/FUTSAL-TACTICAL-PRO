@@ -827,3 +827,89 @@ describe("las situaciones especiales y la secuencia de goles llegan al payload",
     ]);
   });
 });
+
+// ── OBJETIVO 8 · EL VOLUMEN POR ZONA, DECLARADO ─────────────────────────
+//
+// El modelo recibe `zones[].total` junto a las seis categorías, pero nada le
+// decía que el total NO es su suma ni que los goles ya van dentro de los
+// tiros. Con esos dos huecos podía describir un descuadre inexistente o
+// contar los goles dos veces. El glosario es el único sitio donde esto
+// viaja: si vuelve a callarlo, estos tests fallan.
+
+describe("objetivo 8 · el volumen por zona, declarado", () => {
+  const texto = () => TACTICAL_PRO_GLOSSARY.join("\n");
+  const linea = (frag: string) => {
+    const encontradas = TACTICAL_PRO_GLOSSARY.filter((l) => l.includes(frag));
+    expect(encontradas.length).toBe(1);
+    return encontradas[0];
+  };
+
+  it("18 · declara qué agrega zones[].total", () => {
+    const l = linea("zones[].total");
+    expect(l).toMatch(/n\u00famero TOTAL de eventos de ESE equipo/);
+    expect(l).toMatch(/sector de origen/);
+    expect(l).toMatch(/no una suma de categor\u00edas/i);
+  });
+
+  it("19 · declara que goals está INCLUIDO en shots y prohíbe sumarlos", () => {
+    const l = linea("'goals' est\u00e1 INCLUIDO dentro de 'shots'");
+    expect(l).toMatch(/NO sumes shots \+ goals/);
+    expect(l).toMatch(/dos veces/);
+  });
+
+  it("20 · declara que puede haber un residuo, y de qué está hecho", () => {
+    const l = linea("NO es necesariamente igual a");
+    expect(l).toContain("shots + losses + recoveries + fouls + corners");
+    for (const tipo of ["SET_PIECE", "SAVE_CATCH", "SAVE_DEFLECT", "EXIT"]) {
+      expect(l).toContain(tipo);
+    }
+    expect(l).toMatch(/no es un error ni una contradicci\u00f3n/);
+  });
+
+  it("declara que team y opponent son dashboards separados", () => {
+    const l = linea("'zones.team' y 'zones.opponent'");
+    expect(l).toMatch(/SEPARADOS/);
+    expect(l).toMatch(/COMETE, no las que recibe/);
+    expect(l).toMatch(/No los sumes/);
+  });
+
+  it("declara que el color del PDF no viaja y no mide eficacia", () => {
+    const l = linea("el PDF pinta cada celda");
+    expect(l).toMatch(/relativa al m\u00e1ximo de ESE partido/);
+    expect(l).toMatch(/no forma parte de ninguna m\u00e9trica/);
+    expect(l).toMatch(/no significa eficacia, rendimiento ni peligro/);
+  });
+
+  it("el payload sigue enviando el total y las categorías, sin campos nuevos", () => {
+    const md = partido();
+    const payload = buildTacticalProPayload(md) as any;
+    const celda = payload.tacticalContext.zones.team.zone12.zones.find((z: any) => z.zone === "Z2C");
+    expect(Object.keys(celda).sort()).toEqual(
+      ["corners", "fouls", "goals", "label", "losses", "recoveries", "shots", "total", "zone"],
+    );
+    // El glosario es texto: no se ha colado ningún agregado nuevo.
+    expect(payload.tacticalContext.zoneBreakdown).toBeUndefined();
+    expect(payload.tacticalContext.zones.team.zone12.breakdown).toBeUndefined();
+  });
+
+  it("y el total sigue pudiendo superar la suma de las categorías", () => {
+    // Es exactamente el caso que el glosario explica, demostrado sobre el
+    // payload real para que la afirmación no sea solo una promesa de texto.
+    const md: MatchData = {
+      ...partido(),
+      events: [
+        ev({ type: ActionType.SHOT, originGrid: "Z2C", metadata: { isOpponent: false } }),
+        ev({
+          type: ActionType.SET_PIECE,
+          originGrid: "Z2C",
+          metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" },
+        }),
+      ],
+    };
+    const celda = (buildTacticalProPayload(md) as any).tacticalContext.zones.team.zone12.zones.find(
+      (z: any) => z.zone === "Z2C",
+    );
+    expect(celda.total).toBe(2);
+    expect(celda.shots + celda.losses + celda.recoveries + celda.fouls + celda.corners).toBe(1);
+  });
+});

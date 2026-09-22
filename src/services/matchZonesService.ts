@@ -233,6 +233,93 @@ export function buildLegacyBucket(events: GameEvent[]): ZoneBucket | null {
   return buildBucket("legacy3x3", LEGACY_ZONE_IDS, (id) => formatLegacyLabel(id) ?? id, events);
 }
 
+// ── DESGLOSE DE UNA CELDA ────────────────────────────────────
+//
+// EL NÚMERO DE LA CELDA NO ES UNA SUMA
+// ------------------------------------
+// `ZoneStats.total` es `events.length`: cuántos eventos DE ESE EQUIPO tienen
+// un sector reconocido en esa celda. No filtra por tipo. Las seis categorías
+// se calculan aparte y NO lo definen, así que:
+//
+//   1. `goals` está DENTRO de `shots` (isShotAttempt incluye GOAL), de modo
+//      que sumar tiros y goles cuenta los goles dos veces;
+//   2. hay eventos que entran en el total y en NINGUNA categoría: la jugada
+//      de falta (SET_PIECE), las paradas (SAVE, SAVE_CATCH, SAVE_DEFLECT,
+//      SAVE_PARRY) y las salidas (EXIT) cuando traen sector.
+//
+// Ese resto existe y es legítimo —son acciones del equipo, ubicadas—, así
+// que no se oculta ni se resta del total: se declara como `other`. De esa
+// forma el desglose SIEMPRE cierra contra el número que ve el usuario, que
+// es justo lo que no ocurría cuando el PDF imprimía un 22 desnudo.
+
+export type ZoneBreakdown = {
+  /** El MISMO `ZoneStats.total`. No se recalcula aquí. */
+  total: number;
+  losses: number;
+  recoveries: number;
+  /** Intentos de tiro. INCLUYE los goles. */
+  shots: number;
+  /** Subconjunto de `shots`. Nunca se suma aparte. */
+  goals: number;
+  fouls: number;
+  corners: number;
+  /** Resto ubicado sin categoría propia. Cierra el total. */
+  other: number;
+};
+
+/**
+ * Descompone la celda sin tocar su total. Función pura.
+ *
+ * `other` se obtiene por resta y NUNCA descuenta `goals`: los goles ya van
+ * dentro de `shots`, así que restarlos otra vez inflaría el resto.
+ */
+export function zoneBreakdown(zone: ZoneStats): ZoneBreakdown {
+  const categorizadas = zone.shots + zone.losses + zone.recoveries + zone.fouls + zone.corners;
+  return {
+    total: zone.total,
+    losses: zone.losses,
+    recoveries: zone.recoveries,
+    shots: zone.shots,
+    goals: zone.goals,
+    fouls: zone.fouls,
+    corners: zone.corners,
+    other: Math.max(0, zone.total - categorizadas),
+  };
+}
+
+/** Nota que acompaña al resto. Se declara qué es, no se deja como misterio. */
+export const ZONE_OTHER_NOTE =
+  "jugadas de falta, paradas o salidas con zona registrada";
+
+export type ZoneBreakdownRow = { label: string; value: string };
+
+/**
+ * El desglose ya redactado, en el orden en que se lee.
+ *
+ * Fuente ÚNICA de los rótulos: si el PDF y la pantalla escribieran cada uno
+ * los suyos, uno de los dos acabaría diciendo «Tiros 5 · Goles 2», que
+ * invita a sumar 7 acciones donde solo hubo 5.
+ *
+ * Las líneas con valor 0 se mantienen salvo `Otras`, que solo aparece cuando
+ * existe resto: una línea «Otras 0» no informa de nada y ocupa alto de
+ * página, que en el PDF es un recurso escaso.
+ */
+export function describeZoneBreakdown(zone: ZoneStats): ZoneBreakdownRow[] {
+  const d = zoneBreakdown(zone);
+  const filas: ZoneBreakdownRow[] = [
+    { label: "Pérdidas", value: String(d.losses) },
+    { label: "Recuperaciones", value: String(d.recoveries) },
+    {
+      label: "Tiros",
+      value: d.goals > 0 ? `${d.shots} (incluye ${d.goals} gol${d.goals === 1 ? "" : "es"})` : String(d.shots),
+    },
+    { label: "Faltas cometidas", value: String(d.fouls) },
+    { label: "Córners", value: String(d.corners) },
+  ];
+  if (d.other > 0) filas.push({ label: "Otras", value: String(d.other) });
+  return filas;
+}
+
 export function zoneMetricValue(zone: ZoneStats, metric: ZoneMetric): number {
   switch (metric) {
     case "shots": return zone.shots;

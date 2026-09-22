@@ -1168,3 +1168,134 @@ describe("portada · faltas del partido y tarjetas rotuladas", () => {
     expect(r.relevantEvents.some((e) => e.type === "Tarjeta roja")).toBe(true);
   });
 });
+
+// ── EL MAPA DE ZONAS, EXPLICADO ─────────────────────────────────────────
+//
+// La portada imprimía una rejilla con un «22» en azul oscuro y el rótulo
+// «Origen en pista». Quien recibe el PDF no podía saber si eran tiros o
+// acciones, si eran nuestras o del rival, ni qué medía el color. El dato
+// nunca estuvo mal: lo que faltaba era decir qué era.
+//
+// Estos tests fijan lo que la portada tiene que declarar. Ninguno toca un
+// número: comprueban texto.
+
+describe("portada · el mapa de zonas dice qué significa", () => {
+  /** Texto de la PRIMERA página del informe: la del resumen. */
+  async function portada(md: MatchData): Promise<string> {
+    await exportMatchReportPdf(md);
+    return ((toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "").replace(/\s+/g, " ");
+  }
+
+  const rep = (n: number, f: (i: number) => GameEvent) => Array.from({ length: n }, (_, i) => f(i));
+
+  /** El caso auditado: Z2C = 9 pérdidas + 6 recuperaciones + 5 tiros + 2 faltas. */
+  const z2c = () =>
+    matchData({
+      events: [
+        ...rep(9, () => event({ type: ActionType.LOSS, originGrid: "Z2C", metadata: { isOpponent: false } })),
+        ...rep(6, () => event({ type: ActionType.STEAL, originGrid: "Z2C", metadata: { isOpponent: false } })),
+        ...rep(5, () => event({ type: ActionType.SHOT, originGrid: "Z2C", metadata: { isOpponent: false } })),
+        ...rep(2, () => event({ type: ActionType.FOUL, originGrid: "Z2C", metadata: { isOpponent: false } })),
+      ],
+    });
+
+  it("10 · el mapa lleva el nombre del equipo al que pertenece", async () => {
+    const t = await portada(z2c());
+    expect(t).toContain("Volumen de acciones por zona · Mi Equipo");
+    // El rótulo ambiguo desaparece: no decía de quién era el mapa.
+    expect(t).not.toContain("Origen en pista");
+  });
+
+  it("11 · explica qué cuenta el número", async () => {
+    const t = await portada(z2c());
+    expect(t).toContain("Número = acciones del equipo registradas con origen en esa zona");
+  });
+
+  it("12 · explica que la intensidad es relativa a ESTE partido", async () => {
+    const t = await portada(z2c());
+    expect(t).toMatch(/Mayor intensidad = mayor volumen relativo dentro de este partido/);
+  });
+
+  it("13 · advierte de que el color no mide eficacia", async () => {
+    const t = await portada(z2c());
+    expect(t).toContain("No indica eficacia");
+    // Y no promete lo contrario en ningún sitio.
+    expect(t).not.toMatch(/mejor zona|peor zona|zona más eficaz|zona más peligrosa/i);
+  });
+
+  it("14 · la zona más activa viene con su composición", async () => {
+    const t = await portada(z2c());
+    expect(t).toContain("Zona más activa");
+    expect(t).toContain("Zona 2 · centro — 22 acciones");
+    expect(t).toContain("Pérdidas 9");
+    expect(t).toContain("Recuperaciones 6");
+    expect(t).toContain("Tiros 5");
+    expect(t).toContain("Faltas cometidas 2");
+    expect(t).toContain("Córners 0");
+  });
+
+  it("15 · sin residuo no aparece la línea «Otras»", async () => {
+    const t = await portada(z2c());
+    expect(t).not.toContain("Otras");
+  });
+
+  it("16 · con jugada de falta, parada y salida aparece «Otras» y su explicación", async () => {
+    const t = await portada(
+      matchData({
+        events: [
+          ...z2c().events,
+          event({ type: ActionType.SET_PIECE, originGrid: "Z2C", metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+          event({ type: GoalieAction.SAVE, originGrid: "Z2C", metadata: { isOpponent: false } }),
+          event({ type: GoalieAction.EXIT, originGrid: "Z2C", metadata: { isOpponent: false } }),
+        ],
+      }),
+    );
+    expect(t).toContain("Zona 2 · centro — 25 acciones");
+    expect(t).toContain("Otras 3");
+    expect(t).toContain("jugadas de falta, paradas o salidas con zona registrada");
+  });
+
+  it("los goles se anuncian DENTRO de los tiros, nunca como cifra sumable", async () => {
+    const t = await portada(
+      matchData({
+        events: [
+          ...rep(3, () => event({ type: ActionType.SHOT, originGrid: "Z2C", metadata: { isOpponent: false } })),
+          ...rep(2, () => event({ type: ActionType.GOAL, originGrid: "Z2C", metadata: { isOpponent: false } })),
+        ],
+      }),
+    );
+    expect(t).toContain("Zona 2 · centro — 5 acciones");
+    expect(t).toContain("Tiros 5 (incluye 2 goles)");
+    expect(t).not.toMatch(/Tiros 5 · Goles 2/);
+  });
+
+  it("las acciones del RIVAL no entran en el mapa del equipo", async () => {
+    const t = await portada(
+      matchData({
+        events: [
+          ...z2c().events,
+          ...rep(30, () => event({ type: ActionType.LOSS, originGrid: "Z2C", metadata: { isOpponent: true } })),
+        ],
+      }),
+    );
+    expect(t).toContain("Zona 2 · centro — 22 acciones");
+    expect(t).not.toContain("52 acciones");
+  });
+
+  it("21 · un partido histórico conserva su aviso de perspectiva", async () => {
+    const t = await portada(
+      matchData({
+        events: rep(4, () => event({ type: ActionType.SHOT, originGrid: "B2", metadata: { isOpponent: false } })),
+      }),
+    );
+    expect(t).toContain("perspectiva de ataque no registrada");
+    // El rótulo del equipo se mantiene también en legacy.
+    expect(t).toContain("Volumen de acciones por zona · Mi Equipo");
+  });
+
+  it("un partido sin acciones ubicadas no inventa mapa ni desglose", async () => {
+    const t = await portada(matchData({ events: [] }));
+    expect(t).toContain("Sin datos registrados");
+    expect(t).not.toContain("Zona más activa");
+  });
+});

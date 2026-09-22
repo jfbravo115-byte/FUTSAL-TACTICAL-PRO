@@ -174,8 +174,11 @@ describe("exportMatchReportPdf", () => {
     await exportMatchReportPdf(md);
     expect(pdfSaveMock).toHaveBeenCalledTimes(1);
     expect(pdfSaveMock.mock.calls[0][0]).toMatch(/^informe_Mi_Equipo_\d+\.pdf$/);
-    // resumen/zonas + jugadores + situaciones especiales + eventos.
-    expect(toJpegMock).toHaveBeenCalledTimes(5);
+    // resumen/zonas + evolución por periodos + jugadores + situaciones
+    // especiales + eventos. La de periodos aparece porque el gol lleva sector.
+    expect(toJpegMock).toHaveBeenCalledTimes(6);
+    const titulos = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "");
+    expect(titulos.some((t) => t.includes("Evolución por periodos"))).toBe(true);
   });
 
   // 3. sin Tactical Pro
@@ -1565,5 +1568,87 @@ describe("portada · matriz de acciones por zona", () => {
     expect(Array.from(page.querySelectorAll("tr")).some((tr) =>
       ZONE_12_IDS.some((id) => (tr.querySelector("td")?.textContent || "").trim() === formatZoneLabel(id)),
     )).toBe(false);
+  });
+});
+
+// ── PÁGINA «EVOLUCIÓN POR PERIODOS» ─────────────────────────────────────
+//
+// Página propia, después de la portada. Lo que aquí se protege es sobre todo
+// lo que NO debe pasar: que la portada de PR #22 cambie, y que la página
+// aparezca en un partido cuya perspectiva no se registró.
+
+describe("PDF · evolución por periodos", () => {
+  const rep = (n: number, f: () => GameEvent) => Array.from({ length: n }, f);
+  const E = (o: Partial<GameEvent>) => event({ metadata: { isOpponent: false }, ...o });
+  async function paginas(md: MatchData): Promise<{ key: string; text: string }[]> {
+    await exportMatchReportPdf(md);
+    return toJpegMock.mock.calls.map((c, i) => ({
+      key: String(i),
+      text: ((c[0] as HTMLElement).textContent || "").replace(/\s+/g, " "),
+    }));
+  }
+  const conZonas = () =>
+    matchData({
+      events: [
+        ...rep(6, () => E({ type: ActionType.LOSS, originGrid: "Z2C", period: Period.FIRST })),
+        ...rep(3, () => E({ type: ActionType.LOSS, originGrid: "Z2C", period: Period.SECOND })),
+        ...rep(2, () => E({ type: ActionType.STEAL, originGrid: "Z2C", period: Period.FIRST })),
+        ...rep(4, () => E({ type: ActionType.SHOT, originGrid: "Z4C", period: Period.SECOND })),
+      ],
+    });
+
+  it("la página existe y va DESPUÉS de la portada", async () => {
+    const p = await paginas(conZonas());
+    const portada = p.findIndex((x) => x.text.includes("Mapas / Zonas"));
+    const periodos = p.findIndex((x) => x.text.includes("Evolución por periodos · Mi Equipo"));
+    expect(portada).toBe(0);
+    expect(periodos).toBe(1);
+  });
+
+  it("trae las tres métricas y sus cifras por parte", async () => {
+    const t = (await paginas(conZonas()))[1].text;
+    // Los títulos van en mayúsculas por CSS (`textTransform`), que no llega
+    // a textContent: el texto real es el del componente.
+    for (const m of ["Pérdidas", "Recuperaciones", "Tiros"]) expect(t).toContain(m);
+    expect(t).toContain("1ª parte · 6");
+    expect(t).toContain("2ª parte · 3");
+    expect(t).toContain("Total · 9");
+  });
+
+  it("26 · lleva la leyenda de escala compartida", async () => {
+    const t = (await paginas(conZonas()))[1].text;
+    expect(t).toContain("La escala se comparte entre las partes de cada fila");
+    expect(t).toContain("No indica eficacia");
+  });
+
+  it("21 · un partido histórico no genera la página", async () => {
+    const p = await paginas(matchData({ events: rep(4, () => E({ type: ActionType.SHOT, originGrid: "B2" })) }));
+    expect(p.some((x) => x.text.includes("Evolución por periodos"))).toBe(false);
+    expect(p[0].text).toContain("perspectiva de ataque no registrada");
+  });
+
+  it("22 · sin acciones espaciales relevantes tampoco", async () => {
+    const p = await paginas(matchData({ events: [E({ type: ActionType.FOUL, originGrid: "Z2C" })] }));
+    expect(p.some((x) => x.text.includes("Evolución por periodos"))).toBe(false);
+  });
+
+  it("27 · la portada de PR #22 queda intacta", async () => {
+    const t = (await paginas(conZonas()))[0].text;
+    expect(t).toContain("Volumen de acciones por zona · Mi Equipo");
+    expect(t).toContain("Número = acciones del equipo registradas con origen en esa zona");
+    expect(t).toContain("No indica eficacia");
+    expect(t).toContain("Zona más activa");
+    expect(t).toContain("Acciones por zona · Mi Equipo");
+    expect(t).toContain("Zona 2 · centro");
+    // y NO se le ha colado nada de la página nueva
+    expect(t).not.toContain("Evolución por periodos");
+    expect(t).not.toContain("La escala se comparte entre las partes");
+  });
+
+  it("23-25 · la página no clasifica fases ni valora", async () => {
+    const t = (await paginas(conZonas()))[1].text;
+    for (const prohibido of [/atacando/i, /defendiendo/i, /fase ofensiva/i, /fase defensiva/i, /mejor/i, /peor/i]) {
+      expect(t).not.toMatch(prohibido);
+    }
   });
 });

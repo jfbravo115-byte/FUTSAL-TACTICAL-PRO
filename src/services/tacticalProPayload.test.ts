@@ -892,6 +892,18 @@ describe("objetivo 8 · el volumen por zona, declarado", () => {
     expect(payload.tacticalContext.zones.team.zone12.breakdown).toBeUndefined();
   });
 
+  it("30 · PR #23 no toca el payload: las zonas siguen SIN periodo", () => {
+    // La página «Evolución por periodos» es visualización determinista y no
+    // cambia lo que viaja al modelo. El día que se decida enviarle el cruce
+    // zona×periodo será otra PR, con su entrada de glosario.
+    const payload = buildTacticalProPayload(partido()) as any;
+    expect(payload.tacticalContext.zonesByPeriod).toBeUndefined();
+    expect(payload.tacticalContext.zones.team.byPeriod).toBeUndefined();
+    expect(payload.tacticalContext.zones.team.zone12.byPeriod).toBeUndefined();
+    expect(Object.keys(payload.tacticalContext).sort()).toEqual(["glossary", "goalkeepers", "zones"]);
+    expect(Object.keys(payload.tacticalContext.zones).sort()).toEqual(["opponent", "team"]);
+  });
+
   it("y el total sigue pudiendo superar la suma de las categorías", () => {
     // Es exactamente el caso que el glosario explica, demostrado sobre el
     // payload real para que la afirmación no sea solo una promesa de texto.

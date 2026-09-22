@@ -136,10 +136,29 @@ describe("generateMatchReport — marcador, goles, faltas", () => {
     expect(r.score).toEqual({ team: 1, opponent: 2 });
   });
 
-  it("las faltas del informe son exactamente matchData.fouls, sin recalcular", () => {
-    const md = matchData({ fouls: { team: 5, opponent: 1 } });
+  it("las faltas del informe son las del PARTIDO, derivadas de los eventos", () => {
+    // Antes esto era `matchData.fouls`, el contador reglamentario, que se
+    // reinicia en el descanso: al acabar el partido valía lo de la segunda
+    // parte y la portada lo imprimía como el total del encuentro.
+    const md = matchData({
+      fouls: { team: 2, opponent: 6 }, // contador del periodo en curso
+      events: [
+        ...Array.from({ length: 5 }, () =>
+          event({ type: ActionType.FOUL, period: Period.FIRST, metadata: { isOpponent: false } })),
+        ...Array.from({ length: 2 }, () =>
+          event({ type: ActionType.FOUL, period: Period.SECOND, metadata: { isOpponent: false } })),
+        ...Array.from({ length: 6 }, () =>
+          event({ type: ActionType.FOUL, period: Period.SECOND, metadata: { isOpponent: true } })),
+      ],
+    });
     const r = generateMatchReport(md);
-    expect(r.fouls).toEqual({ team: 5, opponent: 1 });
+    expect(r.fouls).toEqual({ team: 7, opponent: 6 });
+    expect(r.fouls.team).not.toBe(2);
+  });
+
+  it("el contador reglamentario se conserva aparte, con su nombre", () => {
+    const md = matchData({ fouls: { team: 2, opponent: 6 } });
+    expect(generateMatchReport(md).periodFoulCounter).toEqual({ team: 2, opponent: 6 });
   });
 
   it("no inventa portero si no hay ninguno en pista", () => {
@@ -285,8 +304,9 @@ describe("balón parado en el informe", () => {
     const r = generateMatchReport(md);
     expect(r.teamTotals.shotsFromFreeKick).toBe(1);
     expect(r.teamTotals.shotsFromCorner).toBe(1);
-    // La falta cometida sigue siendo una infracción y no se mueve.
-    expect(r.teamTotals.fouls).toBe(md.fouls.team);
+    // La falta cometida sigue siendo una infracción y no se mueve: hay UN
+    // evento FOUL y dos tiros de balón parado, y siguen sin tocarse.
+    expect(r.teamTotals.fouls).toBe(1);
   });
 
   it("el markdown que recibe Tactical Pro ya menciona los córners", () => {
@@ -347,7 +367,10 @@ describe("jugadas de falta en el resumen determinista", () => {
     const r = generateMatchReport(conJugadas());
     expect(r.setPieces.freeKickPlays.team).toEqual({ total: 2, located: 1, unlocated: 1 });
     expect(r.setPieces.freeKickPlays.opponent.total).toBe(1);
-    expect(r.teamTotals.fouls).toBe(conJugadas().fouls.team);
+    // El total sale de los eventos FOUL, no del contador del periodo.
+    expect(r.teamTotals.fouls).toBe(
+      conJugadas().events.filter((e) => e.type === ActionType.FOUL && !e.metadata?.isOpponent).length,
+    );
     expect(r.teamTotals.shotsFromFreeKick).toBe(1);
   });
 
@@ -615,5 +638,177 @@ describe("L · los eventos relevantes salen en orden cronológico real", () => {
     const r = generateMatchReport(md);
     expect(r.relevantEvents.map((e) => e.period)).toEqual([Period.FIRST, Period.SECOND]);
     expect(r.goalSequence.map((g) => g.period)).toEqual([Period.FIRST, Period.SECOND]);
+  });
+});
+
+// ── FALTAS DEL PARTIDO EN EL INFORME ───────────────────────────────────
+//
+// El caso real: CD MURCIA llegó al bonus en la 1ª parte y cometió 2 faltas
+// en la 2ª. La portada decía «2 propias» porque leía el contador
+// reglamentario, que se reinicia en el descanso, mientras la columna de
+// jugadores del mismo documento sumaba 7.
+
+describe("el informe cuenta las faltas del partido, no las del periodo", () => {
+  const falta = (period: Period, opponent = false, playerIds: string[] = []) =>
+    event({ type: ActionType.FOUL, period, playerIds, metadata: { isOpponent: opponent } });
+
+  /** 5 propias en 1P (con jugador) + 2 en 2P · rival 3 en 1P + 6 en 2P. */
+  const partidoReal = () =>
+    matchData({
+      // El contador en vivo, ya reiniciado: lo que veía la portada.
+      fouls: { team: 2, opponent: 6 },
+      players: [
+        player({ id: "p1", number: 7, name: "Uno", individualTimeSeconds: 600,
+                 stats: { ...player().stats, fouls: 4 } }),
+        player({ id: "p2", number: 8, name: "Dos", individualTimeSeconds: 600,
+                 stats: { ...player().stats, fouls: 3 } }),
+      ],
+      events: [
+        ...Array.from({ length: 3 }, () => falta(Period.FIRST, false, ["p1"])),
+        ...Array.from({ length: 2 }, () => falta(Period.FIRST, false, ["p2"])),
+        falta(Period.SECOND, false, ["p1"]),
+        falta(Period.SECOND, false, ["p2"]),
+        ...Array.from({ length: 3 }, () => falta(Period.FIRST, true)),
+        ...Array.from({ length: 6 }, () => falta(Period.SECOND, true)),
+      ],
+    });
+
+  it("1 · propias 1P=5, 2P=2 → total 7", () => {
+    const r = generateMatchReport(partidoReal());
+    expect(r.fouls.team).toBe(7);
+    expect(r.teamTotals.fouls).toBe(7);
+    expect(r.fouls.team).not.toBe(2);
+  });
+
+  it("2 · rival 1P=3, 2P=6 → total 9", () => {
+    expect(generateMatchReport(partidoReal()).fouls.opponent).toBe(9);
+  });
+
+  it("5 · el desglose por parte viaja en el informe", () => {
+    const r = generateMatchReport(partidoReal());
+    expect(r.foulsByPeriod).toEqual([
+      { period: Period.FIRST, team: 5, opponent: 3 },
+      { period: Period.SECOND, team: 2, opponent: 6 },
+    ]);
+    expect(r.hasFoulEvents).toBe(true);
+  });
+
+  it("4 · el contador del periodo se conserva aparte y no es el total", () => {
+    const r = generateMatchReport(partidoReal());
+    expect(r.periodFoulCounter).toEqual({ team: 2, opponent: 6 });
+    expect(r.fouls).not.toEqual(r.periodFoulCounter);
+  });
+
+  it("periodStats trae las faltas de los DOS equipos", () => {
+    const ps = generateMatchReport(partidoReal()).periodStats;
+    expect(ps.map((p) => [p.period, p.fouls, p.opponentFouls])).toEqual([
+      [Period.FIRST, 5, 3],
+      [Period.SECOND, 2, 6],
+    ]);
+  });
+
+  it("6 · con todas las faltas atribuidas, la suma individual reconcilia", () => {
+    const r = generateMatchReport(partidoReal());
+    const suma = r.playersUsed.reduce((a, p) => a + p.fouls, 0);
+    expect(suma).toBe(7);
+    expect(suma).toBe(r.fouls.team);
+  });
+
+  it("7 · una falta sin jugador cuenta para el equipo y no para nadie", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [falta(Period.FIRST, false, ["p1"]), falta(Period.FIRST, false, [])],
+    });
+    const r = generateMatchReport(md);
+    expect(r.fouls.team).toBe(2);
+    // El total de equipo puede superar la suma individual: es válido.
+    expect(r.playersUsed.reduce((a, p) => a + p.fouls, 0)).toBeLessThanOrEqual(r.fouls.team);
+  });
+
+  it("9 · dos goles de doble penalti no crean ninguna falta", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      events: [
+        event({ type: ActionType.GOAL, period: Period.FIRST, destinationGrid: "G1",
+                metadata: { isOpponent: true, setPiece: "double_penalty" } }),
+        event({ type: ActionType.GOAL, period: Period.FIRST, destinationGrid: "G2",
+                metadata: { isOpponent: true, setPiece: "double_penalty" } }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.fouls).toEqual({ team: 0, opponent: 0 });
+    expect(r.hasFoulEvents).toBe(false);
+  });
+
+  it("el markdown imprime el total y el desglose", () => {
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(partidoReal()));
+    expect(texto).toContain("**Faltas:** 7 (propias) / 9 (rival)");
+    expect(texto).toContain("1ª Parte 5–3");
+    expect(texto).toContain("2ª Parte 2–6");
+  });
+});
+
+describe("13-14 · históricos", () => {
+  it("13 · un partido con eventos FOUL se reconstruye exactamente", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      fouls: { team: 0, opponent: 0 }, // el contador ya no dice nada
+      events: [
+        event({ type: ActionType.FOUL, period: Period.FIRST, metadata: { isOpponent: false } }),
+        event({ type: ActionType.FOUL, period: Period.SECOND, metadata: { isOpponent: true } }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    expect(r.fouls).toEqual({ team: 1, opponent: 1 });
+    expect(r.hasFoulEvents).toBe(true);
+  });
+
+  it("14 · un partido SIN eventos FOUL no inventa un reparto", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      fouls: { team: 4, opponent: 3 },
+      events: [],
+    });
+    const r = generateMatchReport(md);
+    expect(r.hasFoulEvents).toBe(false);
+    expect(r.foulsByPeriod).toEqual([]);
+    // El contador se conserva con su nombre; NO se presenta como total.
+    expect(r.periodFoulCounter).toEqual({ team: 4, opponent: 3 });
+    expect(r.fouls).toEqual({ team: 0, opponent: 0 });
+  });
+
+  it("y el markdown lo dice en vez de rellenarlo", () => {
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      fouls: { team: 4, opponent: 3 },
+      events: [],
+    });
+    const texto = formatMatchReportAsMarkdown(generateMatchReport(md));
+    expect(texto).toContain("desglose no disponible");
+    expect(texto).toContain("Último contador reglamentario: 4 (propias) / 3 (rival)");
+  });
+});
+
+describe("11 · las situaciones especiales conservan sus conteos", () => {
+  it("la nueva estadística global no cambia las faltas de una ventana", () => {
+    const formacion = (timestamp: number, gameState: string) =>
+      event({ type: ActionType.FORMATION_CHANGE, timestamp, gameState: gameState as any,
+              metadata: { isOpponent: false }, scoreAtEvent: { team: 0, opponent: 0 } });
+    const md = matchData({
+      players: [player({ id: "p1", individualTimeSeconds: 600 })],
+      fouls: { team: 9, opponent: 9 },
+      events: [
+        event({ type: ActionType.FOUL, timestamp: 10_000, metadata: { isOpponent: false } }),
+        formacion(60_000, "Superioridad"),
+        event({ type: ActionType.FOUL, timestamp: 70_000, metadata: { isOpponent: false } }),
+        event({ type: ActionType.FOUL, timestamp: 80_000, metadata: { isOpponent: false } }),
+        formacion(120_000, "4vs4"),
+        event({ type: ActionType.FOUL, timestamp: 150_000, metadata: { isOpponent: false } }),
+      ],
+    });
+    const r = generateMatchReport(md);
+    // Dentro de la ventana: 2. En todo el partido: 4. Dos preguntas distintas.
+    expect(r.matchContexts[0].tally.fouls).toBe(2);
+    expect(r.fouls.team).toBe(4);
   });
 });

@@ -41,6 +41,7 @@ vi.mock("./tacticalAnalysisService", () => ({
 
 import { exportMatchReportPdf, exportGoalkeeperReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
 import { generateMatchReport } from "./matchReportService";
+import { buildZoneDashboard, primaryBucket } from "./matchZonesService";
 
 function player(overrides: Partial<Player> = {}): Player {
   return {
@@ -71,6 +72,30 @@ function event(overrides: Partial<GameEvent> = {}): GameEvent {
     gameState: "4vs4" as any,
     ...overrides,
   };
+}
+
+/**
+ * Las cinco cifras de una fila de la matriz de zonas, por su etiqueta.
+ *
+ * Se localiza por el texto que ve el usuario —nunca por el id interno— y se
+ * devuelven las celdas numéricas en el orden de la cabecera:
+ * Pérd. · Recup. · Tiros · Faltas · Total.
+ */
+function filaMatriz(pageNode: HTMLElement, label: string): string[] {
+  const fila = Array.from(pageNode.querySelectorAll("tr")).find(
+    (tr) => (tr.querySelector("td")?.textContent || "").trim() === label,
+  );
+  if (!fila) throw new Error(`No hay fila de matriz para "${label}"`);
+  return Array.from(fila.querySelectorAll("td"))
+    .slice(1)
+    .map((td) => (td.textContent || "").trim());
+}
+
+/** ¿Qué filas de la matriz están resaltadas como zona más activa? */
+function filasResaltadas(pageNode: HTMLElement): string[] {
+  return Array.from(pageNode.querySelectorAll('tr[data-most-active="true"]')).map(
+    (tr) => (tr.querySelector("td")?.textContent || "").trim(),
+  );
 }
 
 function matchData(overrides: Partial<MatchData> = {}): MatchData {
@@ -636,7 +661,9 @@ describe("Informes sobre la pista de 12 zonas", () => {
     expect(text).toContain("Zona 1 · izquierda");
   });
 
-  it("incluye la lectura textual agregada de pérdidas por zona", async () => {
+  it("las pérdidas llegan a la página desglosadas por zona, ahora en la matriz", async () => {
+    // Antes esto se imprimía en prosa: «Zona 2: 3 pérdidas — 2 derecha, 1
+    // centro». La matriz dice lo mismo y además nombra el carril a cero.
     const md = matchData({
       events: [
         event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2R" }),
@@ -644,7 +671,11 @@ describe("Informes sobre la pista de 12 zonas", () => {
         event({ type: ActionType.LOSS, playerIds: ["p1"], originGrid: "Z2C" }),
       ],
     });
-    expect(await summaryText(md)).toContain("Zona 2: 3 pérdidas — 2 derecha, 1 centro");
+    await exportMatchReportPdf(md);
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    expect(filaMatriz(page, "Zona 2 · derecha")).toEqual(["2", "0", "0", "0", "2"]);
+    expect(filaMatriz(page, "Zona 2 · centro")).toEqual(["1", "0", "0", "0", "1"]);
+    expect(filaMatriz(page, "Zona 2 · izquierda")).toEqual(["0", "0", "0", "0", "0"]);
   });
 
   it("informa de los córners por lado, sin códigos", async () => {
@@ -667,9 +698,13 @@ describe("Informes sobre la pista de 12 zonas", () => {
         event({ type: ActionType.FOUL, playerIds: ["p1"], originGrid: "Z3C" }),
       ],
     });
-    const text = await summaryText(md);
-    expect(text).toContain("sin ubicación registrada");
-    expect(text).toContain("Zona 3: 1 falta — 1 centro");
+    await exportMatchReportPdf(md);
+    const page = toJpegMock.mock.calls[0][0] as HTMLElement;
+    expect((page.textContent || "").replace(/\s+/g, " ")).toContain("sin ubicación registrada");
+    // La ubicada sí ocupa su fila; la que no lo está no inventa ninguna.
+    expect(filaMatriz(page, "Zona 3 · centro")).toEqual(["0", "0", "0", "1", "1"]);
+    const faltasEnMatriz = ZONE_12_IDS.map((id) => Number(filaMatriz(page, formatZoneLabel(id)!)[3]));
+    expect(faltasEnMatriz.reduce((a, b) => a + b, 0)).toBe(1);
   });
 
   it("un partido histórico se dibuja en su rejilla original, nunca en las 12 zonas", async () => {
@@ -769,7 +804,12 @@ describe("Faltas recibidas", () => {
     const text = (toJpegMock.mock.calls[0][0] as HTMLElement).textContent || "";
 
     expect(text).toContain("Faltas recibidas");
-    expect(text).toContain("Zona 4: 1 falta — 1 derecha");
+    expect(text.replace(/\s+/g, " ")).toContain("Zona 4 · 1");
+    expect(text.replace(/\s+/g, " ")).toContain("total 1");
+    // No se han colado en la matriz: este partido no tiene ni una acción
+    // propia ubicada, así que no hay matriz que imprimir — y aun así las
+    // faltas recibidas se cuentan, porque son eventos del rival.
+    expect(text.replace(/\s+/g, " ")).not.toContain("Acciones por zona");
     // El evento original conserva su zona tal cual se registró.
     expect(md.events[0].originGrid).toBe("Z1L");
   });
@@ -1297,5 +1337,233 @@ describe("portada · el mapa de zonas dice qué significa", () => {
     const t = await portada(matchData({ events: [] }));
     expect(t).toContain("Sin datos registrados");
     expect(t).not.toContain("Zona más activa");
+  });
+});
+
+// ── LA MATRIZ DE 12 ZONAS ───────────────────────────────────────────────
+//
+// La página imprimía hasta 16 líneas de prosa que repetían, con otras
+// palabras, las mismas cifras que ya estaban en ZoneStats. Estos tests fijan
+// que la tabla las sustituye sin perder nada, que sus números salen del
+// mismo objeto que pinta el mapa y que el Total NO se redefine para cuadrar
+// con las cuatro columnas visibles.
+
+describe("portada · matriz de acciones por zona", () => {
+  async function portada(md: MatchData): Promise<HTMLElement> {
+    await exportMatchReportPdf(md);
+    return toJpegMock.mock.calls[0][0] as HTMLElement;
+  }
+  const texto = (page: HTMLElement) => (page.textContent || "").replace(/\s+/g, " ");
+  const rep = (n: number, f: () => GameEvent) => Array.from({ length: n }, f);
+  const E = (o: Partial<GameEvent>) => event({ metadata: { isOpponent: false }, ...o });
+
+  /** El caso auditado: Z2C = 9 pérdidas + 6 recuperaciones + 5 tiros + 2 faltas. */
+  const z2c = () =>
+    matchData({
+      events: [
+        ...rep(9, () => E({ type: ActionType.LOSS, originGrid: "Z2C" })),
+        ...rep(6, () => E({ type: ActionType.STEAL, originGrid: "Z2C" })),
+        ...rep(5, () => E({ type: ActionType.SHOT, originGrid: "Z2C" })),
+        ...rep(2, () => E({ type: ActionType.FOUL, originGrid: "Z2C" })),
+        ...rep(3, () => E({ type: ActionType.LOSS, originGrid: "Z1R" })),
+      ],
+    });
+
+  it("1 · imprime exactamente 12 filas", async () => {
+    const page = await portada(z2c());
+    const filas = Array.from(page.querySelectorAll("tr")).filter((tr) =>
+      ZONE_12_IDS.some((id) => (tr.querySelector("td")?.textContent || "").trim() === formatZoneLabel(id)),
+    );
+    expect(filas.length).toBe(12);
+  });
+
+  it("2 · en el orden de ZONE_12_IDS", async () => {
+    const page = await portada(z2c());
+    const etiquetas = Array.from(page.querySelectorAll("tr"))
+      .map((tr) => (tr.querySelector("td")?.textContent || "").trim())
+      .filter((t) => ZONE_12_IDS.some((id) => formatZoneLabel(id) === t));
+    expect(etiquetas).toEqual(ZONE_12_IDS.map((id) => formatZoneLabel(id)));
+  });
+
+  it("3-7 · cada celda es la cifra de ZoneStats, y Total es ZoneStats.total", async () => {
+    const md = z2c();
+    const page = await portada(md);
+    const bucket = primaryBucket(buildZoneDashboard(md, false))!;
+    for (const id of ZONE_12_IDS) {
+      const z = bucket.zones.find((x) => x.zone === id)!;
+      expect(filaMatriz(page, formatZoneLabel(id)!)).toEqual([
+        String(z.losses), String(z.recoveries), String(z.shots), String(z.fouls), String(z.total),
+      ]);
+    }
+    // Y el caso concreto, escrito a mano para que no sea una tautología.
+    expect(filaMatriz(page, "Zona 2 · centro")).toEqual(["9", "6", "5", "2", "22"]);
+  });
+
+  it("7b · el Total de la fila coincide con el número que pinta el mapa", async () => {
+    const md = z2c();
+    const page = await portada(md);
+    const celdaDelMapa = findZoneCell(page, "Z2C");
+    expect((celdaDelMapa.textContent || "").trim()).toBe("22");
+    expect(filaMatriz(page, "Zona 2 · centro")[4]).toBe("22");
+  });
+
+  it("8 · no existe columna «Goles»", async () => {
+    const page = await portada(z2c());
+    const cabeceras = Array.from(page.querySelectorAll("th")).map((th) => (th.textContent || "").trim());
+    expect(cabeceras).toContain("Tiros");
+    expect(cabeceras).not.toContain("Goles");
+    expect(cabeceras).not.toContain("G");
+  });
+
+  it("9 · con goles, la celda de Tiros los anuncia dentro", async () => {
+    const md = matchData({
+      events: [
+        ...rep(3, () => E({ type: ActionType.SHOT, originGrid: "Z4C" })),
+        ...rep(2, () => E({ type: ActionType.GOAL, originGrid: "Z4C" })),
+      ],
+    });
+    const page = await portada(md);
+    expect(filaMatriz(page, "Zona 4 · centro")).toEqual(["0", "0", "5 (2G)", "0", "5"]);
+    // 5 y 2 nunca como dos cifras sumables.
+    expect(texto(page)).not.toMatch(/Tiros 5 · Goles 2/);
+  });
+
+  it("10 · solo se resalta la fila de mostActive", async () => {
+    const page = await portada(z2c());
+    expect(filasResaltadas(page)).toEqual(["Zona 2 · centro"]);
+  });
+
+  it("11 · la tarjeta de zona más activa va ANTES de la matriz", async () => {
+    const t = texto(await portada(z2c()));
+    expect(t.indexOf("Zona más activa")).toBeGreaterThan(-1);
+    expect(t.indexOf("Acciones por zona")).toBeGreaterThan(-1);
+    expect(t.indexOf("Zona más activa")).toBeLessThan(t.indexOf("Acciones por zona"));
+  });
+
+  it("12 · sin residuo, la tarjeta no dice «Otras» y no hay nota bajo la tabla", async () => {
+    const t = texto(await portada(z2c()));
+    expect(t).toContain("Zona 2 · centro — 22 acciones");
+    expect(t).not.toContain("Otras");
+    expect(t).not.toContain("Total puede incluir otras acciones localizadas");
+  });
+
+  it("13 y 15 · con residuo, la tarjeta dice «Otras N» y aparece la nota", async () => {
+    const md = matchData({
+      events: [
+        ...z2c().events,
+        E({ type: ActionType.SET_PIECE, originGrid: "Z2C", metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+        E({ type: GoalieAction.SAVE, originGrid: "Z2C" }),
+      ],
+    });
+    const t = texto(await portada(md));
+    expect(t).toContain("Zona 2 · centro — 24 acciones");
+    expect(t).toContain("Otras 2");
+    expect(t).toContain("Total puede incluir otras acciones localizadas");
+    expect(t).toContain("jugadas de falta, paradas o salidas con zona registrada");
+  });
+
+  it("16 · el Total NO se redefine como suma de las cuatro columnas", async () => {
+    const md = matchData({
+      events: [
+        E({ type: ActionType.SHOT, originGrid: "Z2C" }),
+        E({ type: ActionType.SET_PIECE, originGrid: "Z2C", metadata: { isOpponent: false, setPieceOrigin: "free_kick", setPieceOutcome: "play" } }),
+      ],
+    });
+    const fila = filaMatriz(await portada(md), "Zona 2 · centro");
+    const [p, r, t, f, total] = fila.map((v) => Number(v.replace(/\s*\(.*\)$/, "")));
+    expect(total).toBe(2);
+    expect(p + r + t + f).toBe(1); // la jugada de falta no tiene columna
+    expect(total).not.toBe(p + r + t + f);
+  });
+
+  it("17-19 · las faltas recibidas van fuera de la matriz, con su total", async () => {
+    const md = matchData({
+      events: [
+        ...rep(2, () => E({ type: ActionType.FOUL, originGrid: "Z2C" })),
+        ...rep(3, () => event({ type: ActionType.FOUL, originGrid: "Z1L", metadata: { isOpponent: true } })),
+      ],
+    });
+    const page = await portada(md);
+    const t = texto(page);
+    expect(t).toContain("Faltas recibidas");
+    expect(t).toContain("las comete el rival, vistas desde nuestra perspectiva");
+    // Z1L del rival se lee como Z4R nuestra: banda 4.
+    expect(t).toContain("Zona 4 · 3");
+    expect(t).toContain("total 3");
+    // En la matriz, la columna Faltas son solo las COMETIDAS por nosotros.
+    expect(filaMatriz(page, "Zona 2 · centro")[3]).toBe("2");
+    expect(filaMatriz(page, "Zona 4 · derecha")[3]).toBe("0");
+  });
+
+  it("19b · sin faltas del rival, el bloque de recibidas no aparece", async () => {
+    const t = texto(await portada(z2c()));
+    expect(t).not.toContain("Faltas recibidas");
+  });
+
+  it("20-21 · los córners siguen fuera de las columnas y conservan su bloque", async () => {
+    const md = matchData({
+      events: [
+        ...rep(2, () => E({ type: ActionType.CORNER, originGrid: "Z4L", metadata: { isOpponent: false, cornerSide: "left" } })),
+        E({ type: ActionType.CORNER, originGrid: "Z4R", metadata: { isOpponent: false, cornerSide: "right" } }),
+      ],
+    });
+    const page = await portada(md);
+    const cabeceras = Array.from(page.querySelectorAll("th")).map((th) => (th.textContent || "").trim());
+    expect(cabeceras).not.toContain("Córn.");
+    expect(texto(page)).toContain("Córners: 3 — izquierda 2 · derecha 1");
+    // Pero siguen sumando al Total de su zona.
+    expect(filaMatriz(page, "Zona 4 · izquierda")).toEqual(["0", "0", "0", "0", "2"]);
+  });
+
+  it("22-23 · la orientación y la leyenda de PR #21 siguen ahí", async () => {
+    const t = texto(await portada(z2c()));
+    expect(t).toContain("Volumen de acciones por zona · Mi Equipo");
+    expect(t).toContain("Número = acciones del equipo registradas con origen en esa zona");
+    expect(t).toContain("Mayor intensidad = mayor volumen relativo dentro de este partido");
+    expect(t).toContain("No indica eficacia");
+  });
+
+  it("24 · la prosa antigua ya no se imprime", async () => {
+    const md = matchData({
+      events: [
+        ...z2c().events,
+        ...rep(2, () => event({ type: ActionType.FOUL, originGrid: "Z1L", metadata: { isOpponent: true } })),
+      ],
+    });
+    const t = texto(await portada(md));
+    expect(t).not.toMatch(/Zona \d: \d+ (pérdidas?|recuperaciones?|tiros?|faltas?) —/);
+  });
+
+  it("la matriz NO recalcula eventos: proyecta ZoneBucket y nada más", async () => {
+    // Guardia estructural. Sin ella, alguien podría reintroducir un recuento
+    // propio dentro del PDF y la tabla acabaría diciendo una cifra distinta
+    // de la que pinta el mapa de al lado.
+    const fuente = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "./pdfExportService.tsx"),
+      "utf-8",
+    ) as string;
+    const ini = fuente.indexOf("export function zoneMatrixRows");
+    const fin = fuente.indexOf("export function anyZoneHasOther");
+    expect(ini).toBeGreaterThan(-1);
+    expect(fin).toBeGreaterThan(ini);
+    const cuerpo = fuente.slice(ini, fin);
+    for (const prohibido of ["tallyActionZones", "matchData", "events", "ZONE_PREDICATES", "scopedEvents"]) {
+      expect(cuerpo).not.toContain(prohibido);
+    }
+    expect(cuerpo).toContain("bucket.zones.map");
+  });
+
+  it("25-26 · un partido histórico no imprime la matriz y conserva su aviso", async () => {
+    const md = matchData({
+      events: rep(4, () => E({ type: ActionType.SHOT, originGrid: "B2" })),
+    });
+    const page = await portada(md);
+    const t = texto(page);
+    expect(t).toContain("perspectiva de ataque no registrada");
+    expect(t).not.toContain("Acciones por zona");
+    expect(t).not.toContain("Faltas recibidas");
+    expect(Array.from(page.querySelectorAll("tr")).some((tr) =>
+      ZONE_12_IDS.some((id) => (tr.querySelector("td")?.textContent || "").trim() === formatZoneLabel(id)),
+    )).toBe(false);
   });
 });

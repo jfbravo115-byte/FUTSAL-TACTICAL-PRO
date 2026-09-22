@@ -434,27 +434,124 @@ describe("objetivo 4 · una sola verdad sobre el portero", () => {
   });
 });
 
-describe("objetivo 6 · las tres cifras de faltas, declaradas", () => {
+// ── LAS CUATRO CIFRAS DE FALTAS ──────────────────────────────────
+//
+// Mientras el informe copiaba el contador en vivo, el total del partido y el
+// contador reglamentario eran el mismo número y el glosario lo decía así.
+// Ahora `fouls` es el TOTAL y `periodFoulCounter` es el contador que se
+// reinicia. El glosario es lo ÚNICO que viaja al modelo explicando cuál es
+// cuál: si vuelve a decir que son el mismo número, estos tests fallan.
+
+/** El fixture validado: contador 2/6 y eventos 1P 5–3 · 2P 2–6 → total 7/9. */
+function partidoFaltas5y2(): MatchData {
+  const falta = (period: Period, isOpponent: boolean) =>
+    ev({
+      type: ActionType.FOUL,
+      period,
+      playerIds: isOpponent ? [] : ["p1"],
+      metadata: { isOpponent },
+    });
+  const repetir = (n: number, period: Period, isOpponent: boolean) =>
+    Array.from({ length: n }, () => falta(period, isOpponent));
+  return {
+    ...partido(),
+    fouls: { team: 2, opponent: 6 },
+    events: [
+      ...repetir(5, Period.FIRST, false),
+      ...repetir(3, Period.FIRST, true),
+      ...repetir(2, Period.SECOND, false),
+      ...repetir(6, Period.SECOND, true),
+    ],
+  };
+}
+
+describe("objetivo 6 · las cuatro cifras de faltas, declaradas", () => {
   const texto = () => TACTICAL_PRO_GLOSSARY.join("\n");
+  /** La ÚNICA línea del glosario que nombra ese campo. */
+  const linea = (campo: string) => {
+    const encontradas = TACTICAL_PRO_GLOSSARY.filter((l) => l.includes(campo));
+    expect(encontradas.length).toBe(1);
+    return encontradas[0];
+  };
 
-  it("nombra el contador reglamentario y dice que se reinicia", () => {
-    expect(texto()).toContain("matchData.fouls");
-    expect(texto()).toContain("deterministicReport.teamTotals.fouls");
-    expect(texto()).toContain("PERIODO ACTUAL");
-    expect(texto()).toMatch(/reinician en el descanso/);
+  it("1 · identifica deterministicReport.fouls como TOTAL DEL PARTIDO", () => {
+    const l = linea("'deterministicReport.fouls'");
+    expect(l).toMatch(/total de TODO el partido/);
+    expect(l).toMatch(/SÍ son el total del partido/);
+    expect(l).toMatch(/\{team, opponent\}/);
+    expect(l).toMatch(/eventos FOUL/);
+    // La afirmación vieja, ya falsa, no puede volver a esta línea.
+    expect(l).not.toMatch(/PERIODO ACTUAL/);
+    expect(l).not.toMatch(/NO son el total del partido/);
   });
 
-  it("prohíbe leerlo como total del partido", () => {
-    expect(texto()).toMatch(/NO son el total del partido/);
+  it("2 · identifica teamTotals.fouls como el total PROPIO del partido", () => {
+    const l = linea("'deterministicReport.teamTotals.fouls'");
+    expect(l).toMatch(/total propio del partido/);
+    expect(l).toContain("'deterministicReport.fouls.team'");
+    expect(l).not.toMatch(/PERIODO ACTUAL/);
+    expect(l).not.toMatch(/contador reglamentario/);
   });
 
-  it("dice dónde está el total del partido", () => {
+  it("3 · identifica foulsByPeriod como el desglose por periodo de AMBOS equipos", () => {
+    const l = linea("'deterministicReport.foulsByPeriod'");
+    expect(l).toMatch(/AMBOS equipos/);
+    expect(l).toMatch(/\{period, team, opponent\}/);
+    // Sigue diciendo dónde están esas mismas cifras dentro de periodStats.
     expect(texto()).toContain("periodStats[].fouls");
-    expect(texto()).toMatch(/eventos FOUL registrados/);
+    expect(texto()).toContain("periodStats[].opponentFouls");
   });
 
-  it("explica el 0 con faltas registradas sin llamarlo contradicción", () => {
-    expect(texto()).toMatch(/valga 0 mientras hay eventos FOUL no es una contradicción/);
+  it("4 · identifica periodFoulCounter como el contador reglamentario del periodo", () => {
+    const l = linea("'deterministicReport.periodFoulCounter'");
+    expect(l).toMatch(/contador acumulado del PERIODO/);
+    expect(l).toMatch(/6ª falta/);
+    expect(l).toContain("'matchData.fouls'");
+  });
+
+  it("5 · dice que periodFoulCounter NO es el total del partido", () => {
+    const l = linea("'deterministicReport.periodFoulCounter'");
+    expect(l).toMatch(/NO es el total del partido/);
+    expect(l).toMatch(/no lo sumes al total/);
+  });
+
+  it("6 · explica que el contador puede reiniciarse entre periodos", () => {
+    const l = linea("'deterministicReport.periodFoulCounter'");
+    expect(l).toMatch(/REINICIARSE al cambiar de periodo/);
+    // Y que quedar por debajo del total no es una contradicción.
+    expect(l).toMatch(/valga 0 habiendo eventos FOUL/);
+  });
+
+  it("7 · explica qué significa hasFoulEvents === false", () => {
+    const l = linea("'deterministicReport.hasFoulEvents'");
+    expect(l).toMatch(/Si es false/);
+    expect(l).toMatch(/NO están disponibles/);
+    expect(l).toMatch(/sigue SIN ser el total del partido/);
+  });
+
+  it("8 · prohíbe inventar el histórico cuando no hay eventos suficientes", () => {
+    const l = linea("'deterministicReport.hasFoulEvents'");
+    expect(l).toMatch(/NO inventes total histórico/);
+    expect(l).toMatch(/distribución[\s\S]*por periodos/);
+    expect(l).toMatch(/acumulación previa/);
+    // Las seis fuentes de las que NO se pueden deducir faltas.
+    for (const prohibida of [
+      "PlayerStats",
+      "dobles penaltis",
+      "goles",
+      "tarjetas",
+      "texto narrativo",
+      "zonas",
+    ]) {
+      expect(l).toContain(prohibida);
+    }
+  });
+
+  it("9 · mantiene FOUL separado de double_penalty", () => {
+    const l = linea("'double_penalty'");
+    expect(l).toMatch(/PROCEDENCIA/);
+    expect(l).toMatch(/NO equivale a un nuevo evento FOUL/);
+    expect(l).toMatch(/no reconstruyas el número de faltas a partir del número de dobles penaltis/i);
   });
 
   it("no introduce un cuarto cálculo de faltas", () => {
@@ -474,6 +571,26 @@ describe("objetivo 6 · las tres cifras de faltas, declaradas", () => {
     ).length;
     expect(payload.deterministicReport.fouls.team).toBe(propias);
     expect(payload.deterministicReport.periodFoulCounter).toEqual(md.fouls);
+  });
+
+  it("fixture 5+2 · el payload lleva las cuatro cifras y el glosario las distingue", () => {
+    const dr = buildTacticalProPayload(partidoFaltas5y2()).deterministicReport;
+
+    expect(dr.fouls).toEqual({ team: 7, opponent: 9 });
+    expect(dr.teamTotals.fouls).toBe(7);
+    expect(dr.foulsByPeriod).toEqual([
+      { period: Period.FIRST, team: 5, opponent: 3 },
+      { period: Period.SECOND, team: 2, opponent: 6 },
+    ]);
+    expect(dr.periodFoulCounter).toEqual({ team: 2, opponent: 6 });
+    expect(dr.hasFoulEvents).toBe(true);
+
+    // El 2/6 del contador NO puede confundirse con el 7/9 del total.
+    expect(dr.periodFoulCounter).not.toEqual(dr.fouls);
+    expect(linea("'deterministicReport.fouls'")).toMatch(/SÍ son el total del partido/);
+    expect(linea("'deterministicReport.periodFoulCounter'")).toMatch(
+      /NO es el total del partido/,
+    );
   });
 });
 

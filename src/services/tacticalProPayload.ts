@@ -80,17 +80,42 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "anterior: no se suman entre sí, ninguno implica al otro y pueden no coincidir.",
   "FOUL: infracción COMETIDA por el equipo indicado en el evento. Las faltas recibidas son " +
     "las que comete el rival. Una falta no describe cómo se reanudó el juego.",
-  // Tres cifras de faltas conviven en este payload y miden cosas distintas. El
-  // informe todavía no las etiqueta —eso es otro paso—, así que se declaran
-  // aquí para que el modelo no las presente como si fueran la misma.
-  "Faltas, contador reglamentario: 'matchData.fouls', 'deterministicReport.fouls' y " +
-    "'deterministicReport.teamTotals.fouls' son el MISMO contador, y son las faltas " +
-    "acumuladas del PERIODO ACTUAL, el que dispara la sanción de la 6ª falta. Se reinician " +
-    "en el descanso. NO son el total del partido y no debes presentarlas como tal.",
-  "Faltas, total del partido: son los eventos FOUL registrados. 'periodStats[].fouls' los da " +
-    "por periodo y el desglose por jugador los da por jugador. Que el contador reglamentario " +
-    "valga 0 mientras hay eventos FOUL no es una contradicción: significa que esas faltas se " +
-    "cometieron en un periodo anterior y el contador ya se reinició. Dilo así si lo comentas.",
+  // CUATRO CIFRAS DE FALTAS CONVIVEN AQUÍ Y MIDEN COSAS DISTINTAS.
+  //
+  // Mientras el informe copiaba el contador en vivo, el total del partido y el
+  // contador reglamentario eran el MISMO número, y este glosario lo decía así.
+  // Desde que el informe deriva las faltas de los eventos ya no lo son:
+  // `deterministicReport.fouls` es el TOTAL y `periodFoulCounter` es el
+  // contador que se reinicia. Se declaran por separado, cada uno con su nombre
+  // de campo, porque confundirlos es justo el error que se quiere evitar.
+  "Faltas, TOTAL DEL PARTIDO: 'deterministicReport.fouls' es el total de TODO el partido, " +
+    "con la forma {team, opponent}, derivado EXCLUSIVAMENTE de los eventos FOUL " +
+    "persistidos. 'deterministicReport.teamTotals.fouls' es ese mismo total propio del " +
+    "partido y coincide con 'deterministicReport.fouls.team' cuando hay cobertura de " +
+    "eventos FOUL. Ambas cifras SÍ son el total del partido y debes presentarlas como tal.",
+  "Faltas, DESGLOSE POR PERIODO: 'deterministicReport.foulsByPeriod' trae, por cada periodo " +
+    "con faltas, las cometidas por AMBOS equipos con la forma {period, team, opponent}. Es " +
+    "la fuente para afirmaciones del tipo «cometió 5 faltas en la primera parte y 2 en la " +
+    "segunda». 'periodStats[].fouls' y 'periodStats[].opponentFouls' repiten esas mismas " +
+    "cifras por periodo, propias y del rival.",
+  "Faltas, CONTADOR REGLAMENTARIO: 'deterministicReport.periodFoulCounter' —y su gemelo " +
+    "'matchData.fouls'— es el contador acumulado del PERIODO, el que dispara la sanción de " +
+    "la 6ª falta. Puede REINICIARSE al cambiar de periodo, así que al acabar el partido " +
+    "refleja solo el último periodo. NO es el total del partido: no lo presentes como tal, " +
+    "no lo sumes al total y no lo compares con él como si fuera una contradicción. Que sea " +
+    "menor que el total, o que valga 0 habiendo eventos FOUL, significa únicamente que esas " +
+    "faltas se cometieron en un periodo anterior y el contador ya se reinició.",
+  "Faltas, COBERTURA: 'deterministicReport.hasFoulEvents' dice si existe evidencia FOUL " +
+    "suficiente para reconstruir el desglose. Si es false, el total y el desglose por " +
+    "periodo NO están disponibles: dilo así y NO inventes total histórico, distribución " +
+    "por periodos ni acumulación previa. En ese caso 'periodFoulCounter' puede existir como " +
+    "último contador reglamentario registrado y sigue SIN ser el total del partido. No " +
+    "deduzcas faltas de PlayerStats, de los dobles penaltis, de los goles, de las tarjetas, " +
+    "del texto narrativo ni de las zonas.",
+  "Doble penalti: 'setPiece' con valor 'double_penalty' describe la PROCEDENCIA de un tiro " +
+    "o de un gol, no una infracción. El evento FOUL es la falta cometida y es un registro " +
+    "distinto: un doble penalti NO equivale a un nuevo evento FOUL ni lo implica. No " +
+    "reconstruyas el número de faltas a partir del número de dobles penaltis.",
   "SET_PIECE con setPieceOrigin 'free_kick' y setPieceOutcome 'play': una falta a favor que " +
     "el equipo puso en juego en corto. No es una infracción ni un tiro.",
   "SHOT con setPiece 'free_kick': un tiro que el operador declaró procedente de una falta a " +

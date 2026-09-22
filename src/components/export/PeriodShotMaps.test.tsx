@@ -18,6 +18,7 @@ import {
   buildPeriodShotMaps,
   periodLabel,
   reconciliationLine,
+  sharedShotMax,
   shotMapPeriods,
   unlocatedCount,
 } from "./PeriodShotMaps";
@@ -187,5 +188,62 @@ describe("presentación", () => {
   it("no enseña ni un código interno de sector", () => {
     const node = render([ev(ActionType.SHOT, Period.FIRST, "Z3C")]);
     expect(node.textContent || "").not.toMatch(/\bZ[1-4][LCR]\b/);
+  });
+});
+
+// ── ESCALA COMPARTIDA ───────────────────────────────────────────────────
+//
+// DEFECTO QUE ESTO CORRIGE
+// ------------------------
+// Cada pista se normalizaba contra su propio máximo, así que una primera
+// parte con 4 tiros en una zona y una segunda con 1 se pintaban exactamente
+// igual de oscuras: el color decía que las dos mitades fueron iguales cuando
+// no lo fueron, que es justo lo contrario de lo que esta página viene a
+// permitir. Los recuentos no cambian — solo el color.
+
+describe("29 · las dos partes comparten la escala de color", () => {
+  const partido = [
+    ...Array.from({ length: 4 }, () => ev(ActionType.SHOT, Period.FIRST, "Z3C")),
+    ev(ActionType.SHOT, Period.SECOND, "Z3C"),
+  ];
+
+  /** Alphas de las celdas pintadas con el ACENTO (#2563eb). Las vacías llevan
+   *  el relleno neutro de la pista y no cuentan. */
+  const alphas = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>("[aria-label]"))
+      .map((n) => /^rgba\(37,\s*99,\s*235,\s*([\d.]+)\)$/.exec(n.style.backgroundColor)?.[1])
+      .filter((a): a is string => !!a)
+      .map(Number);
+
+  it("sharedShotMax es el máximo de TODAS las partes", () => {
+    expect(sharedShotMax(buildPeriodShotMaps(partido, false))).toBe(4);
+  });
+
+  it("4 y 1 ya NO se pintan igual", () => {
+    const pintados = alphas(render(partido));
+    expect(pintados.length).toBe(2);
+    const [mayor, menor] = [Math.max(...pintados), Math.min(...pintados)];
+    expect(menor).toBeLessThan(mayor);
+    // jsdom redondea el alpha a tres decimales al serializar el estilo.
+    expect(mayor).toBeCloseTo(0.18 + (4 / 4) * 0.55, 2);
+    expect(menor).toBeCloseTo(0.18 + (1 / 4) * 0.55, 2);
+  });
+
+  it("los recuentos de las celdas no cambian", () => {
+    const host = render(partido);
+    const texto = (host.textContent || "").replace(/\s+/g, " ");
+    expect(texto).toContain("1ª parte 4");
+    expect(texto).toContain("2ª parte 1");
+    expect(texto).toContain("Total 5");
+  });
+
+  it("la leyenda dice que la escala se comparte", () => {
+    expect((render(partido).textContent || "").replace(/\s+/g, " ")).toContain(
+      "La escala de color se comparte entre las partes",
+    );
+  });
+
+  it("un partido sin tiros no rompe la escala", () => {
+    expect(sharedShotMax(buildPeriodShotMaps([], false))).toBe(1);
   });
 });

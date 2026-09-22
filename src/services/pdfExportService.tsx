@@ -48,6 +48,7 @@ import {
   ZoneStats,
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import { PeriodZoneMapsBoard, hasPeriodZoneData } from "../components/export/PeriodZoneMaps";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
 import { ZONE_BANDS, ZoneBand, bandTotal, formatBandLabel } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
@@ -836,6 +837,29 @@ function buildMatchReportPages(
       </>
     ),
   });
+
+  // ── EVOLUCIÓN POR PERIODOS ────────────────────────────────────────
+  //
+  // Página propia, DESPUÉS de la portada y sin tocarla: la de PR #22 va con
+  // 4 px libres en un partido denso y no admite ni una línea más.
+  //
+  // No se dibuja en un partido histórico de 9 celdas —su perspectiva no se
+  // registró— ni en uno sin ninguna de las tres acciones ubicadas, porque
+  // seis pistas vacías no informan de nada.
+  if (hasPeriodZoneData(matchData)) {
+    pages.push({
+      key: "periods",
+      content: (
+        <>
+          <ReportHeader matchData={matchData} report={report} />
+          <div style={sectionTitleStyle}>
+            Evolución por periodos · {matchData.teamName}
+          </div>
+          <PeriodZoneMapsBoard matchData={matchData} />
+        </>
+      ),
+    });
+  }
 
   pages.push({
     key: "players",

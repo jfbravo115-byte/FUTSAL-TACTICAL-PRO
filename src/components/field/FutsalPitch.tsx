@@ -352,6 +352,21 @@ export type FutsalPitchProps = {
    * otro (el de origen de tiro de un portero) deben pasar los suyos.
    */
   goalCaptions?: GoalCaptionTexts;
+  /**
+   * Máximo con el que normalizar la intensidad, en lugar del máximo de las
+   * propias celdas.
+   *
+   * Existe para comparar DOS mapas entre sí. Sin él, cada pista se normaliza
+   * contra su propio máximo, así que una parte con 6 pérdidas en una zona y
+   * otra con 3 se pintan exactamente igual de oscuras y la comparación visual
+   * miente. Quien dibuja una pareja de mapas calcula el máximo de los dos y se
+   * lo pasa a ambos.
+   *
+   * Solo afecta al COLOR: los números de las celdas no se tocan. Un valor
+   * ausente, menor que 1 o no finito se ignora y se usa el máximo local, de
+   * modo que todos los consumidores que no lo pasan siguen igual que siempre.
+   */
+  maxOverride?: number;
   /** Texto cuando no hay ningún dato que representar. */
   emptyLabel?: string;
   className?: string;
@@ -369,6 +384,7 @@ export function FutsalPitch({
   compact = false,
   showGoalCaptions,
   goalCaptions = DEFAULT_GOAL_CAPTIONS,
+  maxOverride,
   emptyLabel = "Sin datos registrados",
   className,
   maxWidth,
@@ -403,7 +419,14 @@ export function FutsalPitch({
       );
 
   const values = cells.map((c) => counts?.[c.id] ?? 0);
-  const max = Math.max(...values, 1);
+  const localMax = Math.max(...values, 1);
+  // El máximo externo solo manda si es utilizable. Un 0, un negativo o un NaN
+  // haría que `count / max` devolviera basura, así que se descarta y se cae al
+  // máximo local — el comportamiento de siempre.
+  const max =
+    typeof maxOverride === "number" && Number.isFinite(maxOverride) && maxOverride >= 1
+      ? maxOverride
+      : localMax;
   const totalCounted = values.reduce((a, b) => a + b, 0);
   const cornerTotal = (corners?.left ?? 0) + (corners?.right ?? 0);
   const hasData = counts ? totalCounted + cornerTotal > 0 : true;

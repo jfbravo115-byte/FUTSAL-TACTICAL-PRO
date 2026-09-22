@@ -111,6 +111,24 @@ export function unlocatedCount(map: PeriodShotMap): number {
 }
 
 /** Línea de reconciliación: la suma de las partes tiene que dar el total. */
+/**
+ * Máximo que COMPARTEN los mapas de las partes.
+ *
+ * Sin esto cada pista se normalizaba contra su propio máximo, así que una
+ * parte con 6 tiros en una zona y otra con 3 se pintaban exactamente igual de
+ * oscuras: el color decía que las dos partes fueron iguales cuando no lo
+ * fueron. Solo cambia el COLOR — los recuentos de las celdas son los mismos.
+ */
+export function sharedShotMax(maps: PeriodShotMap[]): number {
+  let max = 1;
+  for (const m of maps) {
+    for (const n of Object.values(countZones(m.events))) {
+      if (n > max) max = n;
+    }
+  }
+  return max;
+}
+
 export function reconciliationLine(maps: PeriodShotMap[], total: number): string {
   const partes = maps.map((m) => `${periodLabel(m.period)} ${m.events.length}`).join(" · ");
   return `${partes} · Total ${total}`;
@@ -132,6 +150,7 @@ export function PeriodShotMapsBoard({
   accent?: string;
 }) {
   const maps = buildPeriodShotMaps(events, opponent);
+  const escala = sharedShotMax(maps);
   const legacy = isLegacyMatch(events);
   const total = maps.reduce((acc, m) => acc + m.events.length, 0);
   const color = accent ?? (opponent ? "#0ea5e9" : "#2563eb");
@@ -145,8 +164,9 @@ export function PeriodShotMapsBoard({
       <div style={{ fontSize: 8, color: muted, marginBottom: 10 }}>
         {reconciliationLine(maps, total)}
         {" — "}
-        los goles cuentan como intento. Los sectores no se invierten al cambiar de campo:
-        se guardan desde la perspectiva del equipo que ejecuta.
+        los goles cuentan como intento. La escala de color se comparte entre las partes, así
+        que un tono más oscuro significa más tiros. Los sectores no se invierten al cambiar
+        de campo: se guardan desde la perspectiva del equipo que ejecuta.
       </div>
       <div
         style={{
@@ -184,6 +204,7 @@ export function PeriodShotMapsBoard({
                 accent={color}
                 compact
                 maxWidth={width}
+                maxOverride={escala}
                 goalCaptions={captionsForRival(def.isRivalAction)}
                 emptyLabel="Sin tiros ubicados"
               />

@@ -301,3 +301,37 @@ describe("evolución por periodos · acciones no dibujables", () => {
     expect(metricLocated(c1.bucket, "recoveries")).toBe(0);
   });
 });
+
+// ── 32 / 33 · PR #23 INTACTA ────────────────────────────────────────────
+//
+// PR #24A toca la captura, no los informes. Estas guardias comprueban que la
+// página de evolución y la escala compartida siguen exactamente como se
+// validaron en producción.
+
+describe("32-33 · PR #23 no se toca", () => {
+  it("32 · la página sigue siendo tres métricas por parte, con su escala", () => {
+    const cols = buildPeriodColumns(partido());
+    expect(PERIOD_ZONE_METRICS.map((m) => m.key)).toEqual(["losses", "recoveries", "shots"]);
+    expect(sharedMax(cols, "losses")).toBe(6);
+    expect(sharedMax(cols, "recoveries")).toBe(4);
+    expect(sharedMax(cols, "shots")).toBe(4);
+  });
+
+  it("33 · FutsalPitch conserva maxOverride con su guardia de valor inutilizable", () => {
+    const fuente = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "../field/FutsalPitch.tsx"),
+      "utf-8",
+    ) as string;
+    expect(fuente).toContain("maxOverride?: number;");
+    expect(fuente).toContain(
+      'typeof maxOverride === "number" && Number.isFinite(maxOverride) && maxOverride >= 1',
+    );
+  });
+
+  it("la fase de juego NO se ha colado en la página de periodos", () => {
+    const t = texto(partido());
+    expect(t).not.toMatch(/fase/i);
+    expect(t).not.toContain("Ataque posicional");
+    expect(t).not.toContain("Transición");
+  });
+});

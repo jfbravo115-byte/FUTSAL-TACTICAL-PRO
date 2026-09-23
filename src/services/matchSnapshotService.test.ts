@@ -263,3 +263,46 @@ describe("copia local — persistencia del análisis de TACTICAL PRO", () => {
     expect(copia.matchData.teamName).toBeTruthy();
   });
 });
+
+// ── 13 / 28 · LA FASE SOBREVIVE A UNA RECARGA ───────────────────────────
+//
+// Es estado de captura, no un dato del partido: vive en `uiState`, junto a
+// la formación y la orientación, porque lo que se guarda en el historial son
+// los eventos y cada uno lleva ya la suya. Aquí solo está para que recargar a
+// mitad de parte no obligue a volver a declararla.
+
+describe("fase de juego en el snapshot", () => {
+  it("13 · se guarda y se recupera tal cual", () => {
+    saveMatchSnapshot(buildMatchData({ period: Period.SECOND }), {
+      gameState: GameState.SUPERIORITY,
+      currentPhaseOfPlay: "attack_transition",
+    });
+    const snap = loadMatchSnapshot();
+    expect(snap?.uiState?.currentPhaseOfPlay).toBe("attack_transition");
+    // y convive con la formación sin derivarse de ella
+    expect(snap?.uiState?.gameState).toBe(GameState.SUPERIORITY);
+  });
+
+  it("28 · un snapshot anterior a esto no trae fase, y no se inventa", () => {
+    saveMatchSnapshot(buildMatchData({ period: Period.SECOND }), {
+      gameState: GameState.FOUR_VS_FOUR,
+    });
+    expect(loadMatchSnapshot()?.uiState?.currentPhaseOfPlay).toBeUndefined();
+  });
+
+  it("un guardado posterior sin uiState no borra la fase", () => {
+    const md = buildMatchData({ period: Period.SECOND });
+    saveMatchSnapshot(md, { currentPhaseOfPlay: "defense_organized" });
+    // El guardado throttled del reloj llega sin uiState.
+    saveMatchSnapshot({ ...md, matchClock: 9000 });
+    expect(loadMatchSnapshot()?.uiState?.currentPhaseOfPlay).toBe("defense_organized");
+  });
+
+  it("la fase NO se guarda dentro de MatchData: ahí solo viajan los eventos", () => {
+    const md = buildMatchData({ period: Period.SECOND });
+    saveMatchSnapshot(md, { currentPhaseOfPlay: "attack_positional" });
+    const guardado = loadMatchSnapshot()!.matchData as any;
+    expect(guardado.currentPhaseOfPlay).toBeUndefined();
+    expect(guardado.phaseOfPlay).toBeUndefined();
+  });
+});

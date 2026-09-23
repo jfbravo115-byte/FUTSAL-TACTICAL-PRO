@@ -196,3 +196,61 @@ describe("respaldo JSON — conserva el análisis de TACTICAL PRO", () => {
     expect(restaurado.tacticalAnalysis).toBe(texto);
   });
 });
+
+// ── 30 / 31 · LA FASE EN EL CSV DE ACCIONES ─────────────────────────────
+//
+// Se añade AL FINAL para no mover ninguna columna existente: una hoja o un
+// script que leyera por posición sigue funcionando igual. Y un evento sin
+// fase deja la celda vacía, como el resto de columnas opcionales: escribir
+// «No registrada» convertiría la ausencia en un valor.
+
+describe("CSV de acciones · fase de juego", () => {
+  const conFase = (phaseOfPlay?: any): MatchData => ({
+    ...match,
+    events: [
+      { ...match.events[0], id: "f1", type: ActionType.LOSS, phaseOfPlay },
+    ],
+  });
+
+  it("30 · la cabecera incluye la columna «fase», la última", () => {
+    const cabecera = buildActionsCsv(match).split("\n")[0];
+    expect(cabecera).toContain('"fase"');
+    expect(cabecera.trim().endsWith('"fase"')).toBe(true);
+  });
+
+  it("las columnas anteriores no se mueven ni cambian de nombre", () => {
+    const cabecera = buildActionsCsv(match).split("\n")[0].replace(/^﻿/, "");
+    expect(cabecera.split(",").map((c) => c.replace(/"/g, ""))).toEqual([
+      "fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto",
+      "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto",
+      "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner",
+      "desenlace_balon_parado", "accion_desde", "fase",
+    ]);
+  });
+
+  it("una acción con fase la exporta con su nombre completo", () => {
+    const fila = buildActionsCsv(conFase("attack_positional")).split("\n")[1];
+    expect(fila.trim().endsWith('"Ataque posicional"')).toBe(true);
+  });
+
+  it("las cuatro fases se exportan legibles", () => {
+    const de = (p: string) => buildActionsCsv(conFase(p)).split("\n")[1];
+    expect(de("attack_transition")).toContain('"Transición ofensiva"');
+    expect(de("defense_organized")).toContain('"Defensa organizada"');
+    expect(de("defense_transition")).toContain('"Transición defensiva"');
+  });
+
+  it("31 · un evento histórico sin fase deja la celda VACÍA, no inventa valor", () => {
+    const fila = buildActionsCsv(conFase(undefined)).split("\n")[1];
+    expect(fila.trim().endsWith('""')).toBe(true);
+    expect(fila).not.toContain("No registrada");
+    expect(fila).not.toContain("Ataque posicional");
+  });
+
+  it("el JSON de respaldo conserva la fase sin ningún cambio extra", () => {
+    const parsed = JSON.parse(buildMatchJson(conFase("defense_transition")));
+    expect(parsed.events[0].phaseOfPlay).toBe("defense_transition");
+    const sinFase = JSON.parse(buildMatchJson(conFase(undefined)));
+    expect("phaseOfPlay" in sinFase.events[0]).toBe(false);
+  });
+});

@@ -8,6 +8,7 @@ import { formatMatchTime } from "../utils/goalSequence";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
+import { phaseCsvLabel } from "../utils/phaseModel";
 import { generateMatchReport } from "./matchReportService";
 
 const PERIOD_LABEL: Record<number, string> = {
@@ -39,7 +40,9 @@ function cornerSideLabel(e: { metadata?: Record<string, any>; originGrid?: strin
 export function buildActionsCsv(matchData: MatchData): string {
   // "zona" y "destino" conservan el identificador interno para poder cruzar
   // datos; "zona_texto" y "destino_texto" son los legibles.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde"];
+  // "fase" se añade AL FINAL para no mover ninguna columna existente: una
+  // hoja o un script que leyera por posición sigue funcionando igual.
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -79,6 +82,11 @@ export function buildActionsCsv(matchData: MatchData): string {
         cornerSideLabel(e),
         formatSetPieceOutcome(e) ?? "",
         formatSetPieceOrigin(e) ?? "",
+        // Fase de NUESTRO equipo al registrar la acción, también en un evento
+        // del rival. Vacío = no registrada, igual que el resto de columnas
+        // opcionales: escribir «No registrada» convertiría la ausencia en un
+        // valor y la haría indistinguible de un dato.
+        phaseCsvLabel(e.phaseOfPlay),
       ].map(csvCell).join(",");
     });
   return "\uFEFF" + [header.map(csvCell).join(","), ...rows].join("\n");

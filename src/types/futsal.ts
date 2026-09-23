@@ -25,6 +25,30 @@ export enum GameState {
   THREE_VS_THREE = '3vs3',
 }
 
+/**
+ * Fase de juego, la cuarta dimensión del análisis.
+ *
+ * NO ES LO MISMO QUE `GameState`
+ * -----------------------------
+ * `GameState` dice CUÁNTOS somos (4vs4, superioridad, portero-jugador);
+ * `PhaseOfPlay` dice QUÉ ESTAMOS HACIENDO. Son ortogonales: se puede estar en
+ * superioridad y en transición defensiva a la vez, y ninguna se deriva de la
+ * otra.
+ *
+ * NO SE DEDUCE, SE REGISTRA
+ * -------------------------
+ * No existe ningún campo de posesión en el modelo, así que deducir la fase de
+ * la zona o del tipo de acción sería inventarla. La marca el operador y solo
+ * cambia sola cuando el propio evento la determina: recuperar el balón ES el
+ * inicio de una transición ofensiva, perderlo ES el inicio de una defensiva.
+ * Ver src/utils/phaseModel.ts.
+ */
+export type PhaseOfPlay =
+  | "attack_positional"
+  | "attack_transition"
+  | "defense_organized"
+  | "defense_transition";
+
 export enum ActionType {
   GOAL = 'GOAL',
   SHOT = 'SHOT',
@@ -154,6 +178,18 @@ export type GameEvent = {
   onPitchPlayerIds?: string[];
   type: ActionType | GoalieAction;
   gameState: GameState;
+  /**
+   * Fase de NUESTRO equipo al registrar la acción. Ausente = no registrada.
+   *
+   * Describe SIEMPRE nuestra fase, también en un evento del rival: un tiro
+   * suyo mientras defendemos replegados lleva `defense_organized`, no la fase
+   * de su ataque. Misma convención que `gameState`, que en un evento rival
+   * también es el nuestro.
+   *
+   * Su ausencia NUNCA se rellena: ni con un valor por defecto, ni deduciéndola
+   * de la zona, del tipo de acción o del marcador.
+   */
+  phaseOfPlay?: PhaseOfPlay;
   originGrid?: string;
   destinationGrid?: string;
   /**

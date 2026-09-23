@@ -904,6 +904,22 @@ describe("objetivo 8 · el volumen por zona, declarado", () => {
     expect(Object.keys(payload.tacticalContext.zones).sort()).toEqual(["opponent", "team"]);
   });
 
+  it("34 · PR #24A no toca el payload: phaseOfPlay NO viaja al modelo", () => {
+    // La fase es captura determinista. Enviarla al modelo, y su entrada de
+    // glosario, será otra decisión después de validar la captura en un
+    // partido real.
+    const md: MatchData = {
+      ...partido(),
+      events: partido().events.map((e) => ({ ...e, phaseOfPlay: "attack_positional" as const })),
+    };
+    const payload = buildTacticalProPayload(md) as any;
+    expect(JSON.stringify(payload.deterministicReport)).not.toContain("phaseOfPlay");
+    expect(JSON.stringify(payload.tacticalContext)).not.toContain("phaseOfPlay");
+    expect(payload.tacticalContext.phases).toBeUndefined();
+    expect(payload.tacticalContext.zonesByPhase).toBeUndefined();
+    expect(TACTICAL_PRO_GLOSSARY.join("\n")).not.toMatch(/fase de juego|phaseOfPlay/i);
+  });
+
   it("y el total sigue pudiendo superar la suma de las categorías", () => {
     // Es exactamente el caso que el glosario explica, demostrado sobre el
     // payload real para que la afirmación no sea solo una promesa de texto.

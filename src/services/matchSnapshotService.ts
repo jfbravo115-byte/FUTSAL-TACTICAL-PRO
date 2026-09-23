@@ -5,7 +5,7 @@
  * La copia local es independiente del backend remoto y se mantiene incluso
  * después de sincronizar correctamente.
  */
-import { GameState, MatchData, Period } from "../types/futsal";
+import { GameState, MatchData, Period, PhaseOfPlay } from "../types/futsal";
 
 const SNAPSHOT_KEY = "futsal_active_match_snapshot_v1";
 export const FINAL_COPY_PREFIX = "futsal_final_copy_v1_";
@@ -15,6 +15,18 @@ export type MatchSnapshotUiState = {
   gameState?: GameState;
   rivalGameState?: GameState;
   isDataLocked?: boolean;
+  /**
+   * Fase de juego en curso.
+   *
+   * Vive AQUÍ y no en `MatchData` porque es estado de captura, no un dato del
+   * partido: lo que se guarda en el historial y se envía al servidor son los
+   * eventos, y cada uno lleva ya la suya. Aquí solo está para que una recarga
+   * accidental a mitad de parte no obligue a volver a declararla.
+   *
+   * Un snapshot anterior a esto no la trae, y entonces no hay fase: no se
+   * rellena con ningún valor por defecto.
+   */
+  currentPhaseOfPlay?: PhaseOfPlay;
 };
 
 export type MatchSnapshot = {

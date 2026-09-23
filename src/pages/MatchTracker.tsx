@@ -59,7 +59,18 @@ import {
   GoalieAction,
   Role,
   GoalkeeperInterventionZone,
+  PhaseOfPlay,
 } from "../types/futsal";
+import {
+  PHASE_LABEL,
+  nextPhaseAfterEvent,
+  parsePhaseOfPlay,
+  phaseAfterAttackTap,
+  phaseAfterDefenseTap,
+  phaseHeaderLabel,
+  isAttackPhase,
+  isDefensePhase,
+} from "../utils/phaseModel";
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
@@ -1305,6 +1316,9 @@ export default function MatchTracker() {
       if (snap.uiState?.gameState) setGameState(snap.uiState.gameState);
       if (snap.uiState?.rivalGameState) setRivalGameState(snap.uiState.rivalGameState);
       if (typeof snap.uiState?.isDataLocked === "boolean") setIsDataLocked(snap.uiState.isDataLocked);
+      // Un snapshot de una versión anterior no trae fase, y un valor
+      // desconocido se descarta: sin fase registrada se sigue sin ella.
+      applyPhaseOfPlay(parsePhaseOfPlay(snap.uiState?.currentPhaseOfPlay));
     }
     setShowRecoveryPrompt(false);
   };
@@ -1350,6 +1364,26 @@ export default function MatchTracker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchData, showRecoveryPrompt]);
 
+  // ── FASE DE JUEGO ─────────────────────────────────────────────────
+  //
+  // Arranca SIN REGISTRAR y así se queda hasta que el operador declare la
+  // primera: ni el saque inicial, ni el marcador, ni el periodo dicen quién
+  // tiene el balón, así que suponerlo sería inventarlo.
+  //
+  // EL REF ES EL AUTORITATIVO, NO EL STATE
+  // --------------------------------------
+  // `handleAction` lee su contexto del closure, no con un updater funcional.
+  // Con dos toques dentro del mismo frame, un `useState` le daría al segundo
+  // evento la fase ANTERIOR —un fallo silencioso que produce datos plausibles
+  // y falsos—. El ref se actualiza de forma síncrona y es el que se estampa;
+  // el state existe solo para repintar el selector.
+  const [phaseOfPlay, setPhaseOfPlay] = useState<PhaseOfPlay | undefined>(undefined);
+  const phaseOfPlayRef = useRef<PhaseOfPlay | undefined>(undefined);
+  const applyPhaseOfPlay = (next: PhaseOfPlay | undefined) => {
+    phaseOfPlayRef.current = next;
+    setPhaseOfPlay(next);
+  };
+
   const [gameState, setGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
   const [rivalGameState, setRivalGameState] = useState<GameState>(GameState.FOUR_VS_FOUR);
   const [isGameStateMenuOpen, setIsGameStateMenuOpen] = useState(false);
@@ -1390,11 +1424,17 @@ export default function MatchTracker() {
   useEffect(() => {
     if (showRecoveryPrompt || matchData.period === Period.FINISHED) return;
     if (!isMeaningfulActiveMatch(matchData)) return;
-    saveMatchSnapshot(matchData, { isFieldFlipped, gameState, rivalGameState, isDataLocked });
+    saveMatchSnapshot(matchData, {
+      isFieldFlipped,
+      gameState,
+      rivalGameState,
+      isDataLocked,
+      currentPhaseOfPlay: phaseOfPlay,
+    });
     // No incluir matchData: este efecto solo se dispara cuando cambia el estado
     // UI/táctico; el reloj ya tiene su propio guardado throttled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFieldFlipped, gameState, rivalGameState, isDataLocked, showRecoveryPrompt]);
+  }, [isFieldFlipped, gameState, rivalGameState, isDataLocked, phaseOfPlay, showRecoveryPrompt]);
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
@@ -1719,6 +1759,11 @@ export default function MatchTracker() {
     // cambio manual que el usuario ya hubiera hecho con el botón
     // "↔ Cambiar lado".
     setIsFieldFlipped((prev) => !prev);
+    // La fase NO cruza el descanso. Arrastrar la del último minuto de la 1ª
+    // parte al primer balón de la 2ª sería un dato falso: entre una y otra
+    // hay un saque de centro que la app no registra. El operador vuelve a
+    // declararla, igual que al empezar.
+    applyPhaseOfPlay(undefined);
     setIsEndFirstConfirmOpen(false);
     setIsDataLocked(true);
   };
@@ -2064,6 +2109,10 @@ export default function MatchTracker() {
             playerIds: [],
             type: ActionType.FORMATION_CHANGE,
             gameState: newState,
+            // Un cambio de formación NO altera la fase: son dos dimensiones
+            // independientes. Se estampa la que hubiera, para que el evento
+            // sea tan autodescriptivo como los demás.
+            ...(phaseOfPlayRef.current ? { phaseOfPlay: phaseOfPlayRef.current } : {}),
             metadata: { isOpponent },
             onPitchPlayerIds: updatedPlayers.filter(p => p.isOnPitch).map(p => p.id),
             scoreAtEvent: { team: currentGoals, opponent: currentOpponentGoals },
@@ -2374,6 +2423,11 @@ export default function MatchTracker() {
       (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
     ).length;
 
+    // ORDEN OBLIGATORIO: primero se lee la fase que había, después se crea el
+    // evento con ella, y solo al final se calcula la siguiente. Invertirlo
+    // etiquetaría cada acción con la fase que vino DESPUÉS de ella.
+    const phaseAtTap = phaseOfPlayRef.current;
+
     const newEvent: GameEvent = {
       id: `event-action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: matchData.matchClock,
@@ -2383,6 +2437,10 @@ export default function MatchTracker() {
       onPitchPlayerIds: onPitchIds,
       type,
       gameState,
+      // La fase QUE HABÍA al pulsar, leída del ref. El evento se la queda: la
+      // pérdida ocurrió mientras atacábamos, y que después pasemos a
+      // transición defensiva no cambia lo que ya pasó.
+      ...(phaseAtTap ? { phaseOfPlay: phaseAtTap } : {}),
       // Desnormalizada en el propio evento para que sea autodescriptivo: si
       // alguien edita despues la cabecera del partido, el evento sigue
       // diciendo con que orientacion se registro. undefined en partidos que
@@ -2509,6 +2567,11 @@ export default function MatchTracker() {
     if (newEvent.type === ActionType.SET_PIECE && !metadata?.originGrid) {
       setPendingRestartLocation({ eventId: newEvent.id });
     }
+
+    // ÚLTIMO PASO, y solo ahora: el evento ya se ha quedado con `phaseAtTap`,
+    // así que mover el estado no puede contaminarlo. Sin fase declarada no se
+    // inventa ninguna: `nextPhaseAfterEvent` devuelve undefined.
+    applyPhaseOfPlay(nextPhaseAfterEvent(type, isOpponentEvent, phaseAtTap));
   };
 
   /**
@@ -6083,6 +6146,57 @@ export default function MatchTracker() {
                 onSelect={(val) => handleGameStateChange(val, pitchView === 'opponent')}
                 isOpponent={pitchView === 'opponent'}
               />
+            </div>
+
+            {/* FASE DE JUEGO — otra dimensión, no otro selector de formación.
+                Dice QUÉ estamos haciendo; «FORMACIÓN» dice CUÁNTOS somos, y
+                las dos conviven sin derivarse la una de la otra.
+
+                Los dos botones responden a lo único que el operador puede
+                afirmar sin dudar mientras el partido corre: quién tiene el
+                balón. Que la fase sea posicional o de transición lo pone el
+                automatismo; pulsar significa siempre «ya está estabilizado».
+
+                El rótulo va SIEMPRE completo: en directo no hay tiempo de
+                descifrar abreviaturas. */}
+            <div className="px-1.5 py-1.5 border-b border-white/5 flex flex-col gap-1 bg-black/10 flex-shrink-0">
+              <span
+                className={`text-[9px] font-black uppercase tracking-widest leading-none ${
+                  phaseOfPlay === undefined
+                    ? "text-slate-500"
+                    : isAttackPhase(phaseOfPlay)
+                      ? "text-lime-400"
+                      : "text-amber-400"
+                }`}
+              >
+                {phaseHeaderLabel(phaseOfPlay)}
+              </span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => applyPhaseOfPlay(phaseAfterAttackTap())}
+                  disabled={isDataLocked}
+                  aria-pressed={isAttackPhase(phaseOfPlay)}
+                  className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all active:scale-95 disabled:opacity-40 ${
+                    isAttackPhase(phaseOfPlay)
+                      ? "bg-lime-400 text-slate-950 border-lime-400"
+                      : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  Atacamos
+                </button>
+                <button
+                  onClick={() => applyPhaseOfPlay(phaseAfterDefenseTap())}
+                  disabled={isDataLocked}
+                  aria-pressed={isDefensePhase(phaseOfPlay)}
+                  className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all active:scale-95 disabled:opacity-40 ${
+                    isDefensePhase(phaseOfPlay)
+                      ? "bg-amber-400 text-slate-950 border-amber-400"
+                      : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  Defendemos
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 flex flex-col gap-1 p-0.5 min-h-0 overflow-hidden relative">

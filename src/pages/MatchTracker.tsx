@@ -2137,6 +2137,16 @@ export default function MatchTracker() {
     const newCount = matchData.fouls[isTeam ? "team" : "opponent"] + 1;
     const foulEventId = `event-foul-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // MISMO CONTRATO QUE `handleAction`: la fase se lee del REF —nunca del
+    // state, que puede venir viejo— y se lee ANTES de construir el evento.
+    //
+    // Una falta NO cambia la fase (eso lo fija `phaseModel`, y por eso aquí
+    // no se llama a `nextPhaseAfterEvent`), pero sí ocurre DENTRO de una: que
+    // nos la hagan replegados o durante nuestro ataque posicional son dos
+    // hechos distintos. Era el único evento de los tres que se construyen en
+    // esta pantalla que no se la quedaba.
+    const phaseAtTap = phaseOfPlayRef.current;
+
     if (newCount === 4 || newCount === 5) {
       playAlertSound(newCount);
       setShowFoulWarning({
@@ -2160,6 +2170,10 @@ export default function MatchTracker() {
         onPitchPlayerIds: prev.players.filter((p) => p.isOnPitch).map((p) => p.id),
         type: ActionType.FOUL,
         gameState,
+        // La fase de NUESTRO equipo al registrarse la falta, la cometa quien
+        // la cometa: misma convención que `gameState`, que en un evento rival
+        // también es el nuestro. Ausente = no registrada, y no se rellena.
+        ...(phaseAtTap ? { phaseOfPlay: phaseAtTap } : {}),
         // La zona se guarda desde la perspectiva del equipo que COMETE la
         // falta. Una falta recibida se obtiene espejando en presentación,
         // nunca guardando una segunda zona.

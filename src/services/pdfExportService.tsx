@@ -49,6 +49,8 @@ import {
 } from "./matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { PeriodZoneMapsBoard, hasPeriodZoneData } from "../components/export/PeriodZoneMaps";
+import { PHASE_PAGES, PhaseZoneMapsBoard } from "../components/export/PhaseZoneMaps";
+import { hasPhaseData } from "../utils/phaseAnalysis";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
 import { ZONE_BANDS, ZoneBand, bandTotal, formatBandLabel } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
@@ -858,6 +860,32 @@ function buildMatchReportPages(
           <PeriodZoneMapsBoard matchData={matchData} />
         </>
       ),
+    });
+  }
+
+  // ── FASES DE JUEGO ────────────────────────────────────────────────
+  //
+  // Dos páginas propias, después de la evolución por periodos y sin tocar ni
+  // la portada ni aquella: las dos van con su presupuesto de alto ajustado.
+  //
+  // Solo existen si el partido trae la fase registrada. Un histórico anterior
+  // a PR #24A no la tiene —y `phaseOfPlay` ausente no se rellena nunca—, así
+  // que no gana ninguna página: dos hojas de pistas vacías no informan de
+  // nada y harían pensar que el dato existe y es cero.
+  if (hasPhaseData(matchData)) {
+    PHASE_PAGES.forEach((pagina) => {
+      pages.push({
+        key: pagina.key,
+        content: (
+          <>
+            <ReportHeader matchData={matchData} report={report} />
+            <div style={sectionTitleStyle}>
+              Fases de juego · {pagina.title} · {matchData.teamName}
+            </div>
+            <PhaseZoneMapsBoard matchData={matchData} metrics={pagina.metrics} />
+          </>
+        ),
+      });
     });
   }
 

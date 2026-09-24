@@ -7,6 +7,7 @@ import {
   Cpu,
   Download,
   FileText,
+  Layers,
   Loader2,
   RefreshCw,
   Target,
@@ -14,7 +15,7 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { ActionType, MatchData, SavedMatch, Role } from "../types/futsal";
+import { ActionType, MatchData, Period, SavedMatch, Role } from "../types/futsal";
 import { getPartido } from "../services/partidosService";
 import {
   getFinalLocalCopy,
@@ -31,7 +32,16 @@ import {
   zoneMetricValue,
 } from "../services/matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
-import { PeriodShotMapsBoard } from "../components/export/PeriodShotMaps";
+import { PeriodShotMapsBoard, periodLabel } from "../components/export/PeriodShotMaps";
+import { PhaseMetricRow } from "../components/export/PhaseZoneMaps";
+import {
+  PHASE_METRICS,
+  PhaseMetricKey,
+  hasPhaseData,
+  phaseCoverage,
+  phaseMetric,
+  phasePeriods,
+} from "../utils/phaseAnalysis";
 import { summarizePlayerShots } from "../utils/shotModel";
 import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZones";
 import { describeCorners } from "../utils/cornerModel";
@@ -80,9 +90,15 @@ export default function MatchAnalysis() {
   const [exportOpen, setExportOpen] = useState(false);
   const [zoneOpponent, setZoneOpponent] = useState(false);
   const [zoneMetric, setZoneMetric] = useState<ZoneMetric>("all");
+  // FASES DE JUEGO. Dos selectores independientes: la métrica decide QUÉ par
+  // de fases se contrasta y de quién son las acciones; el periodo acota el
+  // conjunto. Nunca hay más de dos mapas en pantalla.
+  const [phaseKey, setPhaseKey] = useState<PhaseMetricKey>("losses");
+  const [phasePeriod, setPhasePeriod] = useState<Period | undefined>(undefined);
 
   const summaryRef = useRef<HTMLDivElement>(null);
   const dataRef = useRef<HTMLDivElement>(null);
+  const phasesRef = useRef<HTMLDivElement>(null);
   const timesRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
   const aiRef = useRef<HTMLDivElement>(null);
@@ -211,6 +227,10 @@ export default function MatchAnalysis() {
   const players = match.players
     .filter((p) => !p.isOpponent && p.role !== Role.COACH && p.role !== Role.DELEGATE)
     .sort((a, b) => a.number - b.number);
+  // Cobertura de la métrica y el periodo que se están viendo: cambia con los
+  // dos selectores, porque «49 de 54» solo significa algo sobre el conjunto
+  // que el lector tiene delante.
+  const phaseCoverageNow = phaseCoverage(match, phaseMetric(phaseKey), phasePeriod);
   const bucket = primaryBucket(zones);
   const bucketZones = bucket?.zones ?? [];
   const maxZoneValue = Math.max(...bucketZones.map((z) => zoneMetricValue(z, zoneMetric)), 1);
@@ -256,6 +276,7 @@ export default function MatchAnalysis() {
             {[
               ["Resumen", summaryRef, Trophy],
               ["Datos / Zonas", dataRef, BarChart3],
+              ["Fases", phasesRef, Layers],
               ["Tiempos", timesRef, Timer],
               ["Informe", reportRef, FileText],
               ["Tactical Pro", aiRef, Cpu],
@@ -471,6 +492,80 @@ export default function MatchAnalysis() {
               <div className="mt-3 text-[10px] text-slate-500">Precisión registrada: <b className="text-white">{zones.totals.accuracyPct ?? "—"}{zones.totals.accuracyPct !== null ? "%" : ""}</b>. Los tiros sin destino registrado se mantienen en el total, pero no se usan para calcular la precisión ni se asignan a una celda.</div>
             </div>
           </div>
+        </section>
+
+        {/* ── FASES DE JUEGO ──────────────────────────────────────────
+            La cuarta dimensión. Solo aparece si el partido la trae
+            registrada: un histórico anterior a PR #24A no la tiene y aquí no
+            se deduce de nada, así que se dice y no se dibuja nada. */}
+        <section ref={phasesRef} className="scroll-mt-28 rounded-3xl border border-violet-500/20 bg-violet-500/5 p-5">
+          <div className="mb-4">
+            <h2 className="font-black text-white uppercase flex items-center gap-2"><Layers size={18} className="text-violet-400"/> Fases de juego</h2>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Qué estábamos haciendo cuando ocurrió cada acción. La fase es siempre la de {match.teamName}, también en las acciones del rival.
+            </p>
+          </div>
+
+          {!hasPhaseData(match) ? (
+            <div data-phase-empty className="rounded-2xl border border-white/10 bg-black/20 p-4 text-[11px] text-slate-400">
+              <b className="text-slate-300">Fase de juego no registrada en este partido.</b>{" "}
+              La captura de fase se estrenó después de este partido y la ausencia no se rellena:
+              deducirla ahora de la zona o del tipo de acción sería inventarla.
+            </div>
+          ) : (
+            <>
+              {/* Cobertura ANTES de los mapas: una cobertura baja no invalida
+                  el mapa, pero tiene que leerse antes que él. */}
+              <div data-phase-coverage className="rounded-2xl border border-white/10 bg-black/20 p-3 mb-3">
+                <div className="text-[9px] uppercase font-black text-slate-500 mb-1">Cobertura de fase</div>
+                <div className="text-[11px] text-slate-300">
+                  {phaseCoverageNow.withPhase}/{phaseCoverageNow.total} acciones
+                  {phaseCoverageNow.pct !== null ? ` · ${phaseCoverageNow.pct.toFixed(1).replace(".", ",")} %` : " · sin acciones"}
+                </div>
+                {phaseCoverageNow.withoutPhase > 0 && (
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {phaseCoverageNow.withoutPhase} sin fase registrada — no se reparten entre las fases.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-2">
+                {PHASE_METRICS.map((m) => (
+                  <button
+                    key={m.key}
+                    data-phase-metric={m.key}
+                    onClick={() => setPhaseKey(m.key)}
+                    className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase border whitespace-nowrap ${phaseKey === m.key ? "bg-white text-slate-950 border-white" : "bg-black/20 text-slate-400 border-white/10"}`}
+                  >
+                    {m.shortTitle}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+                {[undefined, ...phasePeriods(match)].map((p) => (
+                  <button
+                    key={p === undefined ? "total" : p}
+                    data-phase-period={p === undefined ? "total" : String(p)}
+                    onClick={() => setPhasePeriod(p)}
+                    className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase border whitespace-nowrap ${phasePeriod === p ? "bg-violet-400 text-slate-950 border-violet-400" : "bg-black/20 text-slate-400 border-white/10"}`}
+                  >
+                    {p === undefined ? "Total" : periodLabel(p)}
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <PhaseMetricRow
+                  matchData={match}
+                  metric={phaseMetric(phaseKey)}
+                  period={phasePeriod}
+                  theme="dark"
+                  pitchWidth={320}
+                />
+              </div>
+            </>
+          )}
         </section>
 
         <section ref={timesRef} className="scroll-mt-28 rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5 overflow-x-auto">

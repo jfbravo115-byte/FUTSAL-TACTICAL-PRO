@@ -1652,3 +1652,127 @@ describe("PDF · evolución por periodos", () => {
     }
   });
 });
+
+// ── PR #24B · LAS DOS PÁGINAS DE FASES ──────────────────────────────────
+//
+// Condicionadas: un partido sin fase registrada no gana ni una hoja. Esto se
+// comprueba contando páginas del informe real, no inspeccionando la función.
+
+describe("PDF · fases de juego", () => {
+  const rep = (n: number, f: () => GameEvent) => Array.from({ length: n }, f);
+  const E = (o: Partial<GameEvent>) => event({ metadata: { isOpponent: false }, ...o });
+  const R = (o: Partial<GameEvent>) => event({ metadata: { isOpponent: true }, ...o });
+
+  async function paginas(md: MatchData): Promise<string[]> {
+    // Se limpia AQUÍ porque un test exporta dos informes y compara cuántas
+    // páginas tiene cada uno: sin esto, el segundo arrastraría las del
+    // primero y la resta daría cualquier cosa.
+    toJpegMock.mockClear();
+    await exportMatchReportPdf(md);
+    return toJpegMock.mock.calls.map((c) =>
+      ((c[0] as HTMLElement).textContent || "").replace(/\s+/g, " "),
+    );
+  }
+
+  /** Un partido con las cuatro métricas repartidas entre sus dos fases. */
+  const conFases = () =>
+    matchData({
+      events: [
+        ...rep(4, () => E({ type: ActionType.LOSS, originGrid: "Z3C", period: Period.FIRST, phaseOfPlay: "attack_positional" })),
+        ...rep(2, () => E({ type: ActionType.LOSS, originGrid: "Z4R", period: Period.SECOND, phaseOfPlay: "attack_transition" })),
+        ...rep(3, () => E({ type: ActionType.STEAL, originGrid: "Z2C", period: Period.FIRST, phaseOfPlay: "defense_organized" })),
+        ...rep(1, () => E({ type: ActionType.INTERCEPTION, originGrid: "Z3L", period: Period.SECOND, phaseOfPlay: "defense_transition" })),
+        ...rep(2, () => E({ type: ActionType.SHOT, originGrid: "Z4C", period: Period.FIRST, phaseOfPlay: "attack_positional" })),
+        ...rep(1, () => E({ type: ActionType.GOAL, originGrid: "Z4L", period: Period.SECOND, phaseOfPlay: "attack_transition" })),
+        ...rep(2, () => R({ type: ActionType.SHOT, originGrid: "Z4C", period: Period.FIRST, phaseOfPlay: "defense_organized" })),
+        ...rep(1, () => R({ type: ActionType.SHOT, originGrid: "Z3R", period: Period.SECOND, phaseOfPlay: "defense_transition" })),
+        // Una pérdida sin fase: tiene que aparecer declarada, no repartida.
+        E({ type: ActionType.LOSS, originGrid: "Z2L", period: Period.SECOND }),
+      ],
+    });
+
+  it("son exactamente DOS páginas, y van después de la evolución por periodos", async () => {
+    const p = await paginas(conFases());
+    const periodos = p.findIndex((t) => t.includes("Evolución por periodos"));
+    const a = p.findIndex((t) => t.includes("Fases de juego · Pérdidas y recuperaciones"));
+    const b = p.findIndex((t) => t.includes("Fases de juego · Finalización"));
+    expect(periodos).toBe(1);
+    expect(a).toBe(2);
+    expect(b).toBe(3);
+    expect(p.filter((t) => t.includes("Fases de juego ·"))).toHaveLength(2);
+  });
+
+  it("la página A lleva pérdidas y recuperaciones con sus cuatro mapas", async () => {
+    const t = (await paginas(conFases()))[2];
+    expect(t).toContain("Pérdidas");
+    expect(t).toContain("Recuperaciones");
+    expect(t).toContain("Ataque posicional · 4");
+    expect(t).toContain("Transición ofensiva · 2");
+    expect(t).toContain("Defensa organizada · 3");
+    expect(t).toContain("Transición defensiva · 1");
+    expect(t).not.toContain("Tiros rivales");
+  });
+
+  it("la página B lleva los tiros propios y los del rival", async () => {
+    const t = (await paginas(conFases()))[3];
+    expect(t).toContain("Tiros propios");
+    expect(t).toContain("Tiros rivales");
+    expect(t).toContain("1 gol");
+    expect(t).not.toContain("Recuperaciones");
+  });
+
+  it("cada página dice su cobertura y cierra su reconciliación", async () => {
+    const p = await paginas(conFases());
+    expect(p[2]).toContain("Cobertura de fase · 6/7");
+    expect(p[2]).toContain("sin fase 1 = 7");
+    expect(p[3]).toContain("Cobertura de fase · 3/3 · 100,0 %");
+  });
+
+  it("una acción sin fase se declara y NO se reparte entre las dos", async () => {
+    const t = (await paginas(conFases()))[2];
+    expect(t).toContain("Sin fase registrada · 1");
+    expect(t).toContain("no pertenecen a ninguna fase");
+  });
+
+  it("un partido SIN fase registrada no gana ninguna página", async () => {
+    const sinFase = matchData({
+      events: [
+        ...rep(6, () => E({ type: ActionType.LOSS, originGrid: "Z2C", period: Period.FIRST })),
+        ...rep(4, () => E({ type: ActionType.SHOT, originGrid: "Z4C", period: Period.SECOND })),
+      ],
+    });
+    const p = await paginas(sinFase);
+    expect(p.some((t) => t.includes("Fases de juego"))).toBe(false);
+    // …y la evolución por periodos, que sí aplica, sigue estando.
+    expect(p.some((t) => t.includes("Evolución por periodos"))).toBe(true);
+  });
+
+  it("un histórico de 9 celdas tampoco", async () => {
+    const p = await paginas(matchData({ events: rep(4, () => E({ type: ActionType.SHOT, originGrid: "B2" })) }));
+    expect(p.some((t) => t.includes("Fases de juego"))).toBe(false);
+  });
+
+  it("con fase, el informe gana exactamente 2 páginas respecto a sin fase", async () => {
+    const eventos = conFases().events;
+    const conN = (await paginas(matchData({ events: eventos }))).length;
+    const sinN = (
+      await paginas(matchData({ events: eventos.map(({ phaseOfPlay, ...e }) => e as GameEvent) }))
+    ).length;
+    expect(conN - sinN).toBe(2);
+  });
+
+  it("la portada y la evolución por periodos quedan intactas", async () => {
+    const p = await paginas(conFases());
+    expect(p[0]).toContain("Volumen de acciones por zona · Mi Equipo");
+    expect(p[0]).not.toContain("Fases de juego");
+    expect(p[1]).toContain("La escala se comparte entre las partes de cada fila");
+    expect(p[1]).not.toContain("Fases de juego");
+    expect(p[1]).not.toContain("Ataque posicional");
+  });
+
+  it("no se llama a Tactical Pro para construirlas", async () => {
+    generateTacticalReportMock.mockClear();
+    await paginas(conFases());
+    expect(generateTacticalReportMock).not.toHaveBeenCalled();
+  });
+});

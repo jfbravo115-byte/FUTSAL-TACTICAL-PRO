@@ -51,6 +51,30 @@ export type PhaseOfPlay =
 
 export enum ActionType {
   GOAL = 'GOAL',
+  /**
+   * Gol en propia puerta. Tipo PROPIO, no un `GOAL` disfrazado.
+   *
+   * QUIÉN LO EJECUTA Y A QUIÉN SUMA SON DOS COSAS DISTINTAS
+   * ------------------------------------------------------
+   * En cualquier otro evento `metadata.isOpponent` responde a la vez «de quién
+   * es esta acción» y, si marca, «quién sube al marcador». En un gol en propia
+   * esas dos respuestas son contrarias: lo ejecuta un jugador de un equipo y
+   * puntúa el otro. `metadata.isOpponent` sigue siendo el EQUIPO DEL AUTOR; el
+   * beneficiario lo deriva `utils/goalModel`, que es quien decide el marcador.
+   *
+   * POR QUÉ UN TIPO NUEVO
+   * --------------------
+   * `isShotAttempt` es una enumeración cerrada (SHOT, GOAL, GOAL_CONCEDED), así
+   * que un tipo nuevo queda fuera de los tiros, de la precisión, de la
+   * conversión y de los mapas de finalización sin tener que sembrar excepciones
+   * por todo el proyecto. Y ningún partido anterior puede contenerlo: la
+   * compatibilidad es total y no hace falta migrar nada.
+   *
+   * El jugador es OPCIONAL —en directo no siempre se reconoce— pero el equipo
+   * del autor nunca lo es. Sin jugador no se toca ninguna estadística
+   * individual y jamás se inventa un autor.
+   */
+  OWN_GOAL = 'OWN_GOAL',
   SHOT = 'SHOT',
   ASSIST = 'ASSIST',
   FOUL = 'FOUL',

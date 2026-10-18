@@ -27,9 +27,10 @@
  * null. Restar `wallClock` daría un número —pero mediría el descanso, los
  * tiempos muertos y cada parada de reloj, que no es tiempo de juego.
  */
-import { ActionType, GameEvent, GoalieAction, MatchData, Period } from "../types/futsal";
+import { GameEvent, MatchData, Period } from "../types/futsal";
 import { chronologicalIndexed, playingTimeBetween } from "./eventOrder";
 import { SET_PIECE_ORIGIN_LABEL, setPieceOriginOf } from "./setPieceModel";
+import { actorSide, beneficiarySide, isGoalEvent, isOwnGoal } from "./goalModel";
 
 /** Procedencia del gol. `unknown` = no se registró. Nunca se deduce. */
 export type GoalSource =
@@ -47,8 +48,16 @@ export const GOAL_SOURCE_LABEL: Record<GoalSource, string> = {
 
 export type GoalSequenceEntry = {
   eventId: string;
-  /** Quién marcó, desde nuestra perspectiva. */
+  /** Quién SUBE AL MARCADOR, desde nuestra perspectiva. */
   scoringTeam: "team" | "opponent";
+  /**
+   * Gol en propia puerta: lo mete un jugador del equipo CONTRARIO al que
+   * puntúa. Quien lo lee necesita saberlo para no atribuírselo al que se
+   * apunta el tanto — ver `playerSide`.
+   */
+  isOwnGoal: boolean;
+  /** Equipo del jugador que ejecuta. Distinto de `scoringTeam` solo si es en propia. */
+  playerSide: "team" | "opponent";
   playerId: string | null;
   playerName: string | null;
   playerNumber: number | null;
@@ -66,9 +75,6 @@ export type GoalSequenceEntry = {
   /** Desde el gol anterior del OTRO equipo: el tiempo de respuesta. */
   secondsSinceOpponentPreviousGoal: number | null;
 };
-
-const isGoalEvent = (e: GameEvent) =>
-  e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED;
 
 /** `"12:34"` a partir de milisegundos de juego. */
 export function formatMatchTime(milliseconds: number): string {
@@ -95,6 +101,11 @@ function toSeconds(milliseconds: number | null): number | null {
  * entra en la secuencia igual que un `GOAL`: su `metadata.isOpponent` ya dice
  * que lo marcó el rival. No se cuenta dos veces porque los dos tipos no
  * coexisten para un mismo gol.
+ *
+ * Un `OWN_GOAL` también entra —sube al marcador igual que cualquier otro—,
+ * pero quién lo ejecuta y quién puntúa son bandos CONTRARIOS. Lo decide
+ * `utils/goalModel`, no esta función, para que la secuencia y el marcador no
+ * puedan discrepar.
  */
 export function buildGoalSequence(matchData: MatchData): GoalSequenceEntry[] {
   const goles = chronologicalIndexed(matchData?.events || [])
@@ -112,24 +123,26 @@ export function buildGoalSequence(matchData: MatchData): GoalSequenceEntry[] {
   const salida: GoalSequenceEntry[] = [];
 
   for (const event of goles) {
-    const esRival = !!event.metadata?.isOpponent;
-    const scoringTeam: "team" | "opponent" = esRival ? "opponent" : "team";
-    const otro: "team" | "opponent" = esRival ? "team" : "opponent";
+    // Quién PUNTÚA y quién EJECUTA. Coinciden salvo en el gol en propia.
+    const scoringTeam = beneficiarySide(event);
+    const playerSide = actorSide(event);
+    const otro: "team" | "opponent" = scoringTeam === "team" ? "opponent" : "team";
 
     // El marcador se lleva contando, y `scoreAtEvent` manda cuando existe:
     // es lo que se guardó en el momento del gol.
-    marcador = esRival
-      ? { ...marcador, opponent: marcador.opponent + 1 }
-      : { ...marcador, team: marcador.team + 1 };
+    marcador = { ...marcador, [scoringTeam]: marcador[scoringTeam] + 1 };
     const scoreAfter = event.scoreAtEvent ? { ...event.scoreAtEvent } : { ...marcador };
 
-    // El goleador es el jugador del bando que marca. El portero que encaja
-    // también está en playerIds, y no es quien marcó.
+    // El autor es el jugador del bando que EJECUTA, que en un gol en propia
+    // no es el que se apunta el tanto. El portero que encaja también está en
+    // playerIds, y no es quien lo metió. Puede no haber autor: un gol en
+    // propia se puede registrar sin identificar al jugador, y entonces no se
+    // inventa ninguno.
     const goleador =
       jugadores.find(
         (p) =>
           event.playerIds?.includes(p.id) &&
-          !!p.isOpponent === esRival &&
+          !!p.isOpponent === (playerSide === "opponent") &&
           event.metadata?.targetGoalkeeperId !== p.id,
       ) ?? null;
 
@@ -138,6 +151,8 @@ export function buildGoalSequence(matchData: MatchData): GoalSequenceEntry[] {
     salida.push({
       eventId: event.id,
       scoringTeam,
+      isOwnGoal: isOwnGoal(event),
+      playerSide,
       playerId: goleador?.id ?? null,
       playerName: goleador?.name ?? null,
       playerNumber: goleador?.number ?? null,

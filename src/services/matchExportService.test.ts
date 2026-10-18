@@ -212,10 +212,22 @@ describe("CSV de acciones · fase de juego", () => {
     ],
   });
 
-  it("30 · la cabecera incluye la columna «fase», la última", () => {
-    const cabecera = buildActionsCsv(match).split("\n")[0];
+  it("30 · la cabecera incluye «fase», en su posición de siempre", () => {
+    // Lo que se protege es que NINGUNA columna existente se mueva. «fase» se
+    // añadió al final en PR #24A y ahí sigue, en el índice 20; lo que viene
+    // después son columnas nuevas, añadidas también al final por el mismo
+    // motivo: una hoja o un script que lea por posición sigue funcionando.
+    const cabecera = buildActionsCsv(match).split("\n")[0].replace(/^﻿/, "");
+    const columnas = cabecera.split(",").map((c) => c.replace(/"/g, ""));
     expect(cabecera).toContain('"fase"');
-    expect(cabecera.trim().endsWith('"fase"')).toBe(true);
+    expect(columnas.indexOf("fase")).toBe(20);
+  });
+
+  it("y «gol_para» se añade DESPUÉS, sin desplazar nada", () => {
+    const cabecera = buildActionsCsv(match).split("\n")[0].replace(/^﻿/, "");
+    const columnas = cabecera.split(",").map((c) => c.replace(/"/g, ""));
+    expect(columnas[columnas.length - 1]).toBe("gol_para");
+    expect(columnas.indexOf("gol_para")).toBe(21);
   });
 
   it("las columnas anteriores no se mueven ni cambian de nombre", () => {
@@ -224,13 +236,16 @@ describe("CSV de acciones · fase de juego", () => {
       "fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto",
       "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto",
       "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner",
-      "desenlace_balon_parado", "accion_desde", "fase",
+      "desenlace_balon_parado", "accion_desde", "fase", "gol_para",
     ]);
   });
 
   it("una acción con fase la exporta con su nombre completo", () => {
     const fila = buildActionsCsv(conFase("attack_positional")).split("\n")[1];
-    expect(fila.trim().endsWith('"Ataque posicional"')).toBe(true);
+    // Se lee por POSICIÓN, no por ser la última celda: detrás de «fase» hay
+    // ahora otra columna y lo que importa es que la fase siga en su sitio.
+    const celdas = fila.split(",").map((c) => c.replace(/"/g, ""));
+    expect(celdas[celdas.length - 2]).toBe("Ataque posicional");
   });
 
   it("las cuatro fases se exportan legibles", () => {

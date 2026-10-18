@@ -71,6 +71,23 @@ import {
   isAttackPhase,
   isDefensePhase,
 } from "../utils/phaseModel";
+import {
+  actorSide,
+  beneficiarySide,
+  describeOwnGoalActor,
+  describeOwnGoalBenefit,
+  isGoalEvent,
+  isOwnGoal,
+  scoreAfterAdding,
+  scoreOf,
+  scoresFor,
+  sideName,
+  OWN_GOAL_LABEL,
+} from "../utils/goalModel";
+import {
+  describeRegisteredAction,
+  deservesConfirmation,
+} from "../utils/actionSummary";
 import { exportToCSV, exportForNotebookLM } from "../lib/exportUtils";
 import { PlayerActionRadialMenu } from "../components/PlayerActionRadialMenu";
 import { TacticalAnalyst } from "../components/TacticalAnalyst";
@@ -1438,6 +1455,33 @@ export default function MatchTracker() {
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
+  /**
+   * Lo último que se ha registrado, para confirmarlo y poder deshacerlo.
+   *
+   * Con los dos equipos accesibles a la vez, un toque puede irse al equipo
+   * equivocado sin que nada chirríe. La confirmación dice en voz alta qué se
+   * acaba de guardar y ofrece el camino de vuelta durante unos segundos; si
+   * no se usa, desaparece sola y el evento queda.
+   */
+  const [lastRegistered, setLastRegistered] = useState<GameEvent | null>(null);
+  const lastRegisteredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmRegistered = (event: GameEvent) => {
+    if (!deservesConfirmation(event)) return;
+    if (lastRegisteredTimer.current) clearTimeout(lastRegisteredTimer.current);
+    setLastRegistered(event);
+    lastRegisteredTimer.current = setTimeout(() => setLastRegistered(null), 7000);
+  };
+  const undoLastRegistered = () => {
+    const event = lastRegistered;
+    if (!event) return;
+    if (lastRegisteredTimer.current) clearTimeout(lastRegisteredTimer.current);
+    setLastRegistered(null);
+    deleteEventRef.current?.(event);
+  };
+  // `handleDeleteEvent` se declara más abajo; el ref evita reordenar 400
+  // líneas de handlers solo para que la confirmación pueda llamarlo.
+  const deleteEventRef = useRef<((e: GameEvent) => void) | null>(null);
+
   const [exportToast, setExportToast] = useState<string | null>(null);
 
   const showExportToast = (msg: string) => {
@@ -1821,19 +1865,20 @@ export default function MatchTracker() {
   };
 
   const copySummaryToClipboard = () => {
-    const goalsList = matchData.events
-      .filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent)
-      .map((e) => {
-        const p = matchData.players.find((pl) => pl.id === e.playerIds[0]);
-        return `• ${p?.name || "N/A"} (${formatTime(e.timestamp)})`;
-      });
-
-    const opponentGoalsList = matchData.events
-      .filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent)
-      .map((e) => {
-        const p = matchData.players.find((pl) => pl.id === e.playerIds[0]);
-        return `• ${p?.name || "N/A"} (${formatTime(e.timestamp)})`;
-      });
+    // Las dos listas van por BENEFICIARIO, que es lo que cuadra con el
+    // marcador. Un gol en propia aparece en la lista del equipo que puntúa,
+    // pero rotulado con quién lo metió: atribuírselo a un jugador del que
+    // puntúa sería inventarle un gol que no hizo.
+    const lineaGol = (e: GameEvent) => {
+      const p = matchData.players.find((pl) => pl.id === e.playerIds[0]);
+      if (isOwnGoal(e)) {
+        const autorEquipo = actorSide(e) === "team" ? matchData.teamName : matchData.opponentName;
+        return `• ${describeOwnGoalActor(p?.number ?? null, p?.name ?? null)} (${autorEquipo}) (${formatTime(e.timestamp)})`;
+      }
+      return `• ${p?.name || "N/A"} (${formatTime(e.timestamp)})`;
+    };
+    const goalsList = matchData.events.filter((e) => scoresFor(e, "team")).map(lineaGol);
+    const opponentGoalsList = matchData.events.filter((e) => scoresFor(e, "opponent")).map(lineaGol);
 
     const localStats = {
       // Intentos reales del equipo. Sumar `stats.shots` dejaba fuera los
@@ -2089,12 +2134,9 @@ export default function MatchTracker() {
         return p;
       });
 
-      const currentGoals = prev.events.filter(
-        (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-      ).length;
-      const currentOpponentGoals = prev.events.filter(
-        (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-      ).length;
+      // Marcador desde `utils/goalModel`: es el único que sabe que un gol en
+      // propia suma al equipo contrario del que lo mete.
+      const marcador = scoreOf(prev.events);
 
       return {
         ...prev,
@@ -2115,7 +2157,7 @@ export default function MatchTracker() {
             ...(phaseOfPlayRef.current ? { phaseOfPlay: phaseOfPlayRef.current } : {}),
             metadata: { isOpponent },
             onPitchPlayerIds: updatedPlayers.filter(p => p.isOnPitch).map(p => p.id),
-            scoreAtEvent: { team: currentGoals, opponent: currentOpponentGoals },
+            scoreAtEvent: marcador,
           },
         ],
       };
@@ -2158,6 +2200,17 @@ export default function MatchTracker() {
       setTimeout(() => setShowFoulWarning(null), 5000);
     }
 
+    let foulEventParaConfirmar: GameEvent = {
+      id: foulEventId,
+      timestamp: matchData.matchClock,
+      wallClock: Date.now(),
+      period: matchData.period,
+      playerIds: playerId ? [playerId] : [],
+      type: ActionType.FOUL,
+      gameState,
+      metadata: { isOpponent: !isTeam },
+    };
+
     setMatchData((prev) => {
       const foulEvent: GameEvent = {
         id: foulEventId,
@@ -2180,11 +2233,10 @@ export default function MatchTracker() {
         attackDirection:
           attackDirection(prev.teamDefendsAtKickoff, prev.period, !isTeam) ?? undefined,
         metadata: { isOpponent: !isTeam },
-        scoreAtEvent: {
-          team: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent).length,
-          opponent: prev.events.filter((e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent).length,
-        },
+        scoreAtEvent: scoreOf(prev.events),
       };
+
+      foulEventParaConfirmar = foulEvent;
 
       // Las dos dimensiones reglamentarias, con las mismas funciones que usa
       // el borrado (utils/foulModel): equipo e individual.
@@ -2201,6 +2253,8 @@ export default function MatchTracker() {
         })),
       };
     });
+
+    confirmRegistered(foulEventParaConfirmar);
 
     // La falta YA está registrada y contabilizada. Este paso solo añade la
     // ubicación al evento existente y puede descartarse sin consecuencias.
@@ -2430,12 +2484,13 @@ export default function MatchTracker() {
       eventPlayerIds.push(effectivePlayerId);
     }
 
-    const currentGoals = matchData.events.filter(
-      (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-    ).length;
-    const currentOpponentGoals = matchData.events.filter(
-      (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-    ).length;
+    // El marcador YA CON este evento dentro, calculado por `utils/goalModel`:
+    // un gol en propia sube al equipo contrario del que lo mete, y eso no
+    // puede decidirlo esta pantalla por su cuenta.
+    const marcadorTrasEvento = scoreAfterAdding(matchData.events, {
+      type,
+      metadata: { isOpponent: isOpponentEvent },
+    });
 
     // ORDEN OBLIGATORIO: primero se lee la fase que había, después se crea el
     // evento con ella, y solo al final se calcula la siguiente. Invertirlo
@@ -2472,10 +2527,7 @@ export default function MatchTracker() {
         // atribución y el borrado no dependan de esa inferencia.
         ...(targetGoalieId ? { targetGoalkeeperId: targetGoalieId } : {}),
       },
-      scoreAtEvent: {
-        team: currentGoals + (isGoal && !isOpponentEvent ? 1 : 0),
-        opponent: currentOpponentGoals + (isGoal && isOpponentEvent ? 1 : 0),
-      },
+      scoreAtEvent: marcadorTrasEvento,
     };
 
     setMatchData((prev) => {
@@ -2532,17 +2584,12 @@ export default function MatchTracker() {
           stats.exitsSuccess = (stats.exitsSuccess ?? 0) + gkDelta.exitsSuccess;
         }
 
-        // Global Plus/Minus logic (only for Local Team)
-        if (!p.isOpponent && p.isOnPitch) {
-          if (type === ActionType.GOAL && !isOpponentEvent) {
-            pm += 1;
-          }
-          if (
-            isOpponentEvent &&
-            (type === ActionType.GOAL || type === GoalieAction.GOAL_CONCEDED)
-          ) {
-            pm -= 1;
-          }
+        // Plus/Minus (solo jugadores nuestros en pista). Lo decide quién
+        // SUBE AL MARCADOR, no de quién es el evento: un gol en propia
+        // nuestro es un evento nuestro y un tanto del rival, así que resta.
+        const esteGol = { type, metadata: { isOpponent: isOpponentEvent } };
+        if (!p.isOpponent && p.isOnPitch && isGoalEvent(esteGol)) {
+          pm += beneficiarySide(esteGol) === "team" ? 1 : -1;
         }
 
         return { ...p, stats, plusMinus: pm };
@@ -2581,6 +2628,8 @@ export default function MatchTracker() {
     if (newEvent.type === ActionType.SET_PIECE && !metadata?.originGrid) {
       setPendingRestartLocation({ eventId: newEvent.id });
     }
+
+    confirmRegistered(newEvent);
 
     // ÚLTIMO PASO, y solo ahora: el evento ya se ha quedado con `phaseAtTap`,
     // así que mover el estado no puede contaminarlo. Sin fase declarada no se
@@ -2691,10 +2740,10 @@ export default function MatchTracker() {
           // goalieStatsDelta; no se duplican aqui.
         }
 
-        // Revert plusMinus if we have the on-pitch list
-        if (event.onPitchPlayerIds?.includes(p.id)) {
-          if (event.type === ActionType.GOAL) pm -= 1;
-          if (event.type === GoalieAction.GOAL_CONCEDED) pm += 1;
+        // Revertir el plus/minus con el MISMO criterio con el que se sumó:
+        // el beneficiario del gol, no el bando del evento.
+        if (event.onPitchPlayerIds?.includes(p.id) && isGoalEvent(event)) {
+          pm -= beneficiarySide(event) === "team" ? 1 : -1;
         }
 
         return { ...p, stats, plusMinus: pm };
@@ -2732,6 +2781,9 @@ export default function MatchTracker() {
     });
     setDeleteConfirmEvent(null);
   };
+  // La confirmación necesita poder deshacer sin depender del orden de
+  // declaración de los handlers dentro del componente.
+  deleteEventRef.current = handleDeleteEvent;
 
   const executeSwap = (id: string, forceTargetSelection = false) => {
     if (isDataLocked) return;
@@ -3241,16 +3293,8 @@ export default function MatchTracker() {
     );
   };
 
-  const goals = matchData?.events?.filter(
-    (e) =>
-      (e?.type === ActionType?.GOAL || e?.type === GoalieAction?.GOAL_CONCEDED) &&
-      !e?.metadata?.isOpponent,
-  )?.length || 0;
-  const opponentGoals = matchData?.events?.filter(
-    (e) =>
-      (e?.type === ActionType?.GOAL || e?.type === GoalieAction?.GOAL_CONCEDED) &&
-      e?.metadata?.isOpponent,
-  )?.length || 0;
+  // EL MARCADOR de la pantalla. Fuente única: `utils/goalModel`.
+  const { team: goals, opponent: opponentGoals } = scoreOf(matchData?.events);
 
   const localStaff = matchData?.players?.filter(p => !p.isOpponent && (p.role === Role.COACH || p.role === Role.DELEGATE)) || [];
   const localStaffYellows = localStaff.reduce((sum, p) => sum + p.stats.yellowCards, 0);
@@ -3832,6 +3876,50 @@ export default function MatchTracker() {
           </>
         );
       })()}
+
+      {/* ── CONFIRMACIÓN DE LO ÚLTIMO REGISTRADO ────────────────────────
+          Dice equipo, jugador y acción —y, en un gol en propia, a quién le
+          suma— y deja deshacerlo durante unos segundos. Con los dos equipos
+          accesibles desde la misma pantalla, esta línea es lo único que
+          distingue «he registrado el tiro del rival» de «se lo he apuntado a
+          los míos». No bloquea: si no se toca, se va sola. */}
+      {lastRegistered && (
+        <div
+          data-last-registered
+          className="fixed left-1/2 -translate-x-1/2 bottom-3 z-[1500] w-[min(94vw,520px)] px-1"
+        >
+          <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-slate-900/95 backdrop-blur-md px-3 py-2 shadow-2xl shadow-black/60">
+            <div className="min-w-0 flex-1">
+              <div className="text-[8px] font-black uppercase tracking-widest text-slate-500">
+                Registrado
+              </div>
+              <div className="text-[11px] font-bold text-white leading-tight truncate">
+                {describeRegisteredAction(lastRegistered, matchData)}
+              </div>
+              {lastRegistered.phaseOfPlay && (
+                <div className="text-[8px] uppercase tracking-widest text-slate-500 mt-0.5">
+                  {PHASE_LABEL[lastRegistered.phaseOfPlay]}
+                </div>
+              )}
+            </div>
+            <button
+              data-undo-last
+              onClick={undoLastRegistered}
+              disabled={isDataLocked}
+              className="shrink-0 px-3 py-2 rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 text-[10px] font-black uppercase hover:bg-red-500/25 disabled:opacity-40"
+            >
+              Deshacer
+            </button>
+            <button
+              aria-label="Cerrar confirmación"
+              onClick={() => setLastRegistered(null)}
+              className="shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── EXPORT LOADING OVERLAY ─────────────── */}
       {exportToast && (
@@ -4440,7 +4528,7 @@ export default function MatchTracker() {
 
       {/* DASHBOARD BODY - REORGANIZED FOR NO SCROLLING */}
       <main className={`px-2 py-1 grid gap-1 overflow-hidden min-h-0
-        ${activeTab === "pitch" ? "grid-cols-1 lg:grid-cols-[240px_1fr]" : "grid-cols-1 lg:grid-cols-[240px_1fr_240px]"} mb-0 mt-0 h-full`}>
+        grid-cols-1 lg:grid-cols-[240px_1fr_240px] mb-0 mt-0 h-full`}>
         {/* LEFT: ANALYSIS CONSOLE (Goalie, Timeline, Stats) */}
         <aside
           className={`bg-white/5 border border-white/5 rounded-2xl flex flex-col overflow-hidden backdrop-blur-md ${activeTab === "pitch" ? "hidden lg:flex" : "flex h-full lg:h-auto"}`}
@@ -4613,15 +4701,15 @@ export default function MatchTracker() {
                               <div
                                 key={e.id}
                                 className={`p-2 bg-white/5 border border-white/5 rounded-lg flex items-center justify-between gap-3 group transition-all hover:bg-white/10 ${
-                                  e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED 
-                                    ? "ring-1 ring-green-500/30 bg-green-500/5" 
+                                  isGoalEvent(e)
+                                    ? "ring-1 ring-green-500/30 bg-green-500/5"
                                     : ""
                                 }`}
                               >
                                 <div className="flex flex-col gap-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className={`text-[8px] font-mono font-black ${
-                                      e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED ? "text-green-400" : "text-blue-400"
+                                      isGoalEvent(e) ? "text-green-400" : "text-blue-400"
                                     }`}>
                                       {formatTime(e.timestamp)}
                                     </span>
@@ -6104,22 +6192,49 @@ export default function MatchTracker() {
         <div
           className={`flex flex-col gap-1 overflow-hidden ${activeTab !== "pitch" ? "hidden lg:flex" : "flex"} flex-1 min-h-0 relative max-h-full`}
         >
-          {/* PITCH TOGGLE HUD - Always visible to switch views */}
-          <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/10 gap-1 flex-shrink-0">
-            <button
-              onClick={() => setPitchView("local")}
-              className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center justify-center gap-2 ${pitchView === "local" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "text-slate-500 hover:text-slate-300"}`}
-            >
-              <Shield size={10} />
-              {matchData.teamName || "LOCAL"}
-            </button>
-            <button
-              onClick={() => setPitchView("opponent")}
-              className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center justify-center gap-2 ${pitchView === "opponent" ? "bg-red-600 text-white shadow-lg shadow-red-500/30" : "text-slate-500 hover:text-slate-300"}`}
-            >
-              <ShieldAlert size={10} />
-              {matchData.opponentName || "RIVAL"}
-            </button>
+          {/* ── EQUIPO SELECCIONADO ─────────────────────────────────────
+              Decide a qué equipo y jugador se registra lo que se toque en la
+              pista. NO decide el contexto táctico: Atacamos/Defendemos es un
+              estado aparte, siempre referido a NUESTRO equipo, y cambiar de
+              equipo aquí no lo altera ni invierte el campo.
+
+              El que está seleccionado se marca con texto («Seleccionado»),
+              con un anillo y con `aria-pressed`, no solo con el color: en
+              una tablet a pleno sol el color es lo primero que se pierde. */}
+          <div className="flex-shrink-0">
+            <div className="text-[7px] font-black uppercase tracking-widest text-slate-500 px-1 pb-0.5">
+              Equipo seleccionado · registra las acciones de la pista
+            </div>
+            <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/10 gap-1">
+              {([
+                { id: "local" as const, nombre: matchData.teamName || "LOCAL", Icono: Shield, sel: "bg-blue-600 text-white ring-2 ring-blue-300 shadow-lg shadow-blue-500/30" },
+                { id: "opponent" as const, nombre: matchData.opponentName || "RIVAL", Icono: ShieldAlert, sel: "bg-red-600 text-white ring-2 ring-red-300 shadow-lg shadow-red-500/30" },
+              ]).map(({ id, nombre, Icono, sel }) => {
+                const activo = pitchView === id;
+                return (
+                  <button
+                    key={id}
+                    data-team-select={id}
+                    aria-pressed={activo}
+                    onClick={() => setPitchView(id)}
+                    className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase transition-all flex flex-col items-center justify-center gap-0.5 ${activo ? sel : "text-slate-500 hover:text-slate-300"}`}
+                  >
+                    <span className="flex items-center justify-center gap-1.5 max-w-full truncate px-1">
+                      <Icono size={10} className="shrink-0" />
+                      <span className="truncate">{nombre}</span>
+                    </span>
+                    {/* El rótulo solo EXISTE en el seleccionado. Ponerlo
+                        siempre y esconderlo con opacidad dejaba a los dos
+                        botones diciendo «Seleccionado» a un lector de
+                        pantalla, que es justo a quien el color no le sirve.
+                        El hueco se reserva con un espaciador vacío. */}
+                    <span className="text-[6px] tracking-widest" aria-hidden={!activo}>
+                      {activo ? "● Seleccionado" : "\u00A0"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* ORIENTACIÓN VISUAL DEL CAMPO — control discreto, solo afecta
@@ -6471,11 +6586,158 @@ export default function MatchTracker() {
                   <span className="text-[7px] uppercase leading-none px-0.5 text-slate-200">PÉRD.</span>
                 </button>
               </div>
+
+              {/* ── ACCIONES RÁPIDAS DEL OTRO EQUIPO ────────────────────
+                  El problema que resuelve: para apuntar un tiro del rival
+                  había que conmutar la pantalla entera y volver. Aquí las
+                  cuatro acciones que más se repiten se registran SIN cambiar
+                  de equipo seleccionado, y cada una dice a quién va antes de
+                  pulsarla.
+
+                  No se pierde precisión por ahorrar un toque: las que
+                  necesitan jugador siguen pidiéndolo, exactamente con el
+                  mismo modal. La falta ya se registra sin autor desde
+                  siempre, así que ahí no se pregunta nada nuevo.
+
+                  Cambiar de equipo aquí NO toca Atacamos/Defendemos: la fase
+                  es de NUESTRO equipo pase lo que pase, también en una
+                  acción del rival. */}
+              {(() => {
+                const otroEsRival = pitchView === "local";
+                const nombreOtro = (otroEsRival ? matchData.opponentName : matchData.teamName) || (otroEsRival ? "RIVAL" : "LOCAL");
+                const acciones: { id: string; label: string; onClick: () => void }[] = [
+                  { id: "gol", label: "Gol", onClick: () => setPendingAction({ type: ActionType.GOAL, step: "player", isOpponent: otroEsRival }) },
+                  { id: "tiro", label: "Tiro", onClick: () => setPendingAction({ type: ActionType.SHOT, step: "player", isOpponent: otroEsRival }) },
+                  { id: "falta", label: "Falta", onClick: () => handleFoul(!otroEsRival) },
+                  { id: "perdida", label: "Pérdida", onClick: () => setPendingAction({ type: ActionType.LOSS, isOpponent: otroEsRival, step: "subtype" }) },
+                  { id: "timeout", label: "T. muerto", onClick: () => handleAction(ActionType.TIMEOUT, undefined, { metadata: { isOpponent: otroEsRival } }) },
+                ];
+                return (
+                  <div
+                    data-other-team-quick
+                    data-other-team={otroEsRival ? "opponent" : "team"}
+                    className={`mt-1 rounded-xl border p-1.5 flex items-center gap-1.5 flex-shrink-0 flex-wrap sm:flex-nowrap ${
+                      otroEsRival ? "border-red-500/30 bg-red-950/20" : "border-blue-500/30 bg-blue-950/20"
+                    }`}
+                  >
+                    <span
+                      className={`text-[8px] font-black uppercase tracking-widest shrink-0 max-w-[72px] truncate ${
+                        otroEsRival ? "text-red-300" : "text-blue-300"
+                      }`}
+                      title={nombreOtro}
+                    >
+                      {nombreOtro}
+                    </span>
+                    {/* En móvil las cinco acciones no caben en una fila sin
+                        quedarse en botones de 49 px, que es menos de lo que
+                        se acierta con el pulgar en una banda. Se permiten dos
+                        filas: antes dos filas legibles que una sola fila que
+                        obliga a mirar. */}
+                    <div className="flex gap-1 flex-1 basis-full sm:basis-auto min-w-0 flex-wrap sm:flex-nowrap">
+                      {acciones.map((a) => (
+                        <button
+                          key={a.id}
+                          data-other-action={a.id}
+                          disabled={isDataLocked}
+                          onClick={a.onClick}
+                          className={`flex-1 min-w-[72px] min-h-[40px] py-2 rounded-lg text-[9px] font-black uppercase border transition-all active:scale-95 disabled:opacity-40 truncate px-1 ${
+                            otroEsRival
+                              ? "bg-red-500/15 border-red-500/40 text-red-200 hover:bg-red-500/25"
+                              : "bg-blue-500/15 border-blue-500/40 text-blue-200 hover:bg-blue-500/25"
+                          }`}
+                        >
+                          {a.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
 
-        {/* RIGHT: BENCH & ROSTER (Player Management) - HIDDEN ON PITCH TAB AS REQUESTED */}
+        {/* ── DERECHA ─────────────────────────────────────────────────────
+            En modo pista, y solo en escritorio, esta columna enseña el OTRO
+            equipo: el que no está seleccionado. Así los dos están a la vista
+            a la vez sin que haya dos campos, dos marcadores ni dos relojes —
+            el partido sigue siendo uno. En tablet y móvil no cabe una segunda
+            plantilla completa, y ahí el otro equipo se opera desde la franja
+            compacta de acciones rápidas que hay bajo la pista. */}
+        {activeTab === "pitch" && (() => {
+          const otroEsRival = pitchView === "local";
+          const nombreOtro = (otroEsRival ? matchData.opponentName : matchData.teamName) || (otroEsRival ? "RIVAL" : "LOCAL");
+          const plantillaOtro = matchData.players.filter(
+            (p) => p.isOpponent === otroEsRival && p.role !== Role.COACH && p.role !== Role.DELEGATE,
+          );
+          const enPista = plantillaOtro.filter((p) => p.isOnPitch);
+          const banquillo = plantillaOtro.filter((p) => !p.isOnPitch);
+          return (
+            <aside
+              data-other-team-panel
+              className="hidden lg:flex bg-white/5 border border-white/5 rounded-2xl flex-col overflow-hidden backdrop-blur-md"
+            >
+              <div className={`p-3 border-b border-white/5 ${otroEsRival ? "bg-red-950/30" : "bg-blue-950/30"}`}>
+                <div className="text-[7px] font-black uppercase tracking-widest text-slate-500">
+                  Otro equipo · no seleccionado
+                </div>
+                <div className={`text-[11px] font-black uppercase truncate ${otroEsRival ? "text-red-300" : "text-blue-300"}`}>
+                  {nombreOtro}
+                </div>
+                <div className="text-[9px] font-mono font-black text-white mt-0.5">
+                  {otroEsRival ? opponentGoals : goals} gol{(otroEsRival ? opponentGoals : goals) === 1 ? "" : "es"}
+                </div>
+                <button
+                  data-select-other-team
+                  onClick={() => setPitchView(otroEsRival ? "opponent" : "local")}
+                  className={`mt-2 w-full py-2 rounded-xl text-[9px] font-black uppercase border transition-all active:scale-95 ${
+                    otroEsRival
+                      ? "bg-red-500/20 border-red-500/50 text-red-200 hover:bg-red-500/30"
+                      : "bg-blue-500/20 border-blue-500/50 text-blue-200 hover:bg-blue-500/30"
+                  }`}
+                >
+                  Seleccionar este equipo
+                </button>
+              </div>
+              <div className="p-2 flex flex-col gap-2 min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+                {([
+                  { titulo: "En pista", lista: enPista },
+                  { titulo: "Banquillo", lista: banquillo },
+                ]).map(({ titulo, lista }) => (
+                  <div key={titulo}>
+                    <div className="text-[8px] font-black uppercase tracking-widest text-slate-600 pb-1">
+                      {titulo} · {lista.length}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {lista.map((p) => (
+                        <div
+                          key={p.id}
+                          className="relative p-1.5 rounded-lg bg-black/25 border border-white/10 flex items-center gap-1.5 overflow-hidden"
+                        >
+                          <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
+                          <span className="w-5 h-5 shrink-0 rounded bg-black/50 border border-white/10 flex items-center justify-center text-[9px] font-black">
+                            {p.number}
+                          </span>
+                          <span className="text-[8px] font-black uppercase text-slate-300 truncate">
+                            {p.name.split(" ")[0]}
+                          </span>
+                          <div className="absolute top-0.5 right-0.5">
+                            <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
+                          </div>
+                        </div>
+                      ))}
+                      {lista.length === 0 && (
+                        <div className="col-span-2 text-[8px] text-slate-600 italic px-1">Sin jugadores</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </aside>
+          );
+        })()}
+
+        {/* RIGHT: BENCH & ROSTER (Player Management) */}
         <aside
           className={`bg-white/5 border border-white/5 rounded-2xl flex flex-col overflow-hidden backdrop-blur-md ${activeTab === "pitch" ? "hidden" : "hidden lg:flex"}`}
         >
@@ -7085,6 +7347,88 @@ export default function MatchTracker() {
                   })}
                 </div>
 
+                {/* ── GOL o GOL EN PROPIA ───────────────────────────────
+                    Dos tipos de evento distintos, no un gol con una marca.
+                    El conmutador vive aquí y no en el campo porque el error
+                    que previene se comete al registrar, no al elegir el
+                    botón: desde fuera los dos son «el equipo X ha marcado».
+
+                    Se puede cambiar de idea en cualquier momento antes de
+                    confirmar; al hacerlo se limpia la procedencia, que para
+                    un gol en propia no significa nada. */}
+                {(pendingAction.type === ActionType.GOAL ||
+                  pendingAction.type === ActionType.OWN_GOAL) && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { tipo: ActionType.GOAL, label: "Gol", icono: "⚽" },
+                        { tipo: ActionType.OWN_GOAL, label: OWN_GOAL_LABEL, icono: "🥅" },
+                      ].map((opt) => {
+                        const sel = pendingAction.type === opt.tipo;
+                        return (
+                          <button
+                            key={opt.tipo}
+                            data-goal-kind={opt.tipo}
+                            aria-pressed={sel}
+                            onClick={() =>
+                              setPendingAction((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      type: opt.tipo,
+                                      // La procedencia (jugada, córner, penalti…)
+                                      // describe un tiro. Un gol en propia no lo es.
+                                      setPiece: opt.tipo === ActionType.OWN_GOAL ? undefined : prev.setPiece,
+                                      destinationGrid: opt.tipo === ActionType.OWN_GOAL ? undefined : prev.destinationGrid,
+                                      step: prev.step === "target" && opt.tipo === ActionType.OWN_GOAL ? "origin" : prev.step,
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className={`py-3 rounded-2xl text-[11px] font-black uppercase border-2 transition-all active:scale-95 flex items-center justify-center gap-2 ${
+                              sel
+                                ? opt.tipo === ActionType.OWN_GOAL
+                                  ? "bg-orange-500 text-slate-950 border-orange-400"
+                                  : "bg-green-500 text-slate-950 border-green-400"
+                                : "bg-white/5 text-slate-400 border-white/10"
+                            }`}
+                          >
+                            <span aria-hidden="true">{opt.icono}</span> {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {pendingAction.type === ActionType.OWN_GOAL && (() => {
+                      const autor = matchData.players.find((p) => p.id === pendingAction.playerId);
+                      const nombres = {
+                        teamName: matchData.teamName || "LOCAL",
+                        opponentName: matchData.opponentName || "RIVAL",
+                      };
+                      const ladoAutor = pendingAction.isOpponent ? "opponent" : "team";
+                      const ladoBeneficiario = pendingAction.isOpponent ? "team" : "opponent";
+                      return (
+                        <div
+                          data-own-goal-notice
+                          className="rounded-2xl border-2 border-orange-500/40 bg-orange-500/10 p-3 text-center"
+                        >
+                          <div className="text-[11px] font-black uppercase text-orange-300 leading-tight">
+                            {describeOwnGoalBenefit(
+                              sideName(ladoAutor, nombres),
+                              sideName(ladoBeneficiario, nombres),
+                              autor ? { number: autor.number, name: autor.name } : undefined,
+                            )}
+                          </div>
+                          <div className="text-[9px] text-orange-200/70 mt-1">
+                            Suma al marcador de {sideName(ladoBeneficiario, nombres)}. No cuenta como
+                            tiro ni como gol de ningún jugador suyo.
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 {/* Content based on Step */}
                 <div className="min-h-[200px] flex flex-col items-center justify-center">
                   {pendingAction.step === "player" && (
@@ -7092,11 +7436,15 @@ export default function MatchTracker() {
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">
                         {pendingAction.type === GoalieAction.GOAL_CONCEDED
                           ? "¿Quién encajó el gol?"
-                          : "¿Quién realizó la acción?"}
+                          : pendingAction.type === ActionType.OWN_GOAL
+                            ? "¿Quién lo introdujo en su propia portería?"
+                            : "¿Quién realizó la acción?"}
                       </label>
                       <PlayerSelector
-                        players={matchData.players.filter(p => 
-                          (pendingAction.type === ActionType.GOAL || pendingAction.type === ActionType.SHOT) 
+                        players={matchData.players.filter(p =>
+                          (pendingAction.type === ActionType.GOAL ||
+                            pendingAction.type === ActionType.OWN_GOAL ||
+                            pendingAction.type === ActionType.SHOT)
                           ? p.isOpponent === pendingAction.isOpponent
                           : true
                         )}
@@ -7118,13 +7466,33 @@ export default function MatchTracker() {
                             : undefined
                         }
                       />
+                      {/* En directo no siempre se ve quién la metió. El
+                          marcador no puede esperar a saberlo, así que el gol
+                          se registra igual y el autor queda SIN rellenar: no
+                          se le adjudica al portero ni a nadie. El equipo del
+                          autor sí es obligatorio, y ya lo fija el botón. */}
+                      {pendingAction.type === ActionType.OWN_GOAL && (
+                        <button
+                          data-own-goal-unknown-player
+                          onClick={() =>
+                            setPendingAction((prev) =>
+                              prev ? { ...prev, playerId: undefined, step: "origin" } : prev,
+                            )
+                          }
+                          className="w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-black uppercase text-slate-300"
+                        >
+                          Jugador no identificado
+                        </button>
+                      )}
                     </div>
                   )}
 
                   {pendingAction.step === "origin" && (
                     <div className="w-full space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block italic">
-                        Selecciona Zona de Origen (Pista)
+                        {pendingAction.type === ActionType.OWN_GOAL
+                          ? "¿Desde qué zona? (opcional)"
+                          : "Selecciona Zona de Origen (Pista)"}
                       </label>
                       <PitchZones
                         onSelect={(id) => {
@@ -7139,7 +7507,14 @@ export default function MatchTracker() {
                                 originGrid: id,
                                 metadata: {
                                   isOpponent: current.isOpponent,
-                                  setPiece: current.setPiece || "normal",
+                                  // `setPiece` describe de dónde salió un
+                                  // TIRO. Un gol en propia no es un tiro, así
+                                  // que no se le escribe procedencia: poner
+                                  // «normal» afirmaría algo sobre una jugada
+                                  // ofensiva que no existió.
+                                  ...(current.type === ActionType.OWN_GOAL
+                                    ? {}
+                                    : { setPiece: current.setPiece || "normal" }),
                                   subType: current.subType,
                                 },
                               },
@@ -7165,6 +7540,24 @@ export default function MatchTracker() {
                         }}
                         selected={pendingAction.originGrid}
                       />
+                      {/* La zona es información extra; el tanto no. Omitirla
+                          deja el gol registrado y sin ubicación, igual que
+                          una falta sin ubicar. */}
+                      {pendingAction.type === ActionType.OWN_GOAL && (
+                        <button
+                          data-own-goal-no-zone
+                          onClick={() => {
+                            const current = pendingAction;
+                            setPendingAction(null);
+                            handleAction(current.type, current.playerId, {
+                              metadata: { isOpponent: current.isOpponent },
+                            });
+                          }}
+                          className="w-full py-3 rounded-2xl bg-orange-500 hover:bg-orange-400 text-slate-950 text-[11px] font-black uppercase"
+                        >
+                          Registrar sin zona
+                        </button>
+                      )}
                     </div>
                   )}
 

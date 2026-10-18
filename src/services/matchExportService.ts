@@ -9,6 +9,7 @@ import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { phaseCsvLabel } from "../utils/phaseModel";
+import { beneficiarySide, isGoalEvent } from "../utils/goalModel";
 import { generateMatchReport } from "./matchReportService";
 
 const PERIOD_LABEL: Record<number, string> = {
@@ -42,7 +43,7 @@ export function buildActionsCsv(matchData: MatchData): string {
   // datos; "zona_texto" y "destino_texto" son los legibles.
   // "fase" se añade AL FINAL para no mover ninguna columna existente: una
   // hoja o un script que leyera por posición sigue funcionando igual.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase"];
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase", "gol_para"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -87,6 +88,15 @@ export function buildActionsCsv(matchData: MatchData): string {
         // opcionales: escribir «No registrada» convertiría la ausencia en un
         // valor y la haría indistinguible de un dato.
         phaseCsvLabel(e.phaseOfPlay),
+        // Equipo que SUBE AL MARCADOR con este gol. En un gol normal es el
+        // mismo que la columna `equipo`; en un gol en propia es el contrario,
+        // y sin esta columna la exportación no conservaría el beneficiario.
+        // Vacío en todo lo que no sea gol: no hay nada que decir.
+        isGoalEvent(e)
+          ? beneficiarySide(e) === "team"
+            ? matchData.teamName
+            : matchData.opponentName
+          : "",
       ].map(csvCell).join(",");
     });
   return "\uFEFF" + [header.map(csvCell).join(","), ...rows].join("\n");

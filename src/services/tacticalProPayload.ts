@@ -137,6 +137,23 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "último contador reglamentario registrado y sigue SIN ser el total del partido. No " +
     "deduzcas faltas de PlayerStats, de los dobles penaltis, de los goles, de las tarjetas, " +
     "del texto narrativo ni de las zonas.",
+  "GOL EN PROPIA: el tipo de evento 'OWN_GOAL' es un gol en propia puerta. Lo ejecuta un " +
+    "jugador del equipo que indica 'metadata.isOpponent' y SUMA AL MARCADOR DEL EQUIPO " +
+    "CONTRARIO a ese. Es el ÚNICO evento del modelo donde el equipo del autor y el equipo " +
+    "que puntúa son contrarios. El marcador de 'deterministicReport.score' ya lo tiene en " +
+    "cuenta: NO lo recalcules ni lo sumes aparte.",
+  "GOL EN PROPIA, lo que NO es: no es un tiro, no es un gol ofensivo del equipo beneficiado " +
+    "y no cuenta en sus tiros, su precisión ni su conversión. No se lo atribuyas como mérito " +
+    "a ningún jugador del equipo que puntúa: no lo hizo nadie suyo. En " +
+    "'deterministicReport.goalSequence' viene con 'isOwnGoal: true', 'scoringTeam' (quien " +
+    "puntúa) y 'playerSide' (el equipo del autor), que son contrarios.",
+  "GOL EN PROPIA, autor desconocido: el jugador es OPCIONAL. Si 'playerId' y 'playerName' " +
+    "son null, el autor no se pudo identificar en directo. Dilo así —«gol en propia, autor no " +
+    "identificado»— y NO lo adjudiques al portero, al defensa más cercano ni a ningún otro " +
+    "jugador. El equipo del autor sí consta siempre.",
+  "GOL EN PROPIA, partidos antiguos: ningún partido anterior a esta función contiene " +
+    "'OWN_GOAL'. Su ausencia NO significa que no hubiera: significa que entonces no se podía " +
+    "registrar. No deduzcas goles en propia de un marcador que no cuadre con los goleadores.",
   "Doble penalti: 'setPiece' con valor 'double_penalty' describe la PROCEDENCIA de un tiro " +
     "o de un gol, no una infracción. El evento FOUL es la falta cometida y es un registro " +
     "distinto: un doble penalti NO equivale a un nuevo evento FOUL ni lo implica. No " +

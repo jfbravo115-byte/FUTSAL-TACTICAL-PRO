@@ -21,6 +21,7 @@ import { SET_PIECE_RESTART_LABEL } from "./setPieceModel";
 /** Etiquetas de los tipos que no necesitan mirar el metadata. */
 const SIMPLE_LABEL: Partial<Record<string, string>> = {
   [ActionType.GOAL]: "⚽ Gol",
+  [ActionType.OWN_GOAL]: "🥅 Gol en propia",
   [ActionType.SHOT]: "🎯 Tiro",
   [ActionType.ASSIST]: "👟 Asistencia",
   [ActionType.UNFORCED_ERROR]: "❌ Pérdida",

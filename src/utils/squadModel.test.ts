@@ -460,12 +460,17 @@ describe("11 · las tarjetas se pulsan, y se pulsan sobre un jugador concreto", 
   });
 });
 
-describe("el aura disciplinaria llega a las tres representaciones del jugador", () => {
-  it("pista, banquillo y radial de CAMBIO usan el mismo componente", () => {
-    // Tres superficies, una sola implementación: es lo que evita que una de
+describe("el aura disciplinaria llega a TODAS las representaciones del jugador", () => {
+  it("pista, banquillo, radial de CAMBIO y panel del otro equipo usan el mismo componente", () => {
+    // Cuatro superficies, una sola implementación: es lo que evita que una de
     // ellas se quede sin el indicador rojo, como pasaba en el banquillo.
+    //
+    // La cifra es EXACTA a propósito: si alguien añade una quinta tarjeta de
+    // jugador sin el aura, el recuento se queda en cuatro y este test cae.
+    // La cuarta la estrena el panel del equipo NO seleccionado, que desde la
+    // doble vista enseña su plantilla en escritorio.
     const auras = matchTracker.match(/<DisciplinaryAura /g) || [];
-    expect(auras.length).toBe(3);
+    expect(auras.length).toBe(4);
     expect(matchTracker).toContain("disciplinaryState(player)");
     expect(matchTracker).toContain("disciplinaryState(p)");
   });

@@ -147,7 +147,11 @@ describe("19, 35 · ningún flujo de acción gana un paso", () => {
 
 describe("17 · borrar un evento no reconstruye la fase", () => {
   it("handleDeleteEvent no toca el estado de fase", () => {
-    const ini = fuente.indexOf("const handleDeleteEvent");
+    // Ancla COMPLETA, con su paréntesis: `indexOf("const handleDeleteEvent")`
+    // casaba también con cualquier identificador que empezara igual, y
+    // entonces el corte se iba al principio del componente y la guardia
+    // medía medio fichero.
+    const ini = fuente.indexOf("const handleDeleteEvent = (");
     const fin = fuente.indexOf("const executeSwap", ini);
     expect(ini).toBeGreaterThan(-1);
     expect(fin).toBeGreaterThan(ini);

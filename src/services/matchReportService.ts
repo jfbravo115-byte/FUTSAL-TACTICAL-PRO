@@ -36,8 +36,8 @@ import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/
 import {
   describeOwnGoalActor,
   isGoalEvent as isGoalEventModel,
+  isOffensiveGoal,
   scoreOf,
-  scoresFor,
 } from "../utils/goalModel";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import {
@@ -358,15 +358,21 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   const recoveries = sumStat("steals") + sumStat("interceptions");
   const lossesAndErrors = sumStat("losses") + sumStat("errors");
 
+  // Goles que NUESTRO equipo fabricó atacando. NO es el marcador: un gol en
+  // propia del rival sube el marcador sin que nadie nuestro lo produjera, y
+  // meterlo aquí inflaba la conversión —se vio un 200 % con un tiro y dos
+  // goles—. El marcador vive en `score`, que es otra pregunta.
+  const offensiveGoals = eventosPropios.filter(isOffensiveGoal).length;
+
   const teamTotals = {
-    goals: score.team,
+    goals: offensiveGoals,
     shots: shotEvents.length,
     shotsOnTarget,
     shotsOffTarget,
     shotsBlocked,
     shotsUnknownTarget,
     shotAccuracyPct: pct(shotsOnTarget, shotsOnTarget + shotsOffTarget),
-    goalConversionPct: pct(score.team, shotEvents.length),
+    goalConversionPct: pct(offensiveGoals, shotEvents.length),
     steals: sumStat("steals"),
     interceptions: sumStat("interceptions"),
     recoveries,
@@ -428,10 +434,11 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       return {
         period,
         label: PERIOD_LABEL[period] ?? `Periodo ${period}`,
-        // Goles que nos SUBIERON en esa parte, no eventos nuestros de tipo
-        // gol: un gol en propia nuestro es un evento nuestro y un tanto del
-        // rival, así que se mira el marcador y no el bando del evento.
-        goals: matchData.events.filter((e) => e.period === period && scoresFor(e, "team")).length,
+        // Goles que NUESTRO equipo fabricó en esa parte. Va al lado de
+        // `shots`, `steals` y `losses`, que son todos producción propia: si
+        // aquí se contara el marcador, la línea diría «2 goles · 1 tiros» con
+        // un gol en propia del rival por medio.
+        goals: evs.filter(isOffensiveGoal).length,
         shots: evs.filter(isShotAttempt).length,
         steals: evs.filter((e) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
         losses: evs.filter((e) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,

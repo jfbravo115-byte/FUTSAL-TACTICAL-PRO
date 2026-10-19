@@ -150,6 +150,32 @@ describe("3-5 · no suma tiro, ni gol individual, ni conversión", () => {
     expect(generateMatchReport(md).teamTotals.shots).toBe(2); // los nuestros, sin el propio
   });
 
+  it("un gol en propia DEL RIVAL no infla NUESTRA conversión", () => {
+    // Es el caso que se escapó: el gol sube NUESTRO marcador, así que si
+    // `teamTotals.goals` leyera el marcador, un tiro y dos goles darían un
+    // 200 % de conversión. `teamTotals` es producción propia, no resultado.
+    const md = conPropiaRival();
+    md.events.push(
+      ev(ActionType.SHOT, false, { playerIds: ["local10"], destinationGrid: "G5", originGrid: "Z4C" }),
+    );
+    const t = generateMatchReport(md).teamTotals;
+    expect(scoreOf(md.events)).toEqual({ team: 1, opponent: 0 });
+    expect(t.goals).toBe(0);
+    expect(t.shots).toBe(1);
+    expect(t.goalConversionPct).toBe(0);
+    expect(t.goalConversionPct).not.toBe(100);
+  });
+
+  it("y los goles por periodo son producción propia, no marcador", () => {
+    const md = conPropiaRival();
+    md.events.push(
+      ev(ActionType.SHOT, false, { playerIds: ["local10"], destinationGrid: "G5", originGrid: "Z4C" }),
+    );
+    const p1 = generateMatchReport(md).periodStats.find((p) => p.period === Period.FIRST)!;
+    expect(p1.goals).toBe(0);
+    expect(p1.shots).toBe(1);
+  });
+
   it("la conversión NUESTRA no cambia por marcar en propia", () => {
     const sinPropia = partido(conPropiaLocal().events.slice(0, 2));
     const conPropia = conPropiaLocal();
@@ -222,11 +248,13 @@ describe("7 · el informe lo incluye donde toca", () => {
     expect(report.relevantEvents.map((e) => e.type)).not.toContain("OWN_GOAL");
   });
 
-  it("los goles por periodo cuentan los que NOS suben, no nuestros eventos", () => {
+  it("los goles por periodo son los que NUESTRO equipo fabricó", () => {
     const report = generateMatchReport(conPropiaLocal());
     const p1 = report.periodStats.find((p) => p.period === Period.FIRST)!;
-    // Tres eventos nuestros, de los que solo UNO nos sube al marcador.
+    // Dos tiros y un gol nuestros, más un gol en propia que no produjo nadie.
     expect(p1.goals).toBe(1);
+    expect(p1.shots).toBe(2);
+    expect(report.score).toEqual({ team: 1, opponent: 1 });
   });
 });
 

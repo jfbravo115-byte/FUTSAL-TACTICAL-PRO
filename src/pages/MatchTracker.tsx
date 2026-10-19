@@ -2522,10 +2522,18 @@ export default function MatchTracker() {
       metadata: {
         ...metadata?.metadata,
         isOpponent: isOpponentEvent,
-        // Identidad explícita del portero que encara la acción. Antes solo se
+        // Identidad explícita del portero que ENCARA la acción. Antes solo se
         // podía deducir por bando desde playerIds; guardarla hace que la
         // atribución y el borrado no dependan de esa inferencia.
-        ...(targetGoalieId ? { targetGoalkeeperId: targetGoalieId } : {}),
+        //
+        // Se escribe con el MISMO criterio que decide si ese portero entra en
+        // `playerIds`: solo un tiro o un gol tienen portero objetivo. Un gol
+        // en propia no lo tiene —el balón entra en la portería del propio
+        // autor—, así que apuntar aquí al portero contrario guardaría un
+        // hecho falso en el evento, y ese dato viaja al análisis.
+        ...(targetGoalieId && eventTargetsOpposingGoalie(type)
+          ? { targetGoalkeeperId: targetGoalieId }
+          : {}),
       },
       scoreAtEvent: marcadorTrasEvento,
     };

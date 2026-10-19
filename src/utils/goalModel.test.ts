@@ -27,6 +27,7 @@ import {
   sideName,
 } from "./goalModel";
 import { isShotAttempt, isShotGoal, summarizeShots } from "./shotModel";
+import { eventTargetsOpposingGoalie, isConcededGoal } from "./goalkeeperActions";
 
 let n = 0;
 const ev = (
@@ -174,6 +175,22 @@ describe("3 · un gol en propia no es un tiro de nadie", () => {
     expect(isOffensiveGoal(propia(false))).toBe(false);
     // …pero los dos suben al marcador.
     expect(isGoalEvent(propia(false))).toBe(true);
+  });
+
+  it("no tiene portero objetivo: el balón entra en la portería del autor", () => {
+    // `eventTargetsOpposingGoalie` es el predicado que decide quién encara la
+    // acción. Un gol en propia queda fuera por el mismo motivo por el que
+    // queda fuera de los tiros: no va contra la portería contraria.
+    expect(eventTargetsOpposingGoalie(ActionType.OWN_GOAL)).toBe(false);
+    expect(eventTargetsOpposingGoalie(ActionType.GOAL)).toBe(true);
+    expect(eventTargetsOpposingGoalie(ActionType.SHOT)).toBe(true);
+  });
+
+  it("tampoco se lo apunta ningún portero como gol encajado individual", () => {
+    // El equipo que lo comete SÍ lo encaja —eso es el marcador— pero no es
+    // una acción individual de su portero.
+    expect(isConcededGoal(propia(false))).toBe(false);
+    expect(isConcededGoal(gol(true))).toBe(true);
   });
 
   it("isOwnGoal solo es cierto para el tipo propio", () => {

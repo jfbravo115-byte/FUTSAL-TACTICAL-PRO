@@ -129,6 +129,16 @@ describe("2 · el flujo del gol en propia", () => {
     expect(fuente).toContain("Registrar sin zona");
   });
 
+  it("no se le inventa un portero objetivo", () => {
+    // El balón entra en la portería del PROPIO autor, así que no hay portero
+    // contrario que lo encare. Escribirlo guardaba un hecho falso en el
+    // evento —apuntando justo al portero del equipo beneficiado— y ese dato
+    // viaja dentro de `matchData` hasta el análisis. Se usa el mismo
+    // predicado que decide si ese portero entra en `playerIds`.
+    expect(codigo).toContain("targetGoalieId && eventTargetsOpposingGoalie(type)");
+    expect(codigo).not.toContain("...(targetGoalieId ? { targetGoalkeeperId: targetGoalieId } : {})");
+  });
+
   it("no se le escribe procedencia de tiro al registrarlo con zona", () => {
     expect(codigo).toContain(
       'current.type === ActionType.OWN_GOAL\n                                    ? {}\n                                    : { setPiece: current.setPiece || "normal" }',

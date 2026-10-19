@@ -10,6 +10,7 @@ import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { phaseCsvLabel } from "../utils/phaseModel";
 import { beneficiarySide, isGoalEvent } from "../utils/goalModel";
+import { eventActor } from "../utils/eventActor";
 import { generateMatchReport } from "./matchReportService";
 
 const PERIOD_LABEL: Record<number, string> = {
@@ -48,7 +49,10 @@ export function buildActionsCsv(matchData: MatchData): string {
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
     .map((e) => {
-      const player = matchData.players.find((p) => e.playerIds.includes(p.id));
+      // El AUTOR, no el primero de `playerIds`: un tiro o un gol llevan
+      // también al portero que lo encara, y quedarse con el primero exportaba
+      // el gol del rival a nombre de nuestro portero. Ver utils/eventActor.
+      const player = eventActor(e, matchData.players);
       const md = e.metadata || {};
       return [
         matchData.timestamp || new Date(e.wallClock || Date.now()).toISOString(),

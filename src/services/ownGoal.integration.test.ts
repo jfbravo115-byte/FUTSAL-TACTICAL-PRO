@@ -23,7 +23,8 @@ import { buildActionsCsv, buildMatchJson } from "./matchExportService";
 import { buildTacticalProPayload, TACTICAL_PRO_GLOSSARY } from "./tacticalProPayload";
 import { matchHistorySignature } from "./matchHistoryService";
 import { buildZoneDashboard } from "./matchZonesService";
-import { scoreOf } from "../utils/goalModel";
+import { actorSide, beneficiarySide, scoreOf } from "../utils/goalModel";
+import { nextPhaseAfterEvent } from "../utils/phaseModel";
 import { buildGoalSequence } from "../utils/goalSequence";
 import { summarizeShots } from "../utils/shotModel";
 
@@ -349,5 +350,92 @@ describe("13 · compatibilidad", () => {
     const vuelta: MatchData = JSON.parse(crudo);
     expect(scoreOf(vuelta.events)).toEqual({ team: 0, opponent: 1 });
     expect(generateMatchReport(vuelta).score).toEqual({ team: 0, opponent: 1 });
+  });
+});
+
+// ── E · EL GOL EN PROPIA REANUDA COMO CUALQUIER GOL ─────────────────────
+
+describe("E · beneficiario, reanudación y autor", () => {
+  const faseTras = (type: ActionType, opp: boolean) =>
+    nextPhaseAfterEvent(type, opp, "attack_positional");
+  const beneficiario = (type: ActionType, opp: boolean) =>
+    beneficiarySide({ type, metadata: { isOpponent: opp } });
+
+  it("1 · gol normal NUESTRO y gol en propia del RIVAL: mismo beneficiario y misma fase", () => {
+    expect(beneficiario(ActionType.GOAL, false)).toBe("team");
+    expect(beneficiario(ActionType.OWN_GOAL, true)).toBe("team");
+    expect(faseTras(ActionType.OWN_GOAL, true)).toBe(faseTras(ActionType.GOAL, false));
+    expect(faseTras(ActionType.GOAL, false)).toBe("defense_organized");
+  });
+
+  it("2 · gol normal del RIVAL y gol en propia NUESTRO: mismo beneficiario y misma fase", () => {
+    expect(beneficiario(ActionType.GOAL, true)).toBe("opponent");
+    expect(beneficiario(ActionType.OWN_GOAL, false)).toBe("opponent");
+    expect(faseTras(ActionType.OWN_GOAL, false)).toBe(faseTras(ActionType.GOAL, true));
+    expect(faseTras(ActionType.GOAL, true)).toBe("attack_positional");
+  });
+
+  it("3 · el autor del gol en propia es del equipo CONTRARIO al beneficiario", () => {
+    const md = conPropiaLocal();
+    const propio = md.events.find((e) => e.type === ActionType.OWN_GOAL)!;
+    expect(actorSide(propio)).toBe("team");
+    expect(beneficiarySide(propio)).toBe("opponent");
+    expect(actorSide(propio)).not.toBe(beneficiarySide(propio));
+    // Y el jugador existe y es de nuestra plantilla, no de la del rival.
+    const autor = md.players.find((p) => propio.playerIds.includes(p.id))!;
+    expect(autor.isOpponent).toBe(false);
+    expect(autor.number).toBe(7);
+  });
+
+  it("4 · marcador y producción ofensiva siguen correctos tras la reanudación", () => {
+    const md = conPropiaLocal();
+    const r = generateMatchReport(md);
+    expect(r.score).toEqual({ team: 1, opponent: 1 });
+    expect(r.teamTotals.goals).toBe(1);
+    expect(r.teamTotals.shots).toBe(2);
+    expect(r.teamTotals.goalConversionPct).toBe(50);
+  });
+
+  it("5 · quitar el gol en propia restaura marcador y producción", () => {
+    const md = conPropiaLocal();
+    const sin = { ...md, events: md.events.filter((e) => e.type !== ActionType.OWN_GOAL) };
+    const a = generateMatchReport(sin), b = generateMatchReport(md);
+    expect(a.score).toEqual({ team: 1, opponent: 0 });
+    expect(a.teamTotals.goals).toBe(b.teamTotals.goals);
+    expect(a.teamTotals.shots).toBe(b.teamTotals.shots);
+    expect(a.teamTotals.goalConversionPct).toBe(b.teamTotals.goalConversionPct);
+  });
+
+  it("6 · la fase del evento sobrevive a exportar e importar", () => {
+    n = 700;
+    const md = partido([
+      ev(ActionType.OWN_GOAL, false, { playerIds: ["local7"], phaseOfPlay: "defense_transition" }),
+    ]);
+    const vuelta: MatchData = JSON.parse(buildMatchJson(md));
+    expect(vuelta.events[0].phaseOfPlay).toBe("defense_transition");
+    expect(scoreOf(vuelta.events)).toEqual({ team: 0, opponent: 1 });
+  });
+});
+
+// ── D · PÉRDIDA DEL RIVAL ───────────────────────────────────────────────
+
+describe("D · la pérdida del rival es un balón que ganamos", () => {
+  it("la fase resultante es la correcta en los dos sentidos", () => {
+    expect(nextPhaseAfterEvent(ActionType.LOSS, false, "attack_positional")).toBe("defense_transition");
+    expect(nextPhaseAfterEvent(ActionType.LOSS, true, "defense_organized")).toBe("attack_transition");
+  });
+
+  it("y el evento pertenece al equipo que la cometió", () => {
+    n = 800;
+    const md = partido([
+      ev(ActionType.LOSS, true, { originGrid: "Z2C" }),
+      ev(ActionType.LOSS, false, { originGrid: "Z3C" }),
+    ]);
+    const rival = md.events.filter((e) => e.metadata?.isOpponent);
+    const propia = md.events.filter((e) => !e.metadata?.isOpponent);
+    expect(rival).toHaveLength(1);
+    expect(propia).toHaveLength(1);
+    // La pérdida del rival NO cuenta como pérdida nuestra en el informe.
+    expect(generateMatchReport(md).teamTotals.lossesAndErrors).toBe(0);
   });
 });

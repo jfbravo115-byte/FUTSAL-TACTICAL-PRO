@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildActionsCsv, buildMatchJson, buildPlayersCsv, buildPrintableReportHtml } from "./matchExportService";
-import { ActionType, GameState, MatchData, Period, Role } from "../types/futsal";
+import { ActionType, GameEvent, GameState, MatchData, Period, Role } from "../types/futsal";
 
 const match: MatchData = {
   teamName: "Local", opponentName: "Rival", period: Period.FINISHED, matchClock: 0, isClockRunning: false,
@@ -267,5 +267,137 @@ describe("CSV de acciones · fase de juego", () => {
     expect(parsed.events[0].phaseOfPlay).toBe("defense_transition");
     const sinFase = JSON.parse(buildMatchJson(conFase(undefined)));
     expect("phaseOfPlay" in sinFase.events[0]).toBe(false);
+  });
+});
+
+// ── C · EL AUTOR DEL CSV NO ES EL PORTERO ───────────────────────────────
+//
+// `playerIds` lleva al autor Y al portero que encara la acción. Quedarse con
+// el primero exportaba el gol del rival a nombre de NUESTRO portero.
+
+const STATS = () => ({
+  goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
+  fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: 0, conceded: 0,
+});
+
+describe("C · la columna «jugador» es el autor, nunca el portero objetivo", () => {
+  const PLANTILLA = [
+    { id: "lgk", number: 1, name: "Portero Local", role: Role.GOALKEEPER, isOnPitch: true, plusMinus: 0, individualTimeSeconds: 0, isOpponent: false, stats: STATS() },
+    { id: "l7", number: 7, name: "Local Siete", role: Role.PLAYER, isOnPitch: true, plusMinus: 0, individualTimeSeconds: 0, isOpponent: false, stats: STATS() },
+    { id: "rgk", number: 1, name: "Portero Rival", role: Role.GOALKEEPER, isOnPitch: true, plusMinus: 0, individualTimeSeconds: 0, isOpponent: true, stats: STATS() },
+    { id: "r9", number: 9, name: "Rival Nueve", role: Role.PLAYER, isOnPitch: true, plusMinus: 0, individualTimeSeconds: 0, isOpponent: true, stats: STATS() },
+  ] as MatchData["players"];
+
+  const partidoCon = (eventos: GameEvent[]): MatchData => ({
+    teamName: "MI EQUIPO",
+    opponentName: "RIVAL",
+    period: Period.FINISHED,
+    matchClock: 0,
+    isClockRunning: false,
+    fouls: { team: 0, opponent: 0 },
+    timeoutsUsed: { team: { period1: false, period2: false }, opponent: { period1: false, period2: false } },
+    players: PLANTILLA,
+    events: eventos,
+    timestamp: "2026-10-19T18:00:00.000Z",
+  });
+
+  let n = 0;
+  const E = (type: ActionType, opp: boolean, ids: string[], extra: Partial<GameEvent> = {}): GameEvent => ({
+    id: `c${n++}`,
+    timestamp: 1000 * n,
+    wallClock: 1_700_000_000_000 + n,
+    period: Period.FIRST,
+    playerIds: ids,
+    type,
+    gameState: GameState.FOUR_VS_FOUR,
+    metadata: { isOpponent: opp, ...(extra.metadata ?? {}) },
+    ...extra,
+  });
+
+  /** Celdas de la fila que contiene ese tipo. Columna 4 = «jugador». */
+  const fila = (md: MatchData, tipo: string) => {
+    const f = buildActionsCsv(md).replace(/^﻿/, "").split("\n").find((l) => l.includes(`"${tipo}"`))!;
+    return f.split(",").map((c) => c.replace(/^"|"$/g, ""));
+  };
+
+  it("1 · un gol local lo firma el goleador local, no el portero rival", () => {
+    const md = partidoCon([
+      E(ActionType.GOAL, false, ["l7", "rgk"], {
+        destinationGrid: "G5",
+        metadata: { isOpponent: false, targetGoalkeeperId: "rgk" },
+      }),
+    ]);
+    expect(fila(md, "GOAL")[4]).toBe("Local Siete");
+  });
+
+  it("2 · un gol rival lo firma el goleador rival, NO nuestro portero", () => {
+    // Este era el fallo: `playerIds` empieza por el rival, pero en cuanto el
+    // orden cambiaba salía «Portero Local» firmando el gol del contrario.
+    const md = partidoCon([
+      E(ActionType.GOAL, true, ["lgk", "r9"], {
+        destinationGrid: "G1",
+        metadata: { isOpponent: true, targetGoalkeeperId: "lgk" },
+      }),
+    ]);
+    const c = fila(md, "GOAL");
+    expect(c[4]).toBe("Rival Nueve");
+    expect(c[4]).not.toBe("Portero Local");
+    expect(c[3]).toBe("RIVAL");
+  });
+
+  it("3 · un tiro rival lo firma el tirador rival", () => {
+    const md = partidoCon([
+      E(ActionType.SHOT, true, ["lgk", "r9"], {
+        destinationGrid: "OUT",
+        metadata: { isOpponent: true, targetGoalkeeperId: "lgk" },
+      }),
+    ]);
+    expect(fila(md, "SHOT")[4]).toBe("Rival Nueve");
+  });
+
+  it("4 · un gol en propia conserva su autor", () => {
+    const md = partidoCon([E(ActionType.OWN_GOAL, false, ["l7"], { originGrid: "Z1C" })]);
+    const c = fila(md, "OWN_GOAL");
+    expect(c[4]).toBe("Local Siete");
+    expect(c[3]).toBe("MI EQUIPO");
+    expect(c[c.length - 1]).toBe("RIVAL");
+  });
+
+  it("5 · un gol en propia sin autor deja la columna VACÍA, no inventa a nadie", () => {
+    const md = partidoCon([E(ActionType.OWN_GOAL, true, [])]);
+    const c = fila(md, "OWN_GOAL");
+    expect(c[4]).toBe("");
+    expect(c[c.length - 1]).toBe("MI EQUIPO");
+  });
+
+  it("6 · un partido histórico SIN targetGoalkeeperId también se exporta bien", () => {
+    // Ahí el portero se deduce por bando desde `playerIds`, con el mismo
+    // helper de siempre: los históricos no se migran y se exportan igual.
+    const md = partidoCon([
+      E(ActionType.GOAL, true, ["lgk", "r9"], { destinationGrid: "G1" }),
+    ]);
+    const c = fila(md, "GOAL");
+    expect(c[4]).toBe("Rival Nueve");
+    expect(c[4]).not.toBe("Portero Local");
+  });
+
+  it("las columnas no se mueven y «gol_para» sigue siendo la última", () => {
+    const md = partidoCon([E(ActionType.OWN_GOAL, false, ["l7"], { originGrid: "Z1C" })]);
+    const cab = buildActionsCsv(md).replace(/^﻿/, "").split("\n")[0].split(",").map((c) => c.replace(/"/g, ""));
+    expect(cab[4]).toBe("jugador");
+    expect(cab[20]).toBe("fase");
+    expect(cab[cab.length - 1]).toBe("gol_para");
+    expect(cab).toHaveLength(22);
+  });
+
+  it("y el evento conserva su targetGoalkeeperId: solo deja de usarse como autor", () => {
+    const md = partidoCon([
+      E(ActionType.GOAL, true, ["lgk", "r9"], {
+        destinationGrid: "G1",
+        metadata: { isOpponent: true, targetGoalkeeperId: "lgk" },
+      }),
+    ]);
+    expect(md.events[0].metadata?.targetGoalkeeperId).toBe("lgk");
+    expect(fila(md, "GOAL")[4]).toBe("Rival Nueve");
   });
 });

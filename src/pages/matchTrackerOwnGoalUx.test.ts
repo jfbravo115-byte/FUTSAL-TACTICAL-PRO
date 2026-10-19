@@ -240,6 +240,24 @@ describe("5 · las acciones rápidas van al equipo que anuncian", () => {
     expect(barra).not.toContain("applyPhaseOfPlay");
   });
 
+  it("D · la transición posterior usa el bando del EVENTO, no el desplegado", () => {
+    // `isOpponentEvent` sale del evento que se acaba de registrar. Si aquí se
+    // pasara `pitchView`, una pérdida del rival registrada desde la franja
+    // movería la fase como si la hubiéramos perdido nosotros.
+    expect(codigo).toContain(
+      "applyPhaseOfPlay(nextPhaseAfterEvent(type, isOpponentEvent, phaseAtTap));",
+    );
+    expect(codigo).not.toContain("nextPhaseAfterEvent(type, pitchView");
+    const handleAction = trozo("const handleAction = (", "const handleFreeKickPlay = (");
+    expect(handleAction).not.toContain("pitchView");
+  });
+
+  it("y el bando del evento no se deriva del equipo desplegado", () => {
+    const handleAction = trozo("const handleAction = (", "const handleFreeKickPlay = (");
+    expect(handleAction).toContain("const isOpponentEvent =");
+    expect(handleAction).toContain("metadata?.metadata?.isOpponent ??");
+  });
+
   it("la franja dice en voz alta de quién son esas acciones", () => {
     expect(barra).toContain("{nombreOtro}");
     expect(barra).toContain("data-other-team=");

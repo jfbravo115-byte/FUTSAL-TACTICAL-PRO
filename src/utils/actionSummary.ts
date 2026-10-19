@@ -29,6 +29,7 @@ import {
   sideName,
 } from "./goalModel";
 import { formatZoneLabel } from "./fieldZones";
+import { eventActor } from "./eventActor";
 
 export type ActionSummaryNames = { teamName: string; opponentName: string };
 
@@ -37,10 +38,10 @@ export function describeActor(
   event: GameEvent,
   players: MatchData["players"],
 ): string {
-  const autor = (players || []).find(
-    (p) =>
-      event.playerIds?.includes(p.id) && event.metadata?.targetGoalkeeperId !== p.id,
-  );
+  // Misma resolución que el CSV: `utils/eventActor`. Dos criterios distintos
+  // para «quién hizo esto» acabarían diciendo cosas distintas del mismo
+  // evento, que es justo lo que pasaba antes de centralizarlo.
+  const autor = eventActor(event, players || []);
   if (!autor) return UNKNOWN_SCORER_LABEL;
   return `#${autor.number} ${autor.name}`;
 }

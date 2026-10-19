@@ -34,6 +34,7 @@
  * produciría datos plausibles y falsos, que es la peor clase de error.
  */
 import { ActionType, GoalieAction, PhaseOfPlay } from "../types/futsal";
+import { beneficiarySide, isGoalEvent } from "./goalModel";
 
 export const PHASES: readonly PhaseOfPlay[] = [
   "attack_positional",
@@ -131,24 +132,38 @@ export function nextPhaseAfterEvent(
 ): PhaseOfPlay | undefined {
   if (current === undefined) return undefined;
 
+  // La forma mínima que `goalModel` necesita para decidir si esto es un gol y
+  // a quién le sube. No se duplica aquí ninguna tabla: el reinicio tras un gol
+  // lo gobierna el BENEFICIARIO, y quién es el beneficiario lo sabe un solo
+  // módulo.
+  const comoGol = { type, metadata: { isOpponent: isOpponentEvent } };
+
+  // Tras cualquier gol se saca del centro, y saca el equipo que lo ENCAJA.
+  // Vale igual para un gol en propia, donde quien lo mete y quien puntúa son
+  // contrarios: lo que decide la reanudación es quién marcó en el marcador,
+  // no quién tocó el balón.
+  if (isGoalEvent(comoGol)) {
+    return beneficiarySide(comoGol) === "opponent"
+      ? "attack_positional" // nos marcaron: sacamos nosotros
+      : "defense_organized"; // marcamos: saca el rival
+  }
+
   switch (type) {
-    // Recuperar es, por definición, el instante en que empieza la transición
-    // ofensiva. No se deduce de nada: es lo que significa el botón.
+    // Recuperar es, por definición, el instante en que empieza una
+    // transición. CUÁL de las dos depende de quién recupera: si recupera el
+    // rival, el que pasa a defender eres tú.
     case ActionType.STEAL:
     case ActionType.INTERCEPTION:
-      return "attack_transition";
+      return isOpponentEvent ? "defense_transition" : "attack_transition";
 
-    // Perderlo, lo simétrico.
+    // Perderlo, lo simétrico y por el mismo motivo: una pérdida del rival es
+    // un balón que ganamos nosotros. Antes esto no miraba el bando, así que
+    // una pérdida rival nos dejaba «defendiendo» justo cuando acabábamos de
+    // recuperar. Con las acciones del otro equipo a un toque, ese error
+    // pasaba de raro a frecuente.
     case ActionType.LOSS:
     case ActionType.UNFORCED_ERROR:
-      return "defense_transition";
-
-    // Tras un gol se saca del centro, así que la fase siguiente es posicional
-    // y el bando lo decide quién marcó: si marcamos nosotros, reanuda el
-    // rival y nosotros defendemos.
-    case ActionType.GOAL:
-    case GoalieAction.GOAL_CONCEDED:
-      return isOpponentEvent ? "attack_positional" : "defense_organized";
+      return isOpponentEvent ? "attack_transition" : "defense_transition";
 
     // Todo lo demás mantiene la fase. Un tiro no cambia la posesión; el
     // rebote o el saque de puerta sí, y eso lo registra la acción siguiente.

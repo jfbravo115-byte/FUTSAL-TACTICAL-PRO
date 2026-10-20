@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import {
   CAPTURE_MODE_KEY,
   CAPTURE_MODE_LABEL,
+  DUAL_COLUMNS_MIN_HEIGHT,
   DUAL_COLUMNS_MIN_WIDTH,
   DUAL_MIN_WIDTH,
   isCaptureMode,
@@ -244,10 +245,22 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
   it("14 · por debajo de 768 px no hay vista dual", () => {
     expect(DUAL_MIN_WIDTH).toBe(768);
     expect(DUAL_COLUMNS_MIN_WIDTH).toBe(1024);
+    expect(DUAL_COLUMNS_MIN_HEIGHT).toBe(820);
     expect(codigo).toContain("const dualFits = viewportWidth >= DUAL_MIN_WIDTH;");
     expect(codigo).toContain('const dualActive = captureMode === "dual" && dualFits;');
     // Y el botón se deshabilita donde no cabe, en vez de mentir.
     expect(codigo).toContain('const cabe = m === "focal" || dualFits;');
+  });
+
+  it("en vista dual no quedan dos caminos para lo mismo", () => {
+    // Ni la franja rápida del otro equipo ni su panel lateral: la plantilla
+    // del rival ya está junto al campo. Mantener el panel estrangulaba el
+    // campo a 238 px a 1024×768, medido.
+    expect(codigo).toContain('{activeTab === "pitch" && !dualActive && (() => {');
+    // Y la rejilla no reserva la columna que ya no se dibuja: una pista de
+    // 238 px a 1024×768 era justo lo que medía antes de quitarla.
+    expect(codigo).toContain('dualActive ? "lg:grid-cols-[240px_1fr]" : "lg:grid-cols-[240px_1fr_240px]"');
+    expect(codigo).toContain("{!dualActive && (() => {");
   });
 
   it("la franja validada vuelve en cuanto no hay vista dual", () => {
@@ -256,8 +269,8 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
   });
 
   it("15 · la composición cambia por ancho medido, no por suposición", () => {
-    expect(codigo).toContain("const dualColumns = viewportWidth >= DUAL_COLUMNS_MIN_WIDTH;");
-    expect(codigo).toContain('"grid grid-cols-[132px_1fr_132px] gap-1.5"');
+    expect(codigo).toContain("viewportWidth >= DUAL_COLUMNS_MIN_WIDTH && viewportHeight >= DUAL_COLUMNS_MIN_HEIGHT");
+    expect(codigo).toContain('"grid grid-cols-[132px_1fr_132px] grid-rows-1 gap-1.5"');
     expect(codigo).toContain('data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}');
     expect(panel).toContain('orientation === "row"');
   });
@@ -277,10 +290,21 @@ describe("no se reutiliza en silencio el último jugador", () => {
     expect(conf).toContain("setSelectedActor(null);");
   });
 
+  it("la VISTA FOCAL conserva exactamente el flujo validado en PR #27", () => {
+    // Una recuperación o una pérdida nunca preguntaron jugador. Si el
+    // experimento les añadiera ese paso, estaría cambiando la interfaz que
+    // viene a comparar, y la comparación dejaría de medir nada.
+    const lanzar = cuerpo("const lanzarConJugador = (type: ActionType)");
+    expect(lanzar).toContain("if (!dualActive) {");
+    expect(lanzar).toContain('step: detalle === "subtype" ? "subtype" : "player"');
+    const focal = lanzar.slice(lanzar.indexOf("if (!dualActive) {"), lanzar.indexOf("return;"));
+    expect(focal).not.toContain("anyTeam");
+    expect(focal).not.toContain("playerId");
+  });
+
   it("sin jugador, la acción lo pregunta ofreciendo LAS DOS plantillas", () => {
-    const lanzar = trozo("const lanzarConJugador = (type: ActionType)", "const rosterEnPista");
-    expect(lanzar).toContain('{ step: "player" as const }');
-    expect(lanzar).toContain("anyTeam: dualActive");
+    const lanzar = cuerpo("const lanzarConJugador = (type: ActionType)");
+    expect(lanzar).toContain('{ step: "player" as const, anyTeam: true }');
     expect(panel).not.toContain("último");
   });
 

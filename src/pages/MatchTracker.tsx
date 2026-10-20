@@ -87,6 +87,7 @@ import {
 import {
   CaptureMode,
   CAPTURE_MODE_LABEL,
+  DUAL_COLUMNS_MIN_HEIGHT,
   DUAL_COLUMNS_MIN_WIDTH,
   DUAL_MIN_WIDTH,
   readCaptureMode,
@@ -1471,8 +1472,14 @@ export default function MatchTracker() {
   const [viewportWidth, setViewportWidth] = useState<number>(
     () => (typeof window === "undefined" ? 1440 : window.innerWidth),
   );
+  const [viewportHeight, setViewportHeight] = useState<number>(
+    () => (typeof window === "undefined" ? 900 : window.innerHeight),
+  );
   useEffect(() => {
-    const onResize = () => setViewportWidth(window.innerWidth);
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -1485,7 +1492,11 @@ export default function MatchTracker() {
    * desplegado, que es el comportamiento validado.
    */
   const dualFits = viewportWidth >= DUAL_MIN_WIDTH;
-  const dualColumns = viewportWidth >= DUAL_COLUMNS_MIN_WIDTH;
+  // Las columnas piden ancho Y alto: cinco fichas apiladas más su cabecera
+  // no caben en 768 px de alto, y las dos últimas acababan debajo de la barra
+  // de acciones. Sin alto suficiente se usan las filas.
+  const dualColumns =
+    viewportWidth >= DUAL_COLUMNS_MIN_WIDTH && viewportHeight >= DUAL_COLUMNS_MIN_HEIGHT;
   /** Vista dual EFECTIVA: la pedida, y solo donde cabe de verdad. */
   const dualActive = captureMode === "dual" && dualFits;
 
@@ -1522,11 +1533,22 @@ export default function MatchTracker() {
     const isOpponent = bandoDeAccion();
     const detalle: "subtype" | "origin" =
       type === ActionType.STEAL || type === ActionType.LOSS ? "subtype" : "origin";
+
+    // VISTA FOCAL: exactamente el flujo validado en PR #27. Una recuperación
+    // o una pérdida NO preguntan jugador —nunca lo hicieron— y un gol o un
+    // tiro empiezan por él. Cambiar esto aquí le habría añadido un paso a la
+    // interfaz que este experimento no viene a tocar.
+    if (!dualActive) {
+      setPendingAction({ type, isOpponent, step: detalle === "subtype" ? "subtype" : "player" });
+      return;
+    }
+
+    // VISTA DUAL: con el jugador ya tocado se entra directo al detalle; sin
+    // él se pregunta, y se preguntan las DOS plantillas.
     setPendingAction({
       type,
       isOpponent,
-      ...(actor ? { playerId: actor, step: detalle } : { step: "player" as const }),
-      ...(actor ? {} : { anyTeam: dualActive }),
+      ...(actor ? { playerId: actor, step: detalle } : { step: "player" as const, anyTeam: true }),
     });
   };
 
@@ -4679,7 +4701,7 @@ export default function MatchTracker() {
 
       {/* DASHBOARD BODY - REORGANIZED FOR NO SCROLLING */}
       <main className={`px-2 py-1 grid gap-1 overflow-hidden min-h-0
-        grid-cols-1 lg:grid-cols-[240px_1fr_240px] mb-0 mt-0 h-full`}>
+        grid-cols-1 ${dualActive ? "lg:grid-cols-[240px_1fr]" : "lg:grid-cols-[240px_1fr_240px]"} mb-0 mt-0 h-full`}>
         {/* LEFT: ANALYSIS CONSOLE (Goalie, Timeline, Stats) */}
         <aside
           className={`bg-white/5 border border-white/5 rounded-2xl flex flex-col overflow-hidden backdrop-blur-md ${activeTab === "pitch" ? "hidden lg:flex" : "flex h-full lg:h-auto"}`}
@@ -6597,7 +6619,7 @@ export default function MatchTracker() {
                 data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}
                 className={`flex-1 min-h-0 overflow-hidden ${
                   dualActive && dualColumns
-                    ? "grid grid-cols-[132px_1fr_132px] gap-1.5"
+                    ? "grid grid-cols-[132px_1fr_132px] grid-rows-1 gap-1.5"
                     : "flex flex-col"
                 }`}
               >
@@ -6927,7 +6949,11 @@ export default function MatchTracker() {
             el partido sigue siendo uno. En tablet y móvil no cabe una segunda
             plantilla completa, y ahí el otro equipo se opera desde la franja
             compacta de acciones rápidas que hay bajo la pista. */}
-        {activeTab === "pitch" && (() => {
+        {/* En vista dual este panel sobra: la plantilla del rival ya está
+            junto al campo, y mantenerlo dejaba dos caminos para lo mismo y
+            —medido a 1024×768— estrangulaba el campo a 238 px de ancho con
+            dos fichas por debajo de la barra de acciones. */}
+        {activeTab === "pitch" && !dualActive && (() => {
           const otroEsRival = pitchView === "local";
           const nombreOtro = (otroEsRival ? matchData.opponentName : matchData.teamName) || (otroEsRival ? "RIVAL" : "LOCAL");
           const plantillaOtro = matchData.players.filter(

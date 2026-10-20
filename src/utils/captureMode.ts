@@ -32,6 +32,16 @@ export const CAPTURE_MODE_LABEL: Record<CaptureMode, string> = {
 export const DUAL_COLUMNS_MIN_WIDTH = 1024;
 export const DUAL_MIN_WIDTH = 768;
 
+/**
+ * Alto mínimo para las columnas laterales.
+ *
+ * No basta con el ancho: en columna cada plantilla apila cinco fichas de 44 px
+ * más su cabecera, y a 1024×768 las dos últimas quedaban por debajo de la
+ * barra de acciones —medido con `elementFromPoint`: inalcanzables—. Con menos
+ * alto se usan las filas, que a ese tamaño sí caben enteras.
+ */
+export const DUAL_COLUMNS_MIN_HEIGHT = 820;
+
 export function isCaptureMode(raw: unknown): raw is CaptureMode {
   return raw === "focal" || raw === "dual";
 }

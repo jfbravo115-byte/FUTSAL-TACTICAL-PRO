@@ -22,6 +22,24 @@ import { disciplinaryState } from "../utils/squadModel";
 
 export type DualRosterOrientation = "column" | "row";
 
+/**
+ * Nombre corto de la ficha.
+ *
+ * El apellido es lo útil cuando existe, pero una plantilla de prueba —o un
+ * equipo rival apuntado a vuelapluma— se llama «Jugador 1» o «PJ RIVAL 2», y
+ * quedarse con la última palabra deja la ficha diciendo «1». Si la última
+ * palabra no identifica a nadie, se enseña el nombre entero y que lo recorte
+ * el CSS.
+ */
+export function nombreCorto(name: string): string {
+  const limpio = (name || "").trim();
+  if (!limpio) return "";
+  const partes = limpio.split(/\s+/);
+  const ultima = partes[partes.length - 1];
+  const inservible = partes.length < 2 || /^[\d.#-]+$/.test(ultima) || ultima.length < 3;
+  return inservible ? limpio : ultima;
+}
+
 export function DualRosterPanel({
   teamName,
   logo,
@@ -76,7 +94,7 @@ export function DualRosterPanel({
           {p.number}
         </span>
         <span className="text-[9px] font-black uppercase truncate min-w-0">
-          {p.name.split(" ").slice(-1)[0]}
+          {nombreCorto(p.name)}
         </span>
         {p.role === Role.GOALKEEPER && (
           <span className="text-[7px] font-black uppercase opacity-70 shrink-0">POR</span>
@@ -93,10 +111,10 @@ export function DualRosterPanel({
     <div
       data-roster-panel={isOpponent ? "opponent" : "team"}
       className={`rounded-2xl border ${acento.borde} ${acento.fondo} p-1.5 flex flex-col gap-1 min-h-0 ${
-        orientation === "row" ? "w-full" : "h-full overflow-hidden"
+        orientation === "row" ? "w-full shrink-0" : "h-full min-h-0 overflow-hidden"
       }`}
     >
-      <div className="flex items-center gap-1.5 px-0.5 shrink-0">
+      <div className="flex items-center gap-1.5 px-0.5 shrink-0 min-h-[24px]">
         <span className={`shrink-0 w-5 h-5 rounded-md border ${acento.borde} bg-black/40 flex items-center justify-center text-[9px] font-black ${acento.texto}`}>
           {logo ? <img src={logo} alt="" className="w-full h-full object-contain rounded-md" /> : (teamName || "?").charAt(0).toUpperCase()}
         </span>
@@ -113,7 +131,17 @@ export function DualRosterPanel({
         </button>
       </div>
 
-      <div className={orientation === "row" ? "flex gap-1 w-full" : "flex flex-col gap-1 overflow-y-auto custom-scrollbar"}>
+      {/* En columna la lista TIENE que poder desplazarse: a 1024×768 las
+          cinco fichas más la cabecera no caben en el alto del panel, y sin
+          esto las dos últimas quedaban dibujadas por debajo de la barra de
+          acciones —medido: inalcanzables con elementFromPoint—. */}
+      <div
+        className={
+          orientation === "row"
+            ? "flex gap-1 w-full"
+            : "flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto custom-scrollbar"
+        }
+      >
         {onPitch.map(ficha)}
         {onPitch.length === 0 && (
           <div className="text-[8px] text-slate-500 italic px-1 py-2">Sin jugadores en pista</div>
@@ -140,7 +168,7 @@ export function DualRosterPanel({
                 <span className="shrink-0 w-5 h-5 rounded bg-black/50 flex items-center justify-center text-[9px] font-black">
                   {p.number}
                 </span>
-                <span className="text-[8px] font-black uppercase truncate">{p.name.split(" ").slice(-1)[0]}</span>
+                <span className="text-[8px] font-black uppercase truncate">{nombreCorto(p.name)}</span>
               </button>
             ))}
             {bench.length === 0 && (

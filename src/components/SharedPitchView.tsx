@@ -113,6 +113,7 @@ export function SharedPitchBenches({
   open,
   onToggle,
   onSelect,
+  saliente,
   disabled = false,
 }: {
   teamName: string;
@@ -122,6 +123,8 @@ export function SharedPitchBenches({
   open: "team" | "opponent" | null;
   onToggle: (lado: "team" | "opponent") => void;
   onSelect: (id: string) => void;
+  /** Quién está seleccionado en la pista, que es a quien se sustituye. */
+  saliente: { id: string; lado: "team" | "opponent"; nombre: string; dorsal: number } | null;
   disabled?: boolean;
 }) {
   const lados = [
@@ -129,6 +132,8 @@ export function SharedPitchBenches({
     { lado: "opponent" as const, nombre: opponentName, banquillo: opponentBench, acento: "border-red-500/40 text-red-300" },
   ];
   const abierto = lados.find((l) => l.lado === open);
+  /** Solo se puede cambiar dentro del equipo de quien está seleccionado. */
+  const puedeCambiar = !!saliente && !!abierto && saliente.lado === abierto.lado;
 
   return (
     <div data-shared-pitch-benches className="shrink-0 border-t border-white/10 pt-1 mt-1">
@@ -153,11 +158,22 @@ export function SharedPitchBenches({
           data-shared-bench={abierto.lado}
           className="flex gap-1 flex-wrap pt-1"
         >
+          {/* Sin nadie tocado en la pista no se sabe quién sale, y adivinarlo
+              es como se acaba sacando al que no era. Se dice, en vez de dejar
+              fichas que no responden. */}
+          <div
+            data-shared-bench-hint
+            className="w-full text-[7px] font-black uppercase tracking-widest text-slate-500 pb-0.5"
+          >
+            {!puedeCambiar
+              ? "Toca primero en la pista al jugador que SALE"
+              : `Entra por #${saliente!.dorsal} ${nombreCorto(saliente!.nombre)}`}
+          </div>
           {abierto.banquillo.map((p) => (
             <button
               key={p.id}
               data-shared-bench-player={p.id}
-              disabled={disabled}
+              disabled={disabled || !puedeCambiar}
               onClick={() => onSelect(p.id)}
               className="relative overflow-hidden min-h-[44px] rounded-lg border border-white/10 bg-black/30 px-2 py-1 flex items-center gap-1.5 hover:bg-white/10 disabled:opacity-40"
             >

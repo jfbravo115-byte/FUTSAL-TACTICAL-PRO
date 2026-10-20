@@ -3072,83 +3072,111 @@ export default function MatchTracker() {
       setActiveActionPlayerId(null);
     } else {
       // We have a selection and now a target
-      const sourceId = swapSelection;
-      const targetId = id;
-
-      const sourcePlayer = matchData.players.find((p) => p.id === sourceId);
-      const targetPlayer = matchData.players.find((p) => p.id === targetId);
-      if (!sourcePlayer || !targetPlayer) {
-        setSwapSelection(null);
-        return;
-      }
-
-      // Integridad de alineación: el intercambio solo es válido si CADA
-      // jugador resultante es compatible con el slot que va a ocupar.
-      // Bloquea, p.ej., que un portero acabe en un slot de campo o
-      // viceversa. Si no es válido, se cancela SIN registrar sustitución
-      // ni tocar el estado (evita un evento fantasma).
-      const targetSwapValid =
-        !targetPlayer.isOnPitch ||
-        targetPlayer.pitchPosition === undefined ||
-        isRoleAllowedInSlot(sourcePlayer.role, targetPlayer.pitchPosition);
-      const sourceSwapValid =
-        !sourcePlayer.isOnPitch ||
-        sourcePlayer.pitchPosition === undefined ||
-        isRoleAllowedInSlot(targetPlayer.role, sourcePlayer.pitchPosition);
-      if (!targetSwapValid || !sourceSwapValid) {
-        setSwapSelection(null);
-        return;
-      }
-
-      setMatchData((prev) => {
-        const sourcePlayer = prev.players.find((p) => p.id === sourceId);
-        const targetPlayer = prev.players.find((p) => p.id === targetId);
-
-        if (!sourcePlayer || !targetPlayer) return prev;
-
-        // If one is on pitch and other isn't, swap them
-        // If both are on pitch, maybe they want to swap positions? (Futsal, positions are flexible but let's allow it)
-
-        return {
-          ...prev,
-          players: prev.players.map((p) => {
-            if (p.id === sourceId) {
-              return {
-                ...p,
-                isOnPitch: targetPlayer.isOnPitch,
-                pitchPosition: targetPlayer.isOnPitch
-                  ? targetPlayer.pitchPosition
-                  : undefined,
-                // ROT solo se reinicia si esto es una entrada real
-                // (source estaba en el banquillo y pasa a pista).
-                rotationTimeSeconds:
-                  targetPlayer.isOnPitch && !sourcePlayer.isOnPitch
-                    ? 0
-                    : p.rotationTimeSeconds,
-              };
-            }
-            if (p.id === targetId) {
-              return {
-                ...p,
-                isOnPitch: sourcePlayer.isOnPitch,
-                pitchPosition: sourcePlayer.isOnPitch
-                  ? sourcePlayer.pitchPosition
-                  : undefined,
-                rotationTimeSeconds:
-                  sourcePlayer.isOnPitch && !targetPlayer.isOnPitch
-                    ? 0
-                    : p.rotationTimeSeconds,
-              };
-            }
-            return p;
-          }),
-        };
-      });
-
-      handleAction(ActionType.SUBSTITUTION, targetId);
-      setSwapSelection(null);
-      setSwapTargetId(null);
+      aplicarSustitucion(swapSelection, id);
     }
+  };
+
+  /**
+   * El intercambio en sí: validar roles, cambiar y registrar la sustitución.
+   *
+   * Está separado de `executeSwap` porque hay dos puertas al mismo cambio —el
+   * menú del jugador y el banquillo de la pista 5v5— y una segunda copia de
+   * estas reglas es una segunda forma de dejar a un portero en un slot de
+   * campo.
+   */
+  const aplicarSustitucion = (sourceId: string, targetId: string) => {
+    if (isDataLocked) return;
+    const sourcePlayer = matchData.players.find((p) => p.id === sourceId);
+    const targetPlayer = matchData.players.find((p) => p.id === targetId);
+    if (!sourcePlayer || !targetPlayer) {
+      setSwapSelection(null);
+      return;
+    }
+
+    // Integridad de alineación: el intercambio solo es válido si CADA
+    // jugador resultante es compatible con el slot que va a ocupar.
+    // Bloquea, p.ej., que un portero acabe en un slot de campo o
+    // viceversa. Si no es válido, se cancela SIN registrar sustitución
+    // ni tocar el estado (evita un evento fantasma).
+    const targetSwapValid =
+      !targetPlayer.isOnPitch ||
+      targetPlayer.pitchPosition === undefined ||
+      isRoleAllowedInSlot(sourcePlayer.role, targetPlayer.pitchPosition);
+    const sourceSwapValid =
+      !sourcePlayer.isOnPitch ||
+      sourcePlayer.pitchPosition === undefined ||
+      isRoleAllowedInSlot(targetPlayer.role, sourcePlayer.pitchPosition);
+    if (!targetSwapValid || !sourceSwapValid) {
+      setSwapSelection(null);
+      return;
+    }
+
+    setMatchData((prev) => {
+      const sourcePlayer = prev.players.find((p) => p.id === sourceId);
+      const targetPlayer = prev.players.find((p) => p.id === targetId);
+
+      if (!sourcePlayer || !targetPlayer) return prev;
+
+      // If one is on pitch and other isn't, swap them
+      // If both are on pitch, maybe they want to swap positions? (Futsal, positions are flexible but let's allow it)
+
+      return {
+        ...prev,
+        players: prev.players.map((p) => {
+          if (p.id === sourceId) {
+            return {
+              ...p,
+              isOnPitch: targetPlayer.isOnPitch,
+              pitchPosition: targetPlayer.isOnPitch
+                ? targetPlayer.pitchPosition
+                : undefined,
+              // ROT solo se reinicia si esto es una entrada real
+              // (source estaba en el banquillo y pasa a pista).
+              rotationTimeSeconds:
+                targetPlayer.isOnPitch && !sourcePlayer.isOnPitch
+                  ? 0
+                  : p.rotationTimeSeconds,
+            };
+          }
+          if (p.id === targetId) {
+            return {
+              ...p,
+              isOnPitch: sourcePlayer.isOnPitch,
+              pitchPosition: sourcePlayer.isOnPitch
+                ? sourcePlayer.pitchPosition
+                : undefined,
+              rotationTimeSeconds:
+                sourcePlayer.isOnPitch && !targetPlayer.isOnPitch
+                  ? 0
+                  : p.rotationTimeSeconds,
+            };
+          }
+          return p;
+        }),
+      };
+    });
+
+    handleAction(ActionType.SUBSTITUTION, targetId);
+    setSwapSelection(null);
+    setSwapTargetId(null);
+  };
+
+  /**
+   * Sustitución desde el banquillo de la pista 5v5.
+   *
+   * Entra el del banquillo POR EL QUE ESTÁ SELECCIONADO en la pista. Sin nadie
+   * seleccionado no se cambia a nadie: adivinar a quién sustituye es como se
+   * acaba sacando al que no era. Y nunca entre equipos.
+   */
+  const sustituirDesdeBanquillo = (benchId: string) => {
+    const entra = matchData.players.find((p) => p.id === benchId);
+    const sale = selectedActor
+      ? matchData.players.find((p) => p.id === selectedActor.id)
+      : undefined;
+    if (!entra || !sale || !sale.isOnPitch) return;
+    if (!!sale.isOpponent !== !!entra.isOpponent) return;
+    aplicarSustitucion(sale.id, benchId);
+    setSelectedActor(null);
   };
 
   // NOTA: actualmente sin puntos de llamada activos en la UI (código no
@@ -6924,7 +6952,17 @@ export default function MatchTracker() {
                     opponentBench={rosterBanquillo(true)}
                     open={openBench}
                     onToggle={(lado) => setOpenBench((b) => (b === lado ? null : lado))}
-                    onSelect={executeSwap}
+                    onSelect={sustituirDesdeBanquillo}
+                    saliente={
+                      selectedActor
+                        ? {
+                            id: selectedActor.id,
+                            lado: selectedActor.isOpponent ? "opponent" : "team",
+                            nombre: sharedPlayers[selectedActor.id]?.name ?? "",
+                            dorsal: sharedPlayers[selectedActor.id]?.number ?? 0,
+                          }
+                        : null
+                    }
                     disabled={isDataLocked}
                   />
                 )}

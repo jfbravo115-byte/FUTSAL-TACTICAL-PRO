@@ -513,9 +513,34 @@ describe("18 · la separación usa la pista MEDIDA, no la supuesta", () => {
 describe("19 · los banquillos, fuera del campo", () => {
   it("van debajo de la pista y usan la sustitución existente", () => {
     expect(codigo).toContain("<SharedPitchBenches");
-    expect(codigo).toContain("onSelect={executeSwap}");
-    expect(pista).not.toContain("SUBSTITUTION");
-    expect(pista).not.toContain("setMatchData");
+    expect(codigo).toContain("onSelect={sustituirDesdeBanquillo}");
+    // Y el cambio en sí es el de siempre: una sola copia de las reglas.
+    const sub = cuerpo("const sustituirDesdeBanquillo = (benchId: string)");
+    expect(sub).toContain("aplicarSustitucion(sale.id, benchId);");
+    expect(codigo).toContain("aplicarSustitucion(swapSelection, id);");
+    expect(pistaCodigo).not.toContain("SUBSTITUTION");
+    expect(pistaCodigo).not.toContain("setMatchData");
+  });
+
+  it("sin nadie tocado en la pista NO se cambia a nadie", () => {
+    // Adivinar quién sale es como se acaba sacando al que no era.
+    const sub = cuerpo("const sustituirDesdeBanquillo = (benchId: string)");
+    expect(sub).toContain("if (!entra || !sale || !sale.isOnPitch) return;");
+    expect(pistaCodigo).toContain("disabled={disabled || !puedeCambiar}");
+    expect(pistaCodigo).toContain("Toca primero en la pista al jugador que SALE");
+  });
+
+  it("y nunca se cambia un jugador por uno del otro equipo", () => {
+    const sub = cuerpo("const sustituirDesdeBanquillo = (benchId: string)");
+    expect(sub).toContain("if (!!sale.isOpponent !== !!entra.isOpponent) return;");
+    expect(pistaCodigo).toContain("saliente.lado === abierto.lado");
+  });
+
+  it("la validación de rol no se duplica: la pista entra por la misma puerta", () => {
+    const aplicar = cuerpo("const aplicarSustitucion = (sourceId: string, targetId: string)");
+    expect(aplicar).toContain("isRoleAllowedInSlot(sourcePlayer.role, targetPlayer.pitchPosition)");
+    expect(aplicar).toContain("handleAction(ActionType.SUBSTITUTION, targetId);");
+    expect(pistaCodigo).not.toContain("isRoleAllowedInSlot");
   });
 
   it("solo uno abierto a la vez, con el mismo estado que en columnas", () => {

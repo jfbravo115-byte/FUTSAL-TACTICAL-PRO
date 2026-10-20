@@ -70,13 +70,20 @@ export type SharedPosition = { left: number; top: number };
  *     fondo y porterías—, de modo que ningún rectángulo cruza el centro;
  *   · el rival se espeja, y los dos quedan enfrentados.
  *
- * El dominio de entrada es 0–100 fijo, no el mínimo y el máximo de cada
- * sistema: si se ajustara a cada formación, un sistema corto se estiraría
- * hasta el centro y dos sistemas distintos dejarían de ser comparables.
+ * El dominio de entrada es FIJO —el de la tabla de sistemas, de 7 a 85— y no
+ * el de cada formación: ajustarlo a cada una estiraría un sistema defensivo
+ * hasta la línea central como si fuera ofensivo, y dos sistemas distintos
+ * dejarían de ser comparables. Con el dominio fijo, un portero cae junto a su
+ * portería y un pivot a un gap de la línea central, mientras que una
+ * inferioridad se queda a media pista, que es lo que de verdad ocupa.
  *
  * No recibe `period`: el descanso lo gobierna `isFieldFlipped`, que llega ya
  * resuelto en `flipped`.
  */
+/** Extremos de `PITCH_SYSTEMS`: el portero en el 7 y el pivot en el 85. */
+export const SLOT_LEFT_MIN = 7;
+export const SLOT_LEFT_MAX = 85;
+
 export function formationPositionToTeamHalf(
   slot: PitchSlot,
   teamSide: TeamSide,
@@ -86,7 +93,9 @@ export function formationPositionToTeamHalf(
   const margen = pct(metrics.cardWidth / 2 + metrics.gap, metrics.width);
   const desde = margen;
   const hasta = Math.max(margen, 50 - margen);
-  const enMiMitad = desde + (Math.min(100, Math.max(0, slot.left)) / 100) * (hasta - desde);
+  const bruto = (slot.left - SLOT_LEFT_MIN) / (SLOT_LEFT_MAX - SLOT_LEFT_MIN);
+  const avance = Math.min(1, Math.max(0, bruto));
+  const enMiMitad = desde + avance * (hasta - desde);
   const propio = teamSide === "opponent" ? 100 - enMiMitad : enMiMitad;
   return { left: applyFieldFlip(propio, flipped), top: slot.top };
 }

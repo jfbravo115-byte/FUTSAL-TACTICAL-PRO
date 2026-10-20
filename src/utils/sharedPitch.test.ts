@@ -123,6 +123,49 @@ describe("1-2 · cada equipo, en su mitad y enfrentados", () => {
     expect(countCrossingCenter([pivotLocal, pivotRival], M)).toBe(0);
   });
 
+  it("cada mitad se aprovecha ENTERA: portero al fondo, pivot junto al centro", () => {
+    // Con un dominio 0–100 quedaban 80 px muertos a cada lado de la línea
+    // central y los dos equipos parecían encogidos contra su portería.
+    const portero = proy(SISTEMA_1_2_2[0], "team");
+    const pivot = proy(SISTEMA_1_2_2[4], "team");
+    const medio = (M.cardWidth / 2 / M.width) * 100;
+    const gapPct = (M.gap / M.width) * 100;
+    expect(portero.left).toBeCloseTo(MARGEN, 10);
+    expect(pivot.left).toBeCloseTo(50 - MARGEN, 10);
+    // El borde del pivot queda a exactamente un gap de la línea, sin pisarla.
+    expect(pivot.left + medio).toBeCloseTo(50 - gapPct, 10);
+    expect(pivot.left + medio).toBeLessThan(50);
+    // Y los dos pivots, enfrentados a dos gaps uno de otro.
+    const pivotRival = proy(SISTEMA_1_2_2[4], "opponent");
+    expect(((pivotRival.left - medio) - (pivot.left + medio)) / 100 * M.width)
+      .toBeCloseTo(2 * M.gap, 6);
+  });
+
+  it("un sistema nuevo fuera del rango conocido NO se escapa de su mitad", () => {
+    // Si mañana alguien añade un puesto en el 95 o en el 2, el mapa lo recorta
+    // en vez de dejar que cruce la línea central o se salga por el fondo.
+    const medio = (M.cardWidth / 2 / M.width) * 100;
+    for (const left of [-20, 0, 2, 95, 140]) {
+      const p = proy({ left, top: 50 }, "team");
+      expect(p.left + medio, `slot ${left}`).toBeLessThan(50);
+      expect(p.left - medio, `slot ${left}`).toBeGreaterThan(0);
+      const r = proy({ left, top: 50 }, "opponent");
+      expect(r.left - medio, `slot ${left} rival`).toBeGreaterThan(50);
+      expect(r.left + medio, `slot ${left} rival`).toBeLessThan(100);
+    }
+  });
+
+  it("un sistema defensivo NO se estira hasta el centro", () => {
+    // Inferioridad llega al 55 en la tabla: debe quedarse a media pista, que
+    // es lo que de verdad ocupa. Si el dominio se ajustara a cada formación,
+    // sus alas aparecerían donde van los pivots.
+    const inferioridad = SISTEMAS_REALES.Inferioridad;
+    const alaMasAdelantada = proy(inferioridad[2], "team");
+    const pivot4vs4 = proy(SISTEMA_1_2_2[4], "team");
+    expect(alaMasAdelantada.left).toBeLessThan(pivot4vs4.left);
+    expect(alaMasAdelantada.left).toBeGreaterThan(proy(SISTEMA_1_2_2[1], "team").left);
+  });
+
   it("se conserva el orden POR → CIERRE → ALAS → PIVOT", () => {
     const xs = SISTEMA_1_2_2.map((sl) => proy(sl, "team").left);
     expect(xs[0]).toBeLessThan(xs[1]);

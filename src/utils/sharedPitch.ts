@@ -169,6 +169,24 @@ export function verticalBoundsPct(m: PitchMetrics): { min: number; max: number }
   return { min: medio, max: 100 - medio };
 }
 
+/** Lo mismo a izquierda y derecha. Aquí no se mueve a nadie: se comprueba. */
+export function horizontalBoundsPct(m: PitchMetrics): { min: number; max: number } {
+  const medio = pct(m.cardWidth / 2, m.width);
+  return { min: medio, max: 100 - medio };
+}
+
+/** Rectángulo real de una ficha, en píxeles de la pista. */
+export function cardRect(p: SharedPosition, m: PitchMetrics) {
+  const cx = (p.left / 100) * m.width;
+  const cy = (p.top / 100) * m.height;
+  return {
+    x0: cx - m.cardWidth / 2,
+    x1: cx + m.cardWidth / 2,
+    y0: cy - m.cardHeight / 2,
+    y1: cy + m.cardHeight / 2,
+  };
+}
+
 export type SharedPitchEntry = {
   id: string;
   /** Dorsal. Solo se usa para ordenar de forma estable. */
@@ -207,7 +225,6 @@ export function layoutSharedPitch(
 ): SharedPitchLayout {
   const paso = minimumVerticalSeparationPct(metrics);
   const { min, max } = verticalBoundsPct(metrics);
-  const anchoChoque = pct(metrics.cardWidth + metrics.gap, metrics.width);
 
   const base: SharedPitchPlacement[] = [...entries]
     .sort((a, b) =>
@@ -219,45 +236,73 @@ export function layoutSharedPitch(
       nudged: false,
       ...formationPositionToSharedPitch(e.slot, e.side, flipped),
     }));
+  const original = base.map((p) => p.top);
 
-  // Grupos de fichas cuyos rectángulos se tocan, medido en píxeles reales.
-  const grupo: number[] = base.map(() => -1);
-  let siguiente = 0;
-  for (let i = 0; i < base.length; i++) {
-    if (grupo[i] === -1) grupo[i] = siguiente++;
-    for (let j = i + 1; j < base.length; j++) {
-      const seTocan =
-        Math.abs(base[i].left - base[j].left) < anchoChoque &&
-        Math.abs(base[i].top - base[j].top) < paso;
-      if (seTocan) grupo[j] = grupo[i];
-    }
-  }
-
+  // Se separa POR PASADAS, hasta que no quede ningún rectángulo tocando otro.
+  //
+  // Una sola pasada no basta: al abrir una pareja, una de las dos puede
+  // caer encima de un tercero que no estaba en el grupo —medido con un
+  // portero-jugador contra un 1-1-3: quedaba un solape—. Por eso se vuelve a
+  // mirar hasta que no haya ninguno, con un tope para no girar en el vacío.
+  const PASADAS = 8;
   let fits = true;
-  for (let g = 0; g < siguiente; g++) {
-    const indices = base.map((_, i) => i).filter((i) => grupo[i] === g);
-    if (indices.length < 2) continue;
+  let quedanSolapes = true;
 
-    const alto = paso * (indices.length - 1);
-    if (alto > max - min) {
-      // No cabe ni aunque se use toda la pista: esta vista no sirve a este
-      // tamaño. Se reparte lo que se pueda y se avisa.
-      fits = false;
+  for (let pasada = 0; pasada < PASADAS && quedanSolapes; pasada++) {
+    // Componentes conexas de lo que SE TAPA AHORA, no de lo que se tapaba al
+    // principio: así solo se mueve quien lo necesita.
+    const grupo = base.map((_, i) => i);
+    const raiz = (i: number): number => (grupo[i] === i ? i : (grupo[i] = raiz(grupo[i])));
+    quedanSolapes = false;
+    for (let i = 0; i < base.length; i++) {
+      for (let j = i + 1; j < base.length; j++) {
+        const a = cardRect(base[i], metrics);
+        const b = cardRect(base[j], metrics);
+        if (a.x1 > b.x0 && b.x1 > a.x0 && a.y1 > b.y0 && b.y1 > a.y0) {
+          quedanSolapes = true;
+          grupo[raiz(i)] = raiz(j);
+        }
+      }
     }
+    if (!quedanSolapes) break;
 
-    // Simétrico alrededor del centro del grupo mientras haya sitio; si el
-    // reparto se sale, se DESPLAZA entero —no se comprime— para que la
-    // separación mínima se conserve.
-    const centro = indices.reduce((acc, i) => acc + base[i].top, 0) / indices.length;
-    let inicio = centro - alto / 2;
-    if (inicio < min) inicio = min;
-    if (inicio + alto > max) inicio = Math.max(min, max - alto);
-
-    indices.forEach((i, k) => {
-      base[i].top = inicio + paso * k;
-      base[i].nudged = true;
+    const porGrupo = new Map<number, number[]>();
+    base.forEach((_, i) => {
+      const r = raiz(i);
+      porGrupo.set(r, [...(porGrupo.get(r) ?? []), i]);
     });
+
+    for (const indices of porGrupo.values()) {
+      if (indices.length < 2) continue;
+      // Orden estable: por altura actual y, a igualdad, por el orden de
+      // entrada, que ya está ordenado por equipo y dorsal.
+      indices.sort((a, b) => (base[a].top - base[b].top) || (a - b));
+
+      const alto = paso * (indices.length - 1);
+      if (alto > max - min) {
+        // No cabe ni usando toda la pista: esta vista no sirve aquí. Se
+        // reparte lo que se pueda y se avisa, en vez de amontonar.
+        fits = false;
+      }
+
+      // Simétrico alrededor del centro del grupo mientras haya sitio; si el
+      // reparto se sale, se DESPLAZA entero —no se comprime— para que la
+      // separación mínima se conserve.
+      const centro = indices.reduce((acc, i) => acc + base[i].top, 0) / indices.length;
+      let inicio = centro - alto / 2;
+      if (inicio < min) inicio = min;
+      if (inicio + alto > max) inicio = Math.max(min, max - alto);
+
+      indices.forEach((i, k) => {
+        base[i].top = inicio + paso * k;
+      });
+    }
   }
+
+  if (quedanSolapes) fits = false;
+  base.forEach((p, i) => {
+    p.nudged = Math.abs(p.top - original[i]) > 0.0001;
+  });
 
   return { placements: base, fits };
 }
@@ -269,4 +314,86 @@ export function sharedPitchFits(
   metrics: PitchMetrics,
 ): boolean {
   return layoutSharedPitch(entries, flipped, metrics).fits;
+}
+
+// ── ¿CABE DE VERDAD? ────────────────────────────────────────────────────
+//
+// La disponibilidad de la vista NO se decide por el ancho de la ventana. Se
+// decide midiendo: con esta pista, estas dos formaciones y estas fichas, ¿los
+// diez rectángulos quedan dentro y separados? Un umbral fijo sobre
+// `window.innerWidth` dice que no a una tablet donde sí cabía.
+
+/** Parejas cuyos objetivos táctiles se tocan. Debe ser 0. */
+export function countOverlaps(placements: SharedPosition[], m: PitchMetrics): number {
+  let n = 0;
+  for (let i = 0; i < placements.length; i++) {
+    for (let j = i + 1; j < placements.length; j++) {
+      const a = cardRect(placements[i], m);
+      const b = cardRect(placements[j], m);
+      if (a.x1 > b.x0 && b.x1 > a.x0 && a.y1 > b.y0 && b.y1 > a.y0) n++;
+    }
+  }
+  return n;
+}
+
+/** Fichas que se salen de la pista por algún lado. Debe ser 0. */
+export function countOutside(placements: SharedPosition[], m: PitchMetrics): number {
+  const h = horizontalBoundsPct(m);
+  const v = verticalBoundsPct(m);
+  const fuera = (p: SharedPosition) =>
+    p.left < h.min - 0.001 || p.left > h.max + 0.001 || p.top < v.min - 0.001 || p.top > v.max + 0.001;
+  return placements.filter(fuera).length;
+}
+
+export type SharedPitchViability = {
+  /** Todos los grupos que se tapan han podido separarse. */
+  fits: boolean;
+  /** Parejas de fichas que seguirían tocándose. */
+  overlaps: number;
+  /** Fichas que quedarían fuera de la pista. */
+  outside: number;
+  /** La pista tiene dimensiones utilizables (no es 0×0 ni está sin medir). */
+  measured: boolean;
+  /** La conjunción de todo lo anterior. Es lo único que decide. */
+  ok: boolean;
+};
+
+/**
+ * ¿Se puede jugar el 5v5 en ESTA pista con ESTAS formaciones?
+ *
+ * No mira la ventana: mira la pista medida y los diez rectángulos que
+ * saldrían. Por eso una tablet vertical con una pista de 746 px de ancho
+ * puede ofrecer la vista aunque un umbral de 900 px la hubiera descartado.
+ */
+export function sharedPitchViability(
+  entries: SharedPitchEntry[],
+  flipped: boolean,
+  metrics: PitchMetrics,
+): SharedPitchViability {
+  const measured =
+    metrics.width >= metrics.cardWidth && metrics.height >= metrics.cardHeight && entries.length > 0;
+  if (!measured) {
+    return { fits: false, overlaps: 0, outside: 0, measured: false, ok: false };
+  }
+  const { placements, fits } = layoutSharedPitch(entries, flipped, metrics);
+  const overlaps = countOverlaps(placements, metrics);
+  const outside = countOutside(placements, metrics);
+  return { fits, overlaps, outside, measured, ok: fits && overlaps === 0 && outside === 0 };
+}
+
+/**
+ * Lo que le queda a la pista cuando se le pone debajo la barra de banquillos.
+ *
+ * La disponibilidad se evalúa SIEMPRE sobre esta caja reducida, se esté en el
+ * modo que se esté. Es lo que impide el baile: la pista del 5v5 nunca es más
+ * pequeña que la que se mide en focal o en columnas menos esta barra, así que
+ * si la vista se ofrece es porque cabe, y una vez dentro sigue cabiendo.
+ */
+export const BENCH_BAR_PX = 34;
+
+export function pitchBoxForAvailability(
+  box: { width: number; height: number },
+  metrics: PitchMetrics = DEFAULT_PITCH_METRICS,
+): PitchMetrics {
+  return { ...metrics, width: box.width, height: Math.max(0, box.height - BENCH_BAR_PX) };
 }

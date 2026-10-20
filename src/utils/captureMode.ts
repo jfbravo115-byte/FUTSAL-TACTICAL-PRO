@@ -49,17 +49,14 @@ export const ROWS_MIN_WIDTH = 768;
 export const ROWS_MIN_HEIGHT = 900;
 
 /**
- * PISTA 5v5 · los diez dentro del campo.
+ * PISTA 5v5 · NO tiene umbral de viewport.
  *
- * No necesita columnas laterales, así que gasta menos ancho que `columns`,
- * pero el alto es crítico por otra razón: la separación de fichas que se tapan
- * se hace en vertical, y si la pista es baja no hay sitio donde separarlas.
- * `layoutSharedPitch` lo comprueba con las medidas reales; estos umbrales son
- * la primera barrera, sobre el viewport.
+ * Un ancho fijo —900 px— decía que no a una tablet vertical donde la pista
+ * medía 746×262 y los diez cabían de sobra. La disponibilidad la decide la
+ * GEOMETRÍA: `sharedPitchViability` coloca los diez sobre la pista medida y
+ * comprueba que ninguno se sale y que ninguna pareja se toca. Esta función
+ * solo recibe ese veredicto.
  */
-export const PITCH_MIN_WIDTH = 900;
-export const PITCH_MIN_HEIGHT = 820;
-
 export type ColumnsLayout = "columns" | "rows" | null;
 
 /**
@@ -74,16 +71,39 @@ export function columnsLayoutFor(width: number, height: number): ColumnsLayout {
   return null;
 }
 
-/** ¿Cabe la pista 5v5 en este viewport? */
-export function pitchAvailableFor(width: number, height: number): boolean {
-  return width >= PITCH_MIN_WIDTH && height >= PITCH_MIN_HEIGHT;
+/**
+ * Qué se puede ofrecer AHORA MISMO.
+ *
+ * `focal` siempre: es lo que hace seguro cualquier repliegue. `columns` por
+ * umbrales de viewport, que es lo que se midió. `pitch` por geometría: lo
+ * decide la pista medida y las formaciones que hay en ella, no la ventana.
+ */
+export type CaptureAvailability = {
+  focal: true;
+  columns: boolean;
+  pitch: boolean;
+  /**
+   * Por qué no cabe la pista 5v5, cuando no cabe: `"formacion"` si los diez no
+   * se pueden separar o se salen, `"sin-medir"` si todavía no hay medida.
+   */
+  pitchReason: "formacion" | "sin-medir" | null;
+};
+
+export function captureAvailability(
+  width: number,
+  height: number,
+  pitch: { ok: boolean; measured: boolean },
+): CaptureAvailability {
+  return {
+    focal: true,
+    columns: columnsLayoutFor(width, height) !== null,
+    pitch: pitch.ok,
+    pitchReason: pitch.ok ? null : pitch.measured ? "formacion" : "sin-medir",
+  };
 }
 
-/** `focal` siempre cabe. Es la condición que hace seguro cualquier fallback. */
-export function isCaptureModeAvailable(mode: CaptureMode, width: number, height: number): boolean {
-  if (mode === "focal") return true;
-  if (mode === "columns") return columnsLayoutFor(width, height) !== null;
-  return pitchAvailableFor(width, height);
+export function isCaptureModeAvailable(mode: CaptureMode, av: CaptureAvailability): boolean {
+  return mode === "focal" ? true : av[mode];
 }
 
 /**
@@ -92,13 +112,20 @@ export function isCaptureModeAvailable(mode: CaptureMode, width: number, height:
  */
 export function captureUnavailableReason(
   mode: CaptureMode,
+  av: CaptureAvailability,
   width: number,
-  height: number,
 ): string | null {
-  if (isCaptureModeAvailable(mode, width, height)) return null;
+  if (isCaptureModeAvailable(mode, av)) return null;
   const nombre = CAPTURE_MODE_LABEL[mode];
-  const anchoSuficiente = mode === "columns" ? width >= ROWS_MIN_WIDTH : width >= PITCH_MIN_WIDTH;
-  return anchoSuficiente
+  if (mode === "pitch") {
+    // La pantalla no es el motivo: puede ser que esta pareja de formaciones
+    // no quepa separada en la pista que hay. Decirlo evita que el entrenador
+    // busque el fallo en el tamaño de la tablet.
+    return av.pitchReason === "formacion"
+      ? `${nombre} no disponible: estas formaciones no caben separadas en la pista`
+      : `${nombre} no disponible con el tamaño actual de la pista`;
+  }
+  return width >= ROWS_MIN_WIDTH
     ? `${nombre} no disponible con esta altura de pantalla`
     : `${nombre} no disponible con esta anchura de pantalla`;
 }
@@ -106,16 +133,15 @@ export function captureUnavailableReason(
 /**
  * El modo que se usa de verdad: el preferido si cabe, `focal` si no.
  *
- * Girar la tablet o abrir el teclado no puede dejar la captura a medias, así
- * que el fallback es inmediato y silencioso en el dato —se avisa en la
- * interfaz, no cambiando la preferencia guardada—.
+ * Girar la tablet, cambiar de sistema o hacer un cambio no puede dejar la
+ * captura a medias, así que el repliegue es inmediato y NO reescribe la
+ * preferencia: en cuanto vuelve a caber, vuelve el modo elegido.
  */
 export function effectiveCaptureMode(
   preferred: CaptureMode,
-  width: number,
-  height: number,
+  av: CaptureAvailability,
 ): CaptureMode {
-  return isCaptureModeAvailable(preferred, width, height) ? preferred : "focal";
+  return isCaptureModeAvailable(preferred, av) ? preferred : "focal";
 }
 
 /**

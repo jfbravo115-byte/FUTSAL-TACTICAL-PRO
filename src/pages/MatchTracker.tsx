@@ -88,6 +88,7 @@ import {
   CAPTURE_MODES,
   CaptureMode,
   CAPTURE_MODE_LABEL,
+  captureAvailability,
   captureUnavailableReason,
   columnsLayoutFor,
   isCaptureModeAvailable,
@@ -102,7 +103,9 @@ import {
   TeamSide,
   defendedGoalSide,
   layoutSharedPitch,
+  pitchBoxForAvailability,
   sharedPitchFlipped,
+  sharedPitchViability,
 } from "../utils/sharedPitch";
 import {
   describeRegisteredAction,
@@ -1517,29 +1520,6 @@ export default function MatchTracker() {
    * ninguna —en columnas se esconde un jugador por equipo, en filas el campo
    * baja a 58 px de alto— así que ahí la vista dual simplemente no se ofrece.
    */
-  const dualLayout = columnsLayoutFor(viewportWidth, viewportHeight);
-  const dualColumns = dualLayout === "columns";
-  const dualUnavailable = captureUnavailableReason(captureMode, viewportWidth, viewportHeight);
-
-  /**
-   * El modo EFECTIVO: el pedido, y solo donde cabe.
-   *
-   * Si la pantalla gira y deja de caber, esto vuelve a focal solo, sin tocar
-   * el jugador seleccionado, los eventos, el marcador, la fase ni el partido.
-   * Y recupera el modo elegido cuando vuelve a haber sitio, porque la
-   * preferencia guardada no se ha reescrito.
-   */
-  const modoEfectivo = effectiveCaptureMode(captureMode, viewportWidth, viewportHeight);
-  const columnsActive = modoEfectivo === "columns";
-  const pitchActive = modoEfectivo === "pitch";
-
-  /**
-   * Los dos modos nuevos comparten lo esencial: el jugador se toca DIRECTO,
-   * sin elegir equipo antes. Lo que cambia entre ellos es dónde están las
-   * fichas —a los lados o dentro de la pista—, no cómo se registra.
-   */
-  const dualActive = columnsActive || pitchActive;
-
   /**
    * El bando al que va la acción.
    *
@@ -1608,13 +1588,23 @@ export default function MatchTracker() {
     if (!el || typeof ResizeObserver === "undefined") return;
     const medir = () => {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) setPitchBox({ width: r.width, height: r.height });
+      if (r.width <= 0 || r.height <= 0) return;
+      // Solo se guarda un cambio REAL: escribir en cada notificación encadena
+      // render → medida → render sin que nada se haya movido.
+      setPitchBox((prev) =>
+        Math.abs(prev.width - r.width) < 0.5 && Math.abs(prev.height - r.height) < 0.5
+          ? prev
+          : { width: r.width, height: r.height },
+      );
     };
     medir();
     const ro = new ResizeObserver(medir);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [pitchActive, activeTab]);
+    // Se observa SIEMPRE, no solo en 5v5: la medida de la pista es lo que
+    // decide si la vista 5v5 se puede ofrecer, así que hace falta tenerla
+    // también estando en focal o en columnas.
+  }, [activeTab]);
 
   /** Solo UNO de los dos banquillos abierto a la vez: no caben los dos. */
   const [openBench, setOpenBench] = useState<"team" | "opponent" | null>(null);
@@ -1703,6 +1693,50 @@ export default function MatchTracker() {
   /** Índice por id para que la vista no vuelva a recorrer la plantilla. */
   const sharedPlayers: Record<string, Player> = {};
   for (const p of matchData.players) sharedPlayers[p.id] = p;
+
+  /**
+   * ¿CABE la pista 5v5? Lo dice la geometría, no el ancho de la ventana.
+   *
+   * Se evalúa sobre la pista MEDIDA menos la barra de banquillos, y con las
+   * formaciones que hay ahora mismo en el campo. Esa caja reducida es un
+   * suelo: la pista del 5v5 nunca es más pequeña que la que se mide en focal
+   * o en columnas menos esa barra. Por eso la vista no puede entrar y salir
+   * sola —si se ofrece es porque cabe, y una vez dentro sigue cabiendo—.
+   */
+  const sharedViability = sharedPitchViability(
+    sharedEntries,
+    sharedFlipped,
+    pitchBoxForAvailability(pitchBox),
+  );
+
+  /**
+   * Qué se puede ofrecer ahora. Se recalcula solo: depende del tamaño medido,
+   * de las dos formaciones y de quién está en pista, así que un cambio de
+   * sistema o una sustitución lo revisan sin que nadie tenga que avisar.
+   */
+  const captureAv = captureAvailability(viewportWidth, viewportHeight, sharedViability);
+  const dualLayout = columnsLayoutFor(viewportWidth, viewportHeight);
+  const dualColumns = dualLayout === "columns";
+  const dualUnavailable = captureUnavailableReason(captureMode, captureAv, viewportWidth);
+
+  /**
+   * El modo EFECTIVO: el pedido, y solo donde cabe.
+   *
+   * Si deja de caber —la pantalla gira, o entra una formación que no se puede
+   * separar— esto vuelve a focal solo, sin tocar el jugador seleccionado, los
+   * eventos, el marcador, la fase ni las posiciones. Y recupera el modo
+   * elegido en cuanto vuelve a caber, porque la preferencia no se reescribe.
+   */
+  const modoEfectivo = effectiveCaptureMode(captureMode, captureAv);
+  const columnsActive = modoEfectivo === "columns";
+  const pitchActive = modoEfectivo === "pitch";
+
+  /**
+   * Los dos modos nuevos comparten lo esencial: el jugador se toca DIRECTO,
+   * sin elegir equipo antes. Lo que cambia entre ellos es dónde están las
+   * fichas —a los lados o dentro de la pista—, no cómo se registra.
+   */
+  const dualActive = columnsActive || pitchActive;
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
@@ -6509,14 +6543,14 @@ export default function MatchTracker() {
               </span>
               {CAPTURE_MODES.map((m) => {
                 const activo = captureMode === m;
-                const cabe = isCaptureModeAvailable(m, viewportWidth, viewportHeight);
+                const cabe = isCaptureModeAvailable(m, captureAv);
                 return (
                   <button
                     key={m}
                     data-capture-mode-button={m}
                     aria-pressed={activo}
                     disabled={!cabe}
-                    title={captureUnavailableReason(m, viewportWidth, viewportHeight) ?? undefined}
+                    title={captureUnavailableReason(m, captureAv, viewportWidth) ?? undefined}
                     onClick={() => elegirCaptureMode(m)}
                     className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-all disabled:opacity-30 ${
                       activo

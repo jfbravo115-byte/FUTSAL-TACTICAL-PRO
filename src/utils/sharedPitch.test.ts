@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  BENCH_BAR_PX,
   PitchMetrics,
   PitchSlot,
   SharedPitchEntry,
@@ -16,8 +17,12 @@ import {
   defendedGoalSide,
   formationPositionToSharedPitch,
   layoutSharedPitch,
+  countOutside,
+  countOverlaps,
   minimumVerticalSeparationPct,
+  pitchBoxForAvailability,
   sharedPitchFlipped,
+  sharedPitchViability,
   verticalBoundsPct,
   visualSideSwapped,
 } from "./sharedPitch";
@@ -217,6 +222,26 @@ describe("4 · el descanso: una sola inversión, y ya viene puesta", () => {
     expect(handler).toContain("setIsFieldFlipped((prev) => !prev);");
     // Y sigue siendo imperativa, no un efecto que pueda repetirse por render.
     expect(handler).not.toContain("useEffect");
+  });
+
+  it("solo hay TRES sitios que inviertan la orientación, y ninguno reactivo", () => {
+    // La inversión del descanso viene de `208cd9f` (2026-09-02), anterior a
+    // este experimento y presente ya en la PR #27 y en producción. Lo que
+    // esta prueba impide es que aparezca una segunda: si alguien añadiera un
+    // efecto sobre `period`, la pista se invertiría dos veces y el cambio de
+    // porterías se anularía —que es justo lo que se midió y se corrigió—.
+    const tracker = readFileSync(resolve(__dirname, "../pages/MatchTracker.tsx"), "utf-8");
+    const sitios = tracker.match(/setIsFieldFlipped\(/g) ?? [];
+    expect(sitios).toHaveLength(3); // restaurar snapshot · descanso · botón manual
+    expect(tracker).toContain("if (typeof snap.uiState?.isFieldFlipped === \"boolean\") setIsFieldFlipped(");
+    expect(tracker).toContain("onClick={() => setIsFieldFlipped((prev) => !prev)}");
+    // Ninguna de las tres está dentro de un efecto que escuche al periodo.
+    for (const trozo of tracker.split("useEffect(").slice(1)) {
+      const cuerpo = trozo.slice(0, trozo.indexOf("}, ["));
+      if (cuerpo.includes("setIsFieldFlipped(")) {
+        expect(cuerpo).not.toMatch(/period|Period\./);
+      }
+    }
   });
 
   it("7 · el cambio de campo del DATO sigue intacto y aparte", () => {
@@ -487,5 +512,190 @@ describe("11-12 · una sustitución redibuja sola", () => {
     for (const p of antes.filter((x) => x.side === "team")) {
       expect(despues.find((x) => x.id === p.id)!.left).toBe(p.left);
     }
+  });
+});
+
+// ── 13-19 · TABLET VERTICAL 768×1024 ────────────────────────────────────
+//
+// La pista medida en el Deploy Preview a 768×1024 es 746×262. La
+// disponibilidad se evalúa sobre esa caja MENOS la barra de banquillos, que
+// es el suelo: la pista del 5v5 nunca es más pequeña que eso.
+
+/** Lo medido en el preview a 768×1024, en modo columnas. */
+const TABLET_BOX = { width: 746, height: 262 };
+const TABLET_DISPONIBILIDAD = pitchBoxForAvailability(TABLET_BOX, ESCRITORIO);
+
+/**
+ * Los sistemas REALES de la aplicación (`PITCH_SYSTEMS`), copiados aquí para
+ * que una prueba falle si alguien los mueve sin volver a medir si caben.
+ */
+const SISTEMAS_REALES: Record<string, PitchSlot[]> = {
+  "4vs4": [
+    { left: 7, top: 50, label: "POR" },
+    { left: 28, top: 50, label: "CIE" },
+    { left: 55, top: 18, label: "AI" },
+    { left: 55, top: 82, label: "AD" },
+    { left: 85, top: 50, label: "PIV" },
+  ],
+  // Portero-jugador: el portero sube a campo y no hay nadie bajo palos.
+  "PJ Ataque": [
+    { left: 15, top: 50, label: "P-J" },
+    { left: 35, top: 18, label: "AL" },
+    { left: 35, top: 82, label: "AL" },
+    { left: 80, top: 25, label: "PIV" },
+    { left: 80, top: 75, label: "PIV" },
+  ],
+  "PJ Defensa": [
+    { left: 7, top: 50, label: "POR" },
+    { left: 25, top: 22, label: "DEF" },
+    { left: 25, top: 78, label: "DEF" },
+    { left: 45, top: 22, label: "DEF" },
+    { left: 45, top: 78, label: "DEF" },
+  ],
+  Superioridad: [
+    { left: 7, top: 50, label: "POR" },
+    { left: 28, top: 50, label: "CIE" },
+    { left: 55, top: 18, label: "AL" },
+    { left: 55, top: 82, label: "AL" },
+    { left: 85, top: 50, label: "PIV" },
+  ],
+  // Inferioridad y 3vs3 son de cuatro: la pista lleva nueve fichas.
+  Inferioridad: [
+    { left: 7, top: 50, label: "POR" },
+    { left: 28, top: 50, label: "CIE" },
+    { left: 55, top: 22, label: "AL" },
+    { left: 55, top: 78, label: "AL" },
+  ],
+};
+
+const casos = [
+  ["1-2-2 vs 1-2-2", SISTEMA_1_2_2, SISTEMA_1_2_2],
+  ["1-3-1 vs 1-3-1", SISTEMA_1_3_1, SISTEMA_1_3_1],
+  ["1-1-3 vs 1-1-3", SISTEMA_1_1_3, SISTEMA_1_1_3],
+  ["1-1-3 vs 1-3-1", SISTEMA_1_1_3, SISTEMA_1_3_1],
+  ["portero-jugador vs 1-2-2", SISTEMAS_REALES["PJ Ataque"], SISTEMA_1_2_2],
+  ["portero-jugador vs 1-1-3", SISTEMAS_REALES["PJ Ataque"], SISTEMA_1_1_3],
+  ["PJ Defensa vs PJ Ataque", SISTEMAS_REALES["PJ Defensa"], SISTEMAS_REALES["PJ Ataque"]],
+  ["inferioridad (4) vs 1-2-2", SISTEMAS_REALES.Inferioridad, SISTEMA_1_2_2],
+] as const;
+
+describe("13-16 · en 768×1024 la pista 5v5 CABE", () => {
+  it("la caja de disponibilidad es la pista medida menos la barra", () => {
+    expect(BENCH_BAR_PX).toBe(34);
+    expect(TABLET_DISPONIBILIDAD.width).toBe(746);
+    expect(TABLET_DISPONIBILIDAD.height).toBe(262 - 34);
+    expect(TABLET_DISPONIBILIDAD.cardWidth).toBe(46);
+    expect(TABLET_DISPONIBILIDAD.cardHeight).toBe(44);
+  });
+
+  for (const [nombre, local, rival] of casos) {
+    for (const [parte, segunda] of [["1ª parte", false], ["2ª parte", true]] as const) {
+      for (const [lado, manual] of [["campo normal", false], ["campo invertido", true]] as const) {
+        it(`${nombre} · ${parte} · ${lado}`, () => {
+          const flipped = sharedPitchFlipped(segunda !== manual);
+          const entries = equipos(local, rival);
+          const v = sharedPitchViability(entries, flipped, TABLET_DISPONIBILIDAD);
+          expect(v.ok, JSON.stringify(v)).toBe(true);
+          const { placements } = layoutSharedPitch(entries, flipped, TABLET_DISPONIBILIDAD);
+          // Se dibujan TODOS los que hay en pista: diez en cinco contra
+          // cinco, nueve si un equipo está en inferioridad. Ninguno se cae.
+          expect(placements).toHaveLength(entries.length);
+          expect(new Set(placements.map((p) => p.id)).size).toBe(entries.length);
+          expect(countOverlaps(placements, TABLET_DISPONIBILIDAD)).toBe(0);
+          expect(countOutside(placements, TABLET_DISPONIBILIDAD)).toBe(0);
+        });
+      }
+    }
+  }
+
+  it("TODAS las parejas de sistemas reales caben en la tablet", () => {
+    // 5×5 combinaciones, en las dos orientaciones. Si alguien añade un
+    // sistema nuevo o mueve un puesto, esta prueba lo mide antes de que el
+    // entrenador se encuentre dos fichas superpuestas en el banquillo.
+    const nombres = Object.keys(SISTEMAS_REALES);
+    const malas: string[] = [];
+    for (const a of nombres) {
+      for (const b of nombres) {
+        for (const flipped of [false, true]) {
+          const v = sharedPitchViability(
+            equipos(SISTEMAS_REALES[a], SISTEMAS_REALES[b]),
+            flipped,
+            TABLET_DISPONIBILIDAD,
+          );
+          if (!v.ok) malas.push(`${a}/${b}${flipped ? " invertido" : ""}: ${JSON.stringify(v)}`);
+        }
+      }
+    }
+    expect(malas).toEqual([]);
+  });
+
+  it("tras una sustitución local, y tras una rival, sigue cabiendo", () => {
+    const base = equipos(SISTEMA_1_1_3, SISTEMA_1_1_3);
+    const cambios = [
+      ["local", base.map((e) => (e.id === "L3" ? { ...e, id: "L21", number: 21 } : e))],
+      ["rival", base.map((e) => (e.id === "R1" ? { ...e, id: "R18", number: 18 } : e))],
+    ] as const;
+    for (const [quien, entries] of cambios) {
+      const v = sharedPitchViability(entries, false, TABLET_DISPONIBILIDAD);
+      expect(v.ok, quien).toBe(true);
+      const { placements } = layoutSharedPitch(entries, false, TABLET_DISPONIBILIDAD);
+      expect(placements).toHaveLength(10);
+      expect(countOverlaps(placements, TABLET_DISPONIBILIDAD)).toBe(0);
+    }
+  });
+
+  it("un nombre largo no cambia la geometría: la ficha mide lo que mide", () => {
+    // El nombre se recorta en la ficha; el rectángulo es siempre 46×44, que
+    // es justo lo que la separación da por supuesto.
+    const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, TABLET_DISPONIBILIDAD);
+    expect(v.ok).toBe(true);
+    expect(TABLET_DISPONIBILIDAD.cardWidth).toBe(ESCRITORIO.cardWidth);
+    expect(TABLET_DISPONIBILIDAD.cardHeight).toBe(ESCRITORIO.cardHeight);
+  });
+});
+
+describe("17-19 · cuándo NO se ofrece, y por qué", () => {
+  it("si la pista es tan baja que un grupo no cabe, lo dice en vez de amontonar", () => {
+    const bajita = { ...TABLET_DISPONIBILIDAD, height: 70 };
+    const v = sharedPitchViability(equipos(SISTEMA_1_1_3, SISTEMA_1_1_3), false, bajita);
+    expect(v.ok).toBe(false);
+    expect(v.fits).toBe(false);
+    expect(v.measured).toBe(true);
+  });
+
+  it("si la pista es tan estrecha que alguien se sale, tampoco", () => {
+    const estrechita = { ...TABLET_DISPONIBILIDAD, width: 200 };
+    const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, estrechita);
+    expect(v.ok).toBe(false);
+    expect(v.outside).toBeGreaterThan(0);
+  });
+
+  it("sin medida no se promete nada", () => {
+    const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, { ...ESCRITORIO, width: 0, height: 0 });
+    expect(v.measured).toBe(false);
+    expect(v.ok).toBe(false);
+    const sinJugadores = sharedPitchViability([], false, ESCRITORIO);
+    expect(sinJugadores.ok).toBe(false);
+  });
+
+  it("la caja de disponibilidad es SUELO: lo que se ofrece, cabe", () => {
+    // Entrar exige que quepa en la caja reducida; una vez dentro, la pista
+    // real es mayor o igual. Por eso el modo no puede entrar y salir solo.
+    const real = { ...ESCRITORIO, width: TABLET_BOX.width, height: TABLET_BOX.height };
+    const reducida = pitchBoxForAvailability(TABLET_BOX, ESCRITORIO);
+    expect(reducida.height).toBeLessThan(real.height);
+    const entries = equipos(SISTEMA_1_1_3, SISTEMA_1_1_3);
+    expect(sharedPitchViability(entries, false, reducida).ok).toBe(true);
+    expect(sharedPitchViability(entries, false, real).ok).toBe(true);
+    // Y el móvil, con su pista pequeña, sigue sin ofrecerla.
+    const movil = pitchBoxForAvailability({ width: 343, height: 200 }, ESCRITORIO);
+    expect(sharedPitchViability(entries, false, movil).ok).toBe(false);
+  });
+
+  it("cuenta de verdad los solapes y las fichas fuera", () => {
+    const juntas = [{ left: 50, top: 50 }, { left: 50, top: 51 }, { left: 50, top: 52 }];
+    expect(countOverlaps(juntas, TABLET_DISPONIBILIDAD)).toBe(3);
+    expect(countOverlaps([{ left: 10, top: 10 }, { left: 90, top: 90 }], TABLET_DISPONIBILIDAD)).toBe(0);
+    expect(countOutside([{ left: 0, top: 50 }, { left: 50, top: 50 }, { left: 50, top: 100 }], TABLET_DISPONIBILIDAD)).toBe(2);
   });
 });

@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import {
   CAPTURE_MODE_KEY,
   CAPTURE_MODE_LABEL,
+  captureAvailability,
   captureUnavailableReason,
   columnsLayoutFor,
   effectiveCaptureMode,
@@ -258,32 +259,68 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     expect(snap).not.toContain("captureMode");
   });
 
-  it("14 · cada modo solo se ofrece donde CABE, medido en los cuatro tamaños", () => {
-    // Los cuatro de la validación, y el porqué de cada uno.
+  it("14 · columnas por umbral medido; la pista 5v5, por geometría", () => {
     expect(columnsLayoutFor(1440, 900)).toBe("columns");
     expect(columnsLayoutFor(768, 1024)).toBe("rows");
     expect(columnsLayoutFor(1024, 768)).toBeNull(); // columnas esconden un jugador; filas dejan el campo en 58 px
     expect(columnsLayoutFor(375, 812)).toBeNull();
-    expect(effectiveCaptureMode("pitch", 1024, 768)).toBe("focal");
-    expect(effectiveCaptureMode("pitch", 1440, 900)).toBe("pitch");
+    // La pista 5v5 ya NO tiene umbral de ancho: en una tablet vertical se
+    // ofrece si los diez caben en la pista medida.
+    expect(effectiveCaptureMode("pitch", captureAvailability(768, 1024, { ok: true, measured: true }))).toBe("pitch");
+    expect(effectiveCaptureMode("pitch", captureAvailability(1920, 1080, { ok: false, measured: true }))).toBe("focal");
+    expect(codigo).not.toMatch(/PITCH_MIN_WIDTH|pitchAvailableFor/);
     expect(codigo).toContain("const dualLayout = columnsLayoutFor(viewportWidth, viewportHeight);");
-    expect(codigo).toContain("const modoEfectivo = effectiveCaptureMode(captureMode, viewportWidth, viewportHeight);");
+    expect(codigo).toContain("const modoEfectivo = effectiveCaptureMode(captureMode, captureAv);");
     // Y el botón se deshabilita donde no cabe, en vez de mentir.
-    expect(codigo).toContain("const cabe = isCaptureModeAvailable(m, viewportWidth, viewportHeight);");
+    expect(codigo).toContain("const cabe = isCaptureModeAvailable(m, captureAv);");
+  });
+
+  it("la disponibilidad de la pista sale de la pista MEDIDA, no de la ventana", () => {
+    const v = trozo("const sharedViability = sharedPitchViability(", "const captureAv =");
+    expect(v).toContain("sharedEntries");
+    expect(v).toContain("sharedFlipped");
+    expect(v).toContain("pitchBoxForAvailability(pitchBox)");
+    expect(codigo).toContain("const captureAv = captureAvailability(viewportWidth, viewportHeight, sharedViability);");
+    // Y la medida se toma SIEMPRE, no solo estando ya en 5v5: si solo se
+    // midiera dentro, nunca se sabría si se puede entrar.
+    const efecto = trozo("const el = pitchRef.current;", "}, [activeTab]);");
+    expect(efecto).toContain("new ResizeObserver(medir)");
+    expect(efecto).not.toContain("pitchActive");
+  });
+
+  it("y se recalcula sola cuando cambian formaciones, cambios o tamaño", () => {
+    // `sharedEntries` se construye en cada render a partir del sistema de
+    // cada equipo y de quién está en pista; `sharedViability` cuelga de ella.
+    // No hay estado que haya que invalidar, así que un cambio de sistema o
+    // una sustitución la revisan sin que nadie avise.
+    const entradas = trozo("const sharedEntries =", "const sharedLayout =");
+    expect(entradas).toContain("rivalGameState");
+    expect(entradas).toContain("gameState");
+    expect(entradas).toContain("rosterEnPista(opponent)");
+    const v = trozo("const sharedViability = sharedPitchViability(", "const captureAv =");
+    expect(v).toContain("sharedEntries");
+  });
+
+  it("y la medida no se reescribe si no ha cambiado: nada de bucles", () => {
+    const efecto = trozo("const medir = () => {", "const ro = new ResizeObserver");
+    expect(efecto).toContain("setPitchBox((prev) =>");
+    expect(efecto).toContain("Math.abs(prev.width - r.width) < 0.5");
+    expect(efecto).toContain("? prev");
   });
 
   it("y donde no cabe se dice por qué, en vez de dejar un botón mudo", () => {
-    expect(captureUnavailableReason("columns", 1024, 768)).toBe(
+    const tabletSinSitio = captureAvailability(768, 1024, { ok: false, measured: true });
+    expect(captureUnavailableReason("pitch", tabletSinSitio, 768)).toBe(
+      "Vista pista 5v5 no disponible: estas formaciones no caben separadas en la pista",
+    );
+    const ipad = captureAvailability(1024, 768, { ok: true, measured: true });
+    expect(captureUnavailableReason("columns", ipad, 1024)).toBe(
       "Vista columnas no disponible con esta altura de pantalla",
     );
-    expect(captureUnavailableReason("pitch", 375, 812)).toBe(
-      "Vista pista 5v5 no disponible con esta anchura de pantalla",
-    );
-    expect(captureUnavailableReason("columns", 1440, 900)).toBeNull();
-    expect(captureUnavailableReason("columns", 768, 1024)).toBeNull();
+    expect(captureUnavailableReason("columns", captureAvailability(1440, 900, { ok: true, measured: true }), 1440)).toBeNull();
     expect(codigo).toContain("data-dual-unavailable");
     // Y el título del botón apagado dice lo mismo que la línea de abajo.
-    expect(codigo).toContain("title={captureUnavailableReason(m, viewportWidth, viewportHeight) ?? undefined}");
+    expect(codigo).toContain("title={captureUnavailableReason(m, captureAv, viewportWidth) ?? undefined}");
   });
 
   it("girar la pantalla la devuelve a focal sin tocar el partido", () => {
@@ -291,7 +328,7 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     // ningún efecto que reescriba el partido, el jugador ni la fase.
     expect(codigo).toContain('const columnsActive = modoEfectivo === "columns";');
     expect(codigo).toContain('const pitchActive = modoEfectivo === "pitch";');
-    const deriva = codigo.slice(codigo.indexOf("const dualLayout = columnsLayoutFor("), codigo.indexOf("const bandoDeAccion"));
+    const deriva = trozo("const sharedViability = sharedPitchViability(", "const [isExporting");
     for (const prohibido of ["setMatchData", "setSelectedActor", "applyPhaseOfPlay", "setPitchView", "writeCaptureMode"]) {
       expect(deriva).not.toContain(prohibido);
     }
@@ -494,7 +531,8 @@ describe("18 · la separación usa la pista MEDIDA, no la supuesta", () => {
   it("se mide el campo real con ResizeObserver", () => {
     expect(codigo).toContain("const ro = new ResizeObserver(medir);");
     expect(codigo).toContain("const r = el.getBoundingClientRect();");
-    expect(codigo).toContain("if (r.width > 0 && r.height > 0) setPitchBox({ width: r.width, height: r.height });");
+    expect(codigo).toContain("if (r.width <= 0 || r.height <= 0) return;");
+    expect(codigo).toContain("{ width: r.width, height: r.height }");
   });
 
   it("y esa medida es la que decide cuánto separar", () => {

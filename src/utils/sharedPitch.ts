@@ -86,8 +86,8 @@ export function attackedGoalSide(teamSide: TeamSide, flipped: boolean): "left" |
  * ¿Han cambiado ya de campo los equipos cuando empieza este periodo?
  *
  * Reutiliza la MISMA tabla que usa `attackDirection` para el dato, en vez de
- * una paridad escrita aparte: si algún día la prórroga se implementa de
- * verdad, los dos mecanismos cambiarán juntos.
+ * una paridad escrita aparte. NO se usa para dibujar: está aquí porque es la
+ * trampa que hay documentada justo debajo, y las pruebas la vigilan.
  */
 export function visualSideSwapped(period: Period): boolean {
   return (SIDE_SWAPS_BEFORE[period] ?? 0) % 2 === 1;
@@ -96,19 +96,27 @@ export function visualSideSwapped(period: Period): boolean {
 /**
  * La orientación con la que se dibuja la pista compartida.
  *
- * Es el XOR de las dos causas que pueden invertirla, y se calcula UNA vez por
- * render:
+ * EL DESCANSO SÍ INVIERTE LAS PORTERÍAS, Y YA LLEGA INVERTIDO
+ * -----------------------------------------------------------
+ * `handleConfirmEndFirst` invierte `isFieldFlipped` al confirmar el fin de la
+ * 1ª parte —una llamada imperativa, una sola vez por partido—. Es decir, el
+ * cambio de campo del descanso YA está dentro de `isFieldFlipped` cuando esta
+ * función lo recibe. Combinarlo aquí otra vez con el periodo lo contaría dos
+ * veces y las dos inversiones se anularían: medido en el Deploy Preview #28,
+ * el portero local se quedaba en x=316 en las dos partes.
  *
- *   1ª parte  + sin cambio manual  →  orientación inicial
- *   1ª parte  + cambio manual      →  reflejada
- *   2ª parte  + sin cambio manual  →  inicial intercambiada
- *   2ª parte  + cambio manual      →  la de 2ª parte, reflejada
+ * Por eso la tabla de verdad pedida sale de una sola variable:
  *
- * Si las dos coinciden se anulan, que es lo correcto: cambiar de campo y
- * además pulsar «Cambiar lado» deja la pista como estaba.
+ *   1ª parte + sin cambio manual  →  inicial          (isFieldFlipped = false)
+ *   1ª parte + con cambio manual  →  reflejada        (true)
+ *   2ª parte + sin cambio manual  →  intercambiada    (true,  puesto por el descanso)
+ *   2ª parte + con cambio manual  →  2ª reflejada     (false, el manual deshace el descanso)
+ *
+ * Se resuelve UNA vez por render, no una por ficha: si cada jugador la
+ * resolviera, la inversión se aplicaría diez veces.
  */
-export function sharedPitchFlipped(isFieldFlipped: boolean, period: Period): boolean {
-  return isFieldFlipped !== visualSideSwapped(period);
+export function sharedPitchFlipped(isFieldFlipped: boolean): boolean {
+  return isFieldFlipped;
 }
 
 // ── COLISIONES ──────────────────────────────────────────────────────────

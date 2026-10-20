@@ -1674,15 +1674,15 @@ export default function MatchTracker() {
   /**
    * LA PISTA COMPARTIDA · los diez colocados sobre un solo campo.
    *
-   * La orientación se resuelve UNA vez aquí —`sharedPitchFlipped` combina el
-   * cambio manual de lado con el del descanso— y la proyección de cada jugador
-   * la recibe ya hecha. Si se resolviera por ficha, la segunda parte se
-   * invertiría diez veces.
+   * La orientación se resuelve UNA vez aquí y la proyección de cada jugador la
+   * recibe ya hecha: si se resolviera por ficha, se aplicaría diez veces. El
+   * cambio de campo del descanso llega dentro de `isFieldFlipped`, que
+   * `handleConfirmEndFirst` invierte al confirmar el fin de la 1ª parte.
    *
    * Es transformación de PRESENTACIÓN: no toca `pitchPosition`, ni el evento,
    * ni el dato guardado. `attackDirection` sigue mandando en el dato.
    */
-  const sharedFlipped = sharedPitchFlipped(isFieldFlipped, matchData.period);
+  const sharedFlipped = sharedPitchFlipped(isFieldFlipped);
   const sharedEntries = ([false, true] as const).flatMap((opponent) => {
     const sistema = PITCH_SYSTEMS[opponent ? rivalGameState : gameState]
       || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];

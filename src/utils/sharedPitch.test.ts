@@ -21,6 +21,8 @@ import {
   verticalBoundsPct,
   visualSideSwapped,
 } from "./sharedPitch";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Period } from "../types/futsal";
 import { attackDirection } from "./attackDirection";
 
@@ -142,34 +144,40 @@ describe("3 · cambiar lado mueve a los diez a la vez", () => {
 
 // ── 4 · DESCANSO SIN DOBLE INVERSIÓN ────────────────────────────────────
 
-describe("4 · el descanso: una sola inversión, resuelta arriba", () => {
+describe("4 · el descanso: una sola inversión, y ya viene puesta", () => {
+  /**
+   * `isFieldFlipped` tal y como lo tiene la aplicación en cada momento.
+   * El descanso lo invierte una vez, en `handleConfirmEndFirst`; el botón
+   * «Cambiar lado» lo invierte otra. No hay más fuentes.
+   */
+  const comoEstaLaApp = (segundaParte: boolean, cambioManual: boolean) =>
+    segundaParte !== cambioManual;
+
   it("la proyección de CADA jugador sigue sin conocer el periodo", () => {
-    // Es la barrera contra la doble inversión: el periodo se consulta una vez
-    // por render, no una vez por ficha.
+    // Es la barrera contra la doble inversión: la orientación se decide una
+    // vez por render, no una vez por ficha.
     const fuente = formationPositionToSharedPitch.toString();
     expect(fuente).not.toMatch(/period|Period|SIDE_SWAPS/);
     expect(formationPositionToSharedPitch.length).toBe(3);
   });
 
   it("1-2 · en la 2ª parte los equipos intercambian portería", () => {
-    expect(visualSideSwapped(Period.FIRST)).toBe(false);
-    expect(visualSideSwapped(Period.SECOND)).toBe(true);
-    const flip1 = sharedPitchFlipped(false, Period.FIRST);
-    const flip2 = sharedPitchFlipped(false, Period.SECOND);
-    const local1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", flip1);
-    const local2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", flip2);
+    const primera = sharedPitchFlipped(comoEstaLaApp(false, false));
+    const segunda = sharedPitchFlipped(comoEstaLaApp(true, false));
+    const local1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", primera);
+    const local2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", segunda);
     expect(local1.left).toBe(7);
     expect(local2.left).toBe(93);
-    const rival1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", flip1);
-    const rival2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", flip2);
+    const rival1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", primera);
+    const rival2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", segunda);
     expect(rival1.left).toBe(93);
     expect(rival2.left).toBe(7);
   });
 
-  it("3 · y siguen enfrentados en las dos partes", () => {
-    for (const period of [Period.FIRST, Period.SECOND]) {
+  it("3 · y siguen enfrentados en las cuatro combinaciones", () => {
+    for (const segunda of [false, true]) {
       for (const manual of [false, true]) {
-        const f = sharedPitchFlipped(manual, period);
+        const f = sharedPitchFlipped(comoEstaLaApp(segunda, manual));
         const por = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", f);
         const porR = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", f);
         expect(Math.sign(por.left - 50)).toBe(-Math.sign(porR.left - 50));
@@ -178,22 +186,37 @@ describe("4 · el descanso: una sola inversión, resuelta arriba", () => {
   });
 
   it("8-10 · tabla de verdad de las cuatro combinaciones", () => {
-    expect(sharedPitchFlipped(false, Period.FIRST)).toBe(false);  // inicial
-    expect(sharedPitchFlipped(true, Period.FIRST)).toBe(true);    // reflejada
-    expect(sharedPitchFlipped(false, Period.SECOND)).toBe(true);  // intercambiada
-    expect(sharedPitchFlipped(true, Period.SECOND)).toBe(false);  // 2ª reflejada
+    expect(sharedPitchFlipped(comoEstaLaApp(false, false))).toBe(false); // inicial
+    expect(sharedPitchFlipped(comoEstaLaApp(false, true))).toBe(true);   // reflejada
+    expect(sharedPitchFlipped(comoEstaLaApp(true, false))).toBe(true);   // intercambiada
+    expect(sharedPitchFlipped(comoEstaLaApp(true, true))).toBe(false);   // 2ª reflejada
   });
 
-  it("10 · cambiar lado en la 2ª parte NO invierte dos veces", () => {
-    // Si se sumaran en vez de combinarse con XOR, la 2ª parte con cambio
-    // manual daría lo mismo que la 2ª sin él. Da lo contrario, que es lo
-    // correcto: deshace el intercambio.
-    expect(sharedPitchFlipped(true, Period.SECOND)).not.toBe(
-      sharedPitchFlipped(false, Period.SECOND),
+  it("10 · el periodo NO puede entrar otra vez: se anularía con el descanso", () => {
+    // MEDIDO en el Deploy Preview #28 con la versión que sí lo combinaba: el
+    // portero local se quedaba en x=316 en las dos partes, porque el descanso
+    // ya había invertido `isFieldFlipped` y el XOR lo deshacía.
+    const enSegunda = comoEstaLaApp(true, false);
+    expect(enSegunda).toBe(true);
+    expect(sharedPitchFlipped(enSegunda)).toBe(true);
+    expect(sharedPitchFlipped(enSegunda) !== visualSideSwapped(Period.SECOND)).toBe(false);
+    // Y la función no consulta el periodo por su cuenta.
+    expect(sharedPitchFlipped.length).toBe(1);
+    expect(sharedPitchFlipped.toString()).not.toMatch(/SIDE_SWAPS|visualSideSwapped/);
+  });
+
+  it("la inversión del descanso vive donde se confirma el fin de la 1ª parte", () => {
+    // Si alguien quitara ese toggle, la pista 5v5 dejaría de cambiar de
+    // porterías en silencio. Esta prueba es la que lo delataría.
+    const tracker = readFileSync(resolve(__dirname, "../pages/MatchTracker.tsx"), "utf-8");
+    const handler = tracker.slice(
+      tracker.indexOf("const handleConfirmEndFirst = ()"),
+      tracker.indexOf("const handleConfirmEndSecond"),
     );
-    expect(sharedPitchFlipped(true, Period.SECOND)).toBe(
-      sharedPitchFlipped(false, Period.FIRST),
-    );
+    expect(handler).toContain("period: Period.SECOND");
+    expect(handler).toContain("setIsFieldFlipped((prev) => !prev);");
+    // Y sigue siendo imperativa, no un efecto que pueda repetirse por render.
+    expect(handler).not.toContain("useEffect");
   });
 
   it("7 · el cambio de campo del DATO sigue intacto y aparte", () => {
@@ -201,6 +224,9 @@ describe("4 · el descanso: una sola inversión, resuelta arriba", () => {
     expect(attackDirection("left", Period.FIRST, false)).toBe("ltr");
     expect(attackDirection("left", Period.SECOND, false)).toBe("rtl");
     expect(attackDirection("left", Period.FIRST, true)).toBe("rtl");
+    // La tabla que lo gobierna sigue diciendo que en la 2ª parte se cambia.
+    expect(visualSideSwapped(Period.FIRST)).toBe(false);
+    expect(visualSideSwapped(Period.SECOND)).toBe(true);
   });
 });
 

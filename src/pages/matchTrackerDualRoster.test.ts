@@ -24,6 +24,7 @@ import {
   readCaptureMode,
   writeCaptureMode,
 } from "../utils/captureMode";
+import { DEFAULT_PITCH_METRICS } from "../utils/sharedPitch";
 
 const fuente = readFileSync(resolve(__dirname, "./MatchTracker.tsx"), "utf-8");
 const panel = readFileSync(resolve(__dirname, "../components/DualRosterPanel.tsx"), "utf-8");
@@ -411,6 +412,19 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(pista).toContain("aria-pressed={activo}");
   });
 
+  it("la ficha que se DIBUJA mide lo que la separación CREE que mide", () => {
+    // Si una se cambia y la otra no, la separación se calcula con un tamaño
+    // que no existe y las fichas vuelven a taparse sin que falle nada.
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBe(46);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBe(44);
+    expect(pistaCodigo).toContain(
+      `min-w-[${DEFAULT_PITCH_METRICS.cardWidth}px] min-h-[${DEFAULT_PITCH_METRICS.cardHeight}px]`,
+    );
+    expect(pistaCodigo).toContain(
+      `w-[${DEFAULT_PITCH_METRICS.cardWidth}px] h-[${DEFAULT_PITCH_METRICS.cardHeight}px]`,
+    );
+  });
+
   it("tocar una ficha es exactamente lo mismo que tocarla en la columna", () => {
     // Un solo camino: `selectActor`. Si la pista tuviera el suyo, habría dos
     // reglas para decidir de quién es la acción.
@@ -450,10 +464,15 @@ describe("16 · los diez dentro de una sola pista", () => {
 });
 
 describe("17 · la orientación se resuelve UNA vez", () => {
-  it("el descanso entra por `sharedPitchFlipped`, con el periodo del partido", () => {
-    expect(codigo).toContain("const sharedFlipped = sharedPitchFlipped(isFieldFlipped, matchData.period);");
+  it("el descanso entra por `isFieldFlipped`, que ya viene invertido", () => {
+    expect(codigo).toContain("const sharedFlipped = sharedPitchFlipped(isFieldFlipped);");
     // Una sola llamada: resolverla por ficha invertiría la pista diez veces.
     expect((codigo.match(/sharedPitchFlipped\(/g) ?? []).length).toBe(1);
+    // Y NO se combina aquí con el periodo: `handleConfirmEndFirst` ya lo hizo,
+    // y contarlo dos veces dejaba la pista sin cambiar —medido en el preview—.
+    const bloque = trozo("const sharedFlipped =", "const sharedPlayers");
+    expect(bloque).not.toContain("matchData.period");
+    expect(bloque).not.toContain("visualSideSwapped");
   });
 
   it("las porterías se rotulan con el equipo que las defiende", () => {

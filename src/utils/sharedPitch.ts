@@ -28,15 +28,22 @@
  * lados— se deriva de `teamDefendsAtKickoff` y del periodo, nunca de lo que
  * se ve en pantalla.
  *
- * NO HAY DOBLE INVERSIÓN EN EL DESCANSO
- * -------------------------------------
- * Estas funciones NO reciben el periodo, y es deliberado: hoy la pista no se
- * voltea sola al empezar la segunda parte —`handleConfirmEndFirst` solo
- * cambia `period`— y el cambio de campo real se refleja en el DATO, dentro de
- * `attackDirection` de cada evento. Si además se volteara aquí, el mismo
- * cambio de campo se aplicaría dos veces.
+ * EL DESCANSO SE RESUELVE UNA SOLA VEZ, ARRIBA
+ * --------------------------------------------
+ * En la segunda parte los equipos cambian de portería, y esta vista quiere
+ * representar lo que el analista está viendo, así que la pista se intercambia.
+ * Pero `formationPositionToSharedPitch` sigue SIN conocer el periodo: recibe
+ * un `flipped` ya resuelto. Quien mezcla las dos cosas es
+ * `sharedPitchFlipped`, que se llama UNA vez por render y no una vez por
+ * jugador. Así no hay forma de aplicar el cambio de campo dos veces.
+ *
+ * Y el cambio de campo del DATO —`attackDirection` de cada evento, derivado
+ * de `teamDefendsAtKickoff` y del periodo— no se toca: son dos mecanismos
+ * separados a propósito, uno para dibujar y otro para analizar.
  */
+import { Period } from "../types/futsal";
 import { applyFieldFlip } from "./fieldOrientation";
+import { SIDE_SWAPS_BEFORE } from "./attackDirection";
 
 /** Una posición de la tabla de formaciones. Porcentajes del contenedor. */
 export type PitchSlot = { left: number; top: number; label?: string };
@@ -73,27 +80,86 @@ export function attackedGoalSide(teamSide: TeamSide, flipped: boolean): "left" |
   return defendedGoalSide(teamSide, flipped) === "left" ? "right" : "left";
 }
 
+// ── ORIENTACIÓN VISUAL EFECTIVA ─────────────────────────────────────────
+
+/**
+ * ¿Han cambiado ya de campo los equipos cuando empieza este periodo?
+ *
+ * Reutiliza la MISMA tabla que usa `attackDirection` para el dato, en vez de
+ * una paridad escrita aparte: si algún día la prórroga se implementa de
+ * verdad, los dos mecanismos cambiarán juntos.
+ */
+export function visualSideSwapped(period: Period): boolean {
+  return (SIDE_SWAPS_BEFORE[period] ?? 0) % 2 === 1;
+}
+
+/**
+ * La orientación con la que se dibuja la pista compartida.
+ *
+ * Es el XOR de las dos causas que pueden invertirla, y se calcula UNA vez por
+ * render:
+ *
+ *   1ª parte  + sin cambio manual  →  orientación inicial
+ *   1ª parte  + cambio manual      →  reflejada
+ *   2ª parte  + sin cambio manual  →  inicial intercambiada
+ *   2ª parte  + cambio manual      →  la de 2ª parte, reflejada
+ *
+ * Si las dos coinciden se anulan, que es lo correcto: cambiar de campo y
+ * además pulsar «Cambiar lado» deja la pista como estaba.
+ */
+export function sharedPitchFlipped(isFieldFlipped: boolean, period: Period): boolean {
+  return isFieldFlipped !== visualSideSwapped(period);
+}
+
 // ── COLISIONES ──────────────────────────────────────────────────────────
 //
 // Con los dos equipos sobre la misma pista hay parejas que caen casi en el
-// mismo punto: el pivot local en (85,50) y el cierre rival en (72,50) quedan a
-// 13 puntos, y en algunos sistemas a 8. Dos fichas de 44 px superpuestas no se
-// pueden pulsar por separado.
+// mismo punto: el pivot local en (85,50) y el portero rival en (93,50) quedan
+// a 8 puntos porcentuales. Dos fichas de 44 px superpuestas no se pueden
+// pulsar por separado.
+//
+// LA SEPARACIÓN SE CALCULA EN PÍXELES, NO EN PORCENTAJES
+// ------------------------------------------------------
+// Un porcentaje fijo no sirve: 9 % son 33 px en una pista de 362 y 24 px en
+// una de 265, y con fichas de 44 px los dos casos siguen solapando. Lo que
+// tiene que cumplirse es geométrico —la distancia entre centros ha de ser al
+// menos el alto de la ficha más el margen— así que las medidas reales entran
+// como dato y el porcentaje sale de ellas.
 //
 // La separación es VISUAL y DETERMINISTA: no se tocan los datos, no se mueve
-// nadie a otra parte de la pista y el mismo partido se dibuja siempre igual.
-// Se reparte en vertical alrededor del punto original, en el orden
-// (local antes que rival, y dentro de cada equipo por dorsal), de modo que el
-// jugador sigue donde estaba, solo que sin taparse con el otro.
+// nadie en horizontal y el mismo partido se dibuja siempre igual.
 
-/** Distancias por debajo de las cuales dos fichas se tapan. En % del contenedor. */
-export const COLLISION_LEFT = 9;
-export const COLLISION_TOP = 14;
-/** Separación vertical que se aplica entre fichas en conflicto. */
-export const COLLISION_STEP = 9;
-/** Margen para no sacar una ficha de la pista al separarla. */
-export const TOP_MIN = 8;
-export const TOP_MAX = 92;
+/** Medidas reales del dibujo, en píxeles. */
+export type PitchMetrics = {
+  width: number;
+  height: number;
+  cardWidth: number;
+  cardHeight: number;
+  /** Separación mínima entre los BORDES de dos fichas. */
+  gap: number;
+};
+
+/** Lo medido en el experimento: 898×362 en escritorio, 746×265 en tablet. */
+export const DEFAULT_PITCH_METRICS: PitchMetrics = {
+  width: 898,
+  height: 362,
+  cardWidth: 46,
+  cardHeight: 44,
+  gap: 4,
+};
+
+const pct = (px: number, total: number) => (total > 0 ? (px / total) * 100 : 0);
+
+/** Distancia MÍNIMA entre centros, en % del alto, para que no se toquen. */
+export function minimumVerticalSeparationPct(m: PitchMetrics): number {
+  return pct(m.cardHeight + m.gap, m.height);
+}
+
+/** Margen arriba y abajo para que la ficha entre entera en la pista. */
+export function verticalBoundsPct(m: PitchMetrics): { min: number; max: number } {
+  const medio = pct(m.cardHeight / 2, m.height);
+  return { min: medio, max: 100 - medio };
+}
 
 export type SharedPitchEntry = {
   id: string;
@@ -106,11 +172,19 @@ export type SharedPitchEntry = {
 export type SharedPitchPlacement = SharedPosition & {
   id: string;
   side: TeamSide;
-  /** true si hubo que separarla de otra ficha. Útil para explicarlo y testarlo. */
+  /** true si hubo que separarla de otra ficha. */
   nudged: boolean;
 };
 
-const clampTop = (top: number) => Math.min(TOP_MAX, Math.max(TOP_MIN, top));
+export type SharedPitchLayout = {
+  placements: SharedPitchPlacement[];
+  /**
+   * false cuando la pista es tan baja que algún grupo no cabe separado. Es la
+   * señal para NO ofrecer esta vista en ese tamaño, en vez de dibujar diez
+   * fichas que se tapan.
+   */
+  fits: boolean;
+};
 
 /**
  * Coloca a los diez sobre la pista compartida, separando lo que se tape.
@@ -121,8 +195,13 @@ const clampTop = (top: number) => Math.min(TOP_MAX, Math.max(TOP_MIN, top));
 export function layoutSharedPitch(
   entries: SharedPitchEntry[],
   flipped: boolean,
-): SharedPitchPlacement[] {
-  const base = [...entries]
+  metrics: PitchMetrics = DEFAULT_PITCH_METRICS,
+): SharedPitchLayout {
+  const paso = minimumVerticalSeparationPct(metrics);
+  const { min, max } = verticalBoundsPct(metrics);
+  const anchoChoque = pct(metrics.cardWidth + metrics.gap, metrics.width);
+
+  const base: SharedPitchPlacement[] = [...entries]
     .sort((a, b) =>
       a.side === b.side ? a.number - b.number : a.side === "team" ? -1 : 1,
     )
@@ -133,30 +212,53 @@ export function layoutSharedPitch(
       ...formationPositionToSharedPitch(e.slot, e.side, flipped),
     }));
 
-  // Grupos de fichas que se tapan entre sí, por cercanía en los dos ejes.
+  // Grupos de fichas cuyos rectángulos se tocan, medido en píxeles reales.
   const grupo: number[] = base.map(() => -1);
   let siguiente = 0;
   for (let i = 0; i < base.length; i++) {
     if (grupo[i] === -1) grupo[i] = siguiente++;
     for (let j = i + 1; j < base.length; j++) {
-      const cerca =
-        Math.abs(base[i].left - base[j].left) < COLLISION_LEFT &&
-        Math.abs(base[i].top - base[j].top) < COLLISION_TOP;
-      if (cerca) grupo[j] = grupo[i];
+      const seTocan =
+        Math.abs(base[i].left - base[j].left) < anchoChoque &&
+        Math.abs(base[i].top - base[j].top) < paso;
+      if (seTocan) grupo[j] = grupo[i];
     }
   }
 
+  let fits = true;
   for (let g = 0; g < siguiente; g++) {
     const indices = base.map((_, i) => i).filter((i) => grupo[i] === g);
     if (indices.length < 2) continue;
-    // Se reparten alrededor del centro del grupo, sin alejarse de su sitio.
+
+    const alto = paso * (indices.length - 1);
+    if (alto > max - min) {
+      // No cabe ni aunque se use toda la pista: esta vista no sirve a este
+      // tamaño. Se reparte lo que se pueda y se avisa.
+      fits = false;
+    }
+
+    // Simétrico alrededor del centro del grupo mientras haya sitio; si el
+    // reparto se sale, se DESPLAZA entero —no se comprime— para que la
+    // separación mínima se conserve.
     const centro = indices.reduce((acc, i) => acc + base[i].top, 0) / indices.length;
-    const inicio = centro - (COLLISION_STEP * (indices.length - 1)) / 2;
+    let inicio = centro - alto / 2;
+    if (inicio < min) inicio = min;
+    if (inicio + alto > max) inicio = Math.max(min, max - alto);
+
     indices.forEach((i, k) => {
-      base[i].top = clampTop(inicio + COLLISION_STEP * k);
+      base[i].top = inicio + paso * k;
       base[i].nudged = true;
     });
   }
 
-  return base;
+  return { placements: base, fits };
+}
+
+/** ¿Caben los diez con objetivos táctiles independientes a este tamaño? */
+export function sharedPitchFits(
+  entries: SharedPitchEntry[],
+  flipped: boolean,
+  metrics: PitchMetrics,
+): boolean {
+  return layoutSharedPitch(entries, flipped, metrics).fits;
 }

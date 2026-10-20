@@ -1669,6 +1669,26 @@ export default function MatchTracker() {
       prev?.id === playerId ? null : { id: p.id, isOpponent: !!p.isOpponent },
     );
   };
+  /**
+   * TOCAR UNA FICHA EN LA PISTA 5v5.
+   *
+   * Un solo toque hace las tres cosas: deja al jugador seleccionado —para la
+   * barra común y para el banquillo—, fija su equipo POR SER SUYO, y abre el
+   * MISMO menú radial de la vista focal. No hay un segundo radial ni acciones
+   * duplicadas: `PlayerActionRadialMenu` recibe el jugador por su id y
+   * `handleAction` deduce el bando de `actingPlayer.isOpponent`, así que nada
+   * depende de `pitchView` ni de que un render posterior haya cuajado.
+   *
+   * La selección aquí NO alterna: alternarla dejaría el radial abierto para
+   * un jugador que ya no está seleccionado.
+   */
+  const tocarFichaEnPista = (playerId: string) => {
+    const p = matchData.players.find((x) => x.id === playerId);
+    if (!p || isDataLocked) return;
+    setSelectedActor({ id: p.id, isOpponent: !!p.isOpponent });
+    setActiveActionPlayerId(p.id);
+  };
+
   // ── ORIENTACIÓN VISUAL DEL CAMPO ──────────────────────────────────────
   // isFieldFlipped afecta ÚNICAMENTE a qué lado de la pantalla (izquierda/
   // derecha) se dibuja cada equipo en la vista táctica. NO toca isOpponent,
@@ -6918,7 +6938,7 @@ export default function MatchTracker() {
                       placements={sharedLayout.placements}
                       players={sharedPlayers}
                       selectedId={selectedActor?.id ?? null}
-                      onSelect={selectActor}
+                      onSelect={tocarFichaEnPista}
                       disabled={isDataLocked}
                     />
                   )}

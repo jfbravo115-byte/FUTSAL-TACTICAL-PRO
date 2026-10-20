@@ -32,8 +32,8 @@
  * --------------------------------------------
  * En la segunda parte los equipos cambian de portería, y esta vista quiere
  * representar lo que el analista está viendo, así que la pista se intercambia.
- * Pero `formationPositionToSharedPitch` sigue SIN conocer el periodo: recibe
- * un `flipped` ya resuelto. Quien mezcla las dos cosas es
+ * Pero `formationPositionToTeamHalf` sigue SIN conocer el periodo: recibe un
+ * `flipped` ya resuelto. Quien mezcla las dos cosas es
  * `sharedPitchFlipped`, que se llama UNA vez por render y no una vez por
  * jugador. Así no hay forma de aplicar el cambio de campo dos veces.
  *
@@ -48,24 +48,60 @@ import { SIDE_SWAPS_BEFORE } from "./attackDirection";
 /** Una posición de la tabla de formaciones. Porcentajes del contenedor. */
 export type PitchSlot = { left: number; top: number; label?: string };
 
+const pct = (px: number, total: number) => (total > 0 ? (px / total) * 100 : 0);
+
 export type TeamSide = "team" | "opponent";
 
 export type SharedPosition = { left: number; top: number };
 
 /**
- * La posición de UN jugador sobre la pista compartida.
+ * LA PROYECCIÓN BUENA · cada formación DENTRO DE SU MITAD.
  *
- * `teamSide` decide hacia dónde mira su formación; `flipped` es el botón
- * «Cambiar lado», que se aplica después y por igual a los dos equipos, así
- * que siguen enfrentados.
+ * Repartir cada sistema por todo el ancho —que es lo que hace la vista de un
+ * solo equipo— mezcla los dos equipos alrededor del centro: el pivot local
+ * acababa en el 85 %, campo rival, y el rival espejado en el 15 %.
+ *
+ * Aquí el sistema se COMPRIME solo en horizontal para caber en su mitad:
+ *
+ *   · el eje vertical no se toca, así que la formación se reconoce igual;
+ *   · el orden POR → CIERRE → ALAS → PIVOT se conserva, porque el mapa es
+ *     lineal y creciente;
+ *   · se reserva media ficha más el margen táctil a cada lado —línea central,
+ *     fondo y porterías—, de modo que ningún rectángulo cruza el centro;
+ *   · el rival se espeja, y los dos quedan enfrentados.
+ *
+ * El dominio de entrada es 0–100 fijo, no el mínimo y el máximo de cada
+ * sistema: si se ajustara a cada formación, un sistema corto se estiraría
+ * hasta el centro y dos sistemas distintos dejarían de ser comparables.
+ *
+ * No recibe `period`: el descanso lo gobierna `isFieldFlipped`, que llega ya
+ * resuelto en `flipped`.
  */
-export function formationPositionToSharedPitch(
+export function formationPositionToTeamHalf(
   slot: PitchSlot,
   teamSide: TeamSide,
   flipped: boolean,
+  metrics: PitchMetrics,
 ): SharedPosition {
-  const propio = teamSide === "opponent" ? 100 - slot.left : slot.left;
+  const margen = pct(metrics.cardWidth / 2 + metrics.gap, metrics.width);
+  const desde = margen;
+  const hasta = Math.max(margen, 50 - margen);
+  const enMiMitad = desde + (Math.min(100, Math.max(0, slot.left)) / 100) * (hasta - desde);
+  const propio = teamSide === "opponent" ? 100 - enMiMitad : enMiMitad;
   return { left: applyFieldFlip(propio, flipped), top: slot.top };
+}
+
+/** Los límites de cada mitad, en % del ancho. Para dibujar y para comprobar. */
+export function halfBoundsPct(
+  teamSide: TeamSide,
+  flipped: boolean,
+  metrics: PitchMetrics,
+): { min: number; max: number } {
+  const margen = pct(metrics.cardWidth / 2 + metrics.gap, metrics.width);
+  const izquierda = { min: margen, max: Math.max(margen, 50 - margen) };
+  const derecha = { min: 100 - izquierda.max, max: 100 - izquierda.min };
+  const enIzquierda = (teamSide === "team") !== flipped;
+  return enIzquierda ? izquierda : derecha;
 }
 
 /** Portería que DEFIENDE cada equipo sobre la pista compartida. */
@@ -156,8 +192,6 @@ export const DEFAULT_PITCH_METRICS: PitchMetrics = {
   gap: 4,
 };
 
-const pct = (px: number, total: number) => (total > 0 ? (px / total) * 100 : 0);
-
 /** Distancia MÍNIMA entre centros, en % del alto, para que no se toquen. */
 export function minimumVerticalSeparationPct(m: PitchMetrics): number {
   return pct(m.cardHeight + m.gap, m.height);
@@ -234,7 +268,7 @@ export function layoutSharedPitch(
       id: e.id,
       side: e.side,
       nudged: false,
-      ...formationPositionToSharedPitch(e.slot, e.side, flipped),
+      ...formationPositionToTeamHalf(e.slot, e.side, flipped, metrics),
     }));
   const original = base.map((p) => p.top);
 
@@ -256,12 +290,9 @@ export function layoutSharedPitch(
     quedanSolapes = false;
     for (let i = 0; i < base.length; i++) {
       for (let j = i + 1; j < base.length; j++) {
-        const a = cardRect(base[i], metrics);
-        const b = cardRect(base[j], metrics);
-        if (a.x1 > b.x0 && b.x1 > a.x0 && a.y1 > b.y0 && b.y1 > a.y0) {
-          quedanSolapes = true;
-          grupo[raiz(i)] = raiz(j);
-        }
+        if (!seSeparanJuntas(base[i], base[j], metrics)) continue;
+        quedanSolapes = true;
+        grupo[raiz(i)] = raiz(j);
       }
     }
     if (!quedanSolapes) break;
@@ -345,6 +376,40 @@ export function countOutside(placements: SharedPosition[], m: PitchMetrics): num
   return placements.filter(fuera).length;
 }
 
+/**
+ * ¿Hay que separar estas dos fichas, y pueden separarse juntas?
+ *
+ * Solo si se tapan Y son del mismo equipo. Un grupo que mezclara equipos
+ * repartiría a los diez alrededor del centro, que es justo lo que la
+ * proyección por mitades viene a impedir; y con las mitades separadas dos
+ * fichas de equipos distintos no pueden tocarse, así que esta condición es
+ * también la barrera que lo deja escrito.
+ */
+export function seSeparanJuntas(
+  a: SharedPitchPlacement,
+  b: SharedPitchPlacement,
+  m: PitchMetrics,
+): boolean {
+  if (a.side !== b.side) return false;
+  const ra = cardRect(a, m);
+  const rb = cardRect(b, m);
+  return ra.x1 > rb.x0 && rb.x1 > ra.x0 && ra.y1 > rb.y0 && rb.y1 > ra.y0;
+}
+
+/** Fichas cuyo rectángulo pisa la línea central. Debe ser 0. */
+export function countCrossingCenter(
+  placements: (SharedPosition & { side?: TeamSide })[],
+  m: PitchMetrics,
+): number {
+  const mitad = pct(m.width / 2, m.width); // 50, explícito
+  return placements.filter((p) => {
+    const r = cardRect(p, m);
+    const x0 = pct(r.x0, m.width);
+    const x1 = pct(r.x1, m.width);
+    return x0 < mitad && x1 > mitad;
+  }).length;
+}
+
 export type SharedPitchViability = {
   /** Todos los grupos que se tapan han podido separarse. */
   fits: boolean;
@@ -352,6 +417,8 @@ export type SharedPitchViability = {
   overlaps: number;
   /** Fichas que quedarían fuera de la pista. */
   outside: number;
+  /** Fichas que pisarían la línea central. */
+  crossing: number;
   /** La pista tiene dimensiones utilizables (no es 0×0 ni está sin medir). */
   measured: boolean;
   /** La conjunción de todo lo anterior. Es lo único que decide. */
@@ -373,12 +440,20 @@ export function sharedPitchViability(
   const measured =
     metrics.width >= metrics.cardWidth && metrics.height >= metrics.cardHeight && entries.length > 0;
   if (!measured) {
-    return { fits: false, overlaps: 0, outside: 0, measured: false, ok: false };
+    return { fits: false, overlaps: 0, outside: 0, crossing: 0, measured: false, ok: false };
   }
   const { placements, fits } = layoutSharedPitch(entries, flipped, metrics);
   const overlaps = countOverlaps(placements, metrics);
   const outside = countOutside(placements, metrics);
-  return { fits, overlaps, outside, measured, ok: fits && overlaps === 0 && outside === 0 };
+  const crossing = countCrossingCenter(placements, metrics);
+  return {
+    fits,
+    overlaps,
+    outside,
+    crossing,
+    measured,
+    ok: fits && overlaps === 0 && outside === 0 && crossing === 0,
+  };
 }
 
 /**

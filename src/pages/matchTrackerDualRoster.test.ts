@@ -430,6 +430,10 @@ describe("16 · los diez dentro de una sola pista", () => {
   it("se dibujan desde la colocación probada, no desde coordenadas a mano", () => {
     expect(codigo).toContain("<SharedPitchPlayers");
     expect(codigo).toContain("placements={sharedLayout.placements}");
+    // Y la colocación es la de MITADES, no la de un equipo por todo el ancho.
+    const sp = readFileSync(resolve(__dirname, "../utils/sharedPitch.ts"), "utf-8");
+    expect(sp).toContain("formationPositionToTeamHalf(e.slot, e.side, flipped, metrics)");
+    expect(sp).not.toContain("formationPositionToSharedPitch");
     expect(codigo).toContain("const sharedLayout = layoutSharedPitch(sharedEntries, sharedFlipped, {");
     // Y la vista no recalcula nada: solo pinta lo que recibe.
     expect(pistaCodigo).not.toContain("100 - ");
@@ -461,6 +465,60 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(pista).toContain("aria-pressed={activo}");
   });
 
+  it("22-25 · un toque abre el MISMO menú radial de la vista focal", () => {
+    // Era el otro defecto: la ficha solo seleccionaba, y para registrar había
+    // que ir a la barra común. Ahora el toque abre el radial que ya existe.
+    const tocar = cuerpo("const tocarFichaEnPista = (playerId: string)");
+    expect(tocar).toContain("setSelectedActor({ id: p.id, isOpponent: !!p.isOpponent });");
+    expect(tocar).toContain("setActiveActionPlayerId(p.id);");
+    // Y es el mismo componente, montado una sola vez en toda la pantalla.
+    expect((codigo.match(/<PlayerActionRadialMenu/g) ?? []).length).toBe(1);
+    expect(codigo).toContain("onSelect={tocarFichaEnPista}");
+    expect(pistaCodigo).not.toContain("RadialMenu");
+  });
+
+  it("basta el PRIMER toque: la selección no alterna ni espera a otro render", () => {
+    const tocar = cuerpo("const tocarFichaEnPista = (playerId: string)");
+    // Nada de `prev?.id === playerId ? null : ...`: alternar dejaría el
+    // radial abierto para un jugador ya deseleccionado.
+    expect(tocar).not.toContain("prev?.id === playerId");
+    expect(tocar).not.toContain("setPitchView");
+    // El radial recibe al jugador por su id, resuelto en el mismo render.
+    expect(codigo).toContain("matchData.players.find((p) => p.id === activeActionPlayerId)!");
+  });
+
+  it("el equipo actor del radial sale del JUGADOR, nunca del panel desplegado", () => {
+    // `handleAction` deduce el bando de la plantilla del ejecutante, así que
+    // el radial de un rival registra del rival sin tocar `pitchView`.
+    const ha = trozo("const handleAction = (", "if (type === ActionType.FOUL)");
+    expect(ha).toContain("const actingPlayer = playerId");
+    expect(ha).toContain("actingPlayer.isOpponent");
+    expect(ha).not.toContain("pitchView");
+  });
+
+  it("el radial se dibuja centrado en la pantalla, no colgado de la ficha", () => {
+    // Por eso cabe entero en los cuatro casos de borde —porteros pegados a
+    // su portería y alas junto a las bandas— sin cálculo de posición.
+    const radial = readFileSync(resolve(__dirname, "../components/PlayerActionRadialMenu.tsx"), "utf-8");
+    expect(radial).toContain("fixed inset-0");
+    expect(radial).toContain("items-center justify-center");
+  });
+
+  it("abrir el radial no estropea la sustitución posterior", () => {
+    // El toque deja al jugador seleccionado además de abrir el radial, así
+    // que al cerrarlo el banquillo sigue sabiendo quién sale.
+    const tocar = cuerpo("const tocarFichaEnPista = (playerId: string)");
+    expect(tocar).toContain("setSelectedActor(");
+    expect(codigo).toContain("onClose={() => setActiveActionPlayerId(null)}");
+    const sub = cuerpo("const sustituirDesdeBanquillo = (benchId: string)");
+    expect(sub).toContain("selectedActor");
+  });
+
+  it("y con el partido bloqueado, el toque no abre nada", () => {
+    const tocar = cuerpo("const tocarFichaEnPista = (playerId: string)");
+    expect(tocar).toContain("if (!p || isDataLocked) return;");
+  });
+
   it("la ficha que se DIBUJA mide lo que la separación CREE que mide", () => {
     // Si una se cambia y la otra no, la separación se calcula con un tamaño
     // que no existe y las fichas vuelven a taparse sin que falle nada.
@@ -478,7 +536,7 @@ describe("16 · los diez dentro de una sola pista", () => {
     // Un solo camino: `selectActor`. Si la pista tuviera el suyo, habría dos
     // reglas para decidir de quién es la acción.
     expect(codigo).toContain("onSelect={selectActor}");
-    expect((codigo.match(/onSelect=\{selectActor\}/g) ?? []).length).toBe(3);
+    expect((codigo.match(/onSelect=\{selectActor\}/g) ?? []).length).toBe(2);
     expect(pista).not.toContain("setPendingAction");
     expect(pista).not.toContain("isOpponent:");
   });

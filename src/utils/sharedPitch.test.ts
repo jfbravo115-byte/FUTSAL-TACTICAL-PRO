@@ -10,13 +10,17 @@
 import { describe, expect, it } from "vitest";
 import {
   BENCH_BAR_PX,
+  TeamSide,
   BENCH_SPACE_PX,
   PitchMetrics,
   PitchSlot,
   SharedPitchEntry,
   attackedGoalSide,
+  countCrossingCenter,
   defendedGoalSide,
-  formationPositionToSharedPitch,
+  formationPositionToTeamHalf,
+  halfBoundsPct,
+  seSeparanJuntas,
   layoutSharedPitch,
   countOutside,
   countOverlaps,
@@ -57,47 +61,124 @@ const SISTEMA_1_1_3: PitchSlot[] = [
   { left: 70, top: 80, label: "AL" },
 ];
 
+/** Medidas reales de escritorio; las pruebas de proyección las comparten. */
+const M: PitchMetrics = { width: 898, height: 362, cardWidth: 46, cardHeight: 44, gap: 4 };
+/** Proyección con esas medidas, para no repetirlas en cada línea. */
+const proy = (slot: PitchSlot, side: TeamSide, flipped = false) =>
+  formationPositionToTeamHalf(slot, side, flipped, M);
+
 const equipos = (local: PitchSlot[], rival: PitchSlot[]): SharedPitchEntry[] => [
   ...local.map((slot, i) => ({ id: `L${i}`, number: i + 1, side: "team" as const, slot })),
   ...rival.map((slot, i) => ({ id: `R${i}`, number: i + 1, side: "opponent" as const, slot })),
 ];
 
-// ── 1-2 · LAS DOS FORMACIONES, ENFRENTADAS ──────────────────────────────
+// ── 1-2 · CADA FORMACIÓN, DENTRO DE SU MITAD ────────────────────────────
+//
+// Lo que se protege aquí es lo que falló en la captura: repartir los dos
+// sistemas por todo el ancho los mezclaba alrededor del centro.
 
-describe("1-2 · proyección de cada equipo", () => {
-  it("1 · el equipo local se dibuja tal cual: su portero a la izquierda", () => {
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", false)).toEqual({ left: 7, top: 50 });
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[4], "team", false)).toEqual({ left: 85, top: 50 });
+/** El margen a la línea central y a los bordes: media ficha más el gap. */
+const MARGEN = ((M.cardWidth / 2 + M.gap) / M.width) * 100;
+
+describe("1-2 · cada equipo, en su mitad y enfrentados", () => {
+  it("1 · los CINCO locales caben enteros en la mitad izquierda", () => {
+    for (const slot of SISTEMA_1_2_2) {
+      const p = proy(slot, "team");
+      const medio = (M.cardWidth / 2 / M.width) * 100;
+      expect(p.left + medio).toBeLessThan(50);
+      expect(p.left - medio).toBeGreaterThan(0);
+    }
   });
 
-  it("2 · el rival se espeja: su portero queda a la derecha", () => {
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", false)).toEqual({ left: 93, top: 50 });
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[4], "opponent", false)).toEqual({ left: 15, top: 50 });
+  it("2 · los CINCO rivales caben enteros en la mitad derecha", () => {
+    for (const slot of SISTEMA_1_2_2) {
+      const p = proy(slot, "opponent");
+      const medio = (M.cardWidth / 2 / M.width) * 100;
+      expect(p.left - medio).toBeGreaterThan(50);
+      expect(p.left + medio).toBeLessThan(100);
+    }
+  });
+
+  it("el portero de cada uno queda junto a SU portería", () => {
+    const local = proy(SISTEMA_1_2_2[0], "team");
+    const rival = proy(SISTEMA_1_2_2[0], "opponent");
+    // El más retrasado de los suyos, y pegado al fondo sin salirse.
+    const xs = SISTEMA_1_2_2.map((sl) => proy(sl, "team").left);
+    expect(local.left).toBe(Math.min(...xs));
+    expect(local.left).toBeLessThan(10);
+    expect(local.left).toBeGreaterThanOrEqual(MARGEN);
+    expect(rival.left).toBeCloseTo(100 - local.left, 10);
+    // Y cada uno en el lado que defiende.
+    expect(defendedGoalSide("team", false)).toBe("left");
+    expect(defendedGoalSide("opponent", false)).toBe("right");
+  });
+
+  it("los más adelantados se acercan al centro SIN cruzarlo", () => {
+    const pivotLocal = proy(SISTEMA_1_2_2[4], "team");
+    const pivotRival = proy(SISTEMA_1_2_2[4], "opponent");
+    const medio = (M.cardWidth / 2 / M.width) * 100;
+    expect(pivotLocal.left).toBeGreaterThan(proy(SISTEMA_1_2_2[1], "team").left);
+    expect(pivotLocal.left + medio).toBeLessThan(50);
+    expect(pivotRival.left - medio).toBeGreaterThan(50);
+    expect(countCrossingCenter([pivotLocal, pivotRival], M)).toBe(0);
+  });
+
+  it("se conserva el orden POR → CIERRE → ALAS → PIVOT", () => {
+    const xs = SISTEMA_1_2_2.map((sl) => proy(sl, "team").left);
+    expect(xs[0]).toBeLessThan(xs[1]);
+    expect(xs[1]).toBeLessThan(xs[2]);
+    expect(xs[2]).toBe(xs[3]);          // los dos alas, mismo carril
+    expect(xs[3]).toBeLessThan(xs[4]);
+    // En el rival, el mismo orden visto desde su portería: invertido.
+    const rs = SISTEMA_1_2_2.map((sl) => proy(sl, "opponent").left);
+    expect(rs[0]).toBeGreaterThan(rs[1]);
+    expect(rs[4]).toBeLessThan(rs[1]);
   });
 
   it("los dos quedan ENFRENTADOS, no mirando al mismo lado", () => {
-    const porteroLocal = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", false);
-    const porteroRival = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", false);
-    // Cada portero en su mitad, y en mitades distintas.
-    expect(porteroLocal.left).toBeLessThan(50);
-    expect(porteroRival.left).toBeGreaterThan(50);
-    // Y los pivots, cruzados respecto a los porteros.
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[4], "team", false).left).toBeGreaterThan(50);
-    expect(formationPositionToSharedPitch(SISTEMA_1_2_2[4], "opponent", false).left).toBeLessThan(50);
+    expect(proy(SISTEMA_1_2_2[0], "team").left).toBeLessThan(50);
+    expect(proy(SISTEMA_1_2_2[0], "opponent").left).toBeGreaterThan(50);
+    expect(proy(SISTEMA_1_2_2[4], "team").left).toBeLessThan(50);
+    expect(proy(SISTEMA_1_2_2[4], "opponent").left).toBeGreaterThan(50);
+    // Y el pivot local está más cerca del rival que su propio portero.
+    expect(proy(SISTEMA_1_2_2[4], "team").left)
+      .toBeGreaterThan(proy(SISTEMA_1_2_2[0], "team").left);
   });
 
   it("el eje vertical NO se toca: un ala sigue en su carril", () => {
     for (const side of ["team", "opponent"] as const) {
       for (const flipped of [false, true]) {
-        expect(formationPositionToSharedPitch(SISTEMA_1_2_2[2], side, flipped).top).toBe(18);
-        expect(formationPositionToSharedPitch(SISTEMA_1_2_2[3], side, flipped).top).toBe(82);
+        for (const slot of [...SISTEMA_1_2_2, ...SISTEMA_1_3_1, ...SISTEMA_1_1_3]) {
+          expect(formationPositionToTeamHalf(slot, side, flipped, M).top).toBe(slot.top);
+        }
+      }
+    }
+  });
+
+  it("los límites de cada mitad son explícitos y simétricos", () => {
+    const izq = halfBoundsPct("team", false, M);
+    const der = halfBoundsPct("opponent", false, M);
+    expect(izq.min).toBeCloseTo(MARGEN, 5);
+    expect(izq.max).toBeCloseTo(50 - MARGEN, 5);
+    expect(der.min).toBeCloseTo(50 + MARGEN, 5);
+    expect(der.max).toBeCloseTo(100 - MARGEN, 5);
+    // Al cambiar de lado, cada equipo se lleva su mitad.
+    expect(halfBoundsPct("team", true, M)).toEqual(der);
+    expect(halfBoundsPct("opponent", true, M)).toEqual(izq);
+    // Y toda proyección cae dentro de los límites de su equipo.
+    for (const side of ["team", "opponent"] as const) {
+      for (const flipped of [false, true]) {
+        const b = halfBoundsPct(side, flipped, M);
+        for (const slot of SISTEMA_1_1_3) {
+          const x = formationPositionToTeamHalf(slot, side, flipped, M).left;
+          expect(x).toBeGreaterThanOrEqual(b.min - 0.0001);
+          expect(x).toBeLessThanOrEqual(b.max + 0.0001);
+        }
       }
     }
   });
 
   it("y cada equipo sabe qué portería defiende y a cuál ataca", () => {
-    expect(defendedGoalSide("team", false)).toBe("left");
-    expect(defendedGoalSide("opponent", false)).toBe("right");
     expect(attackedGoalSide("team", false)).toBe("right");
     expect(attackedGoalSide("opponent", false)).toBe("left");
     for (const side of ["team", "opponent"] as const) {
@@ -106,18 +187,29 @@ describe("1-2 · proyección de cada equipo", () => {
       }
     }
   });
+
+  it("en una pista más estrecha el margen crece, y sigue sin cruzarse", () => {
+    const estrecha: PitchMetrics = { ...M, width: 500 };
+    const margen = ((estrecha.cardWidth / 2 + estrecha.gap) / estrecha.width) * 100;
+    const medio = (estrecha.cardWidth / 2 / estrecha.width) * 100;
+    expect(margen).toBeGreaterThan(MARGEN);
+    for (const slot of SISTEMA_1_2_2) {
+      const p = formationPositionToTeamHalf(slot, "team", false, estrecha);
+      expect(p.left + medio).toBeLessThan(50);
+    }
+  });
 });
 
 // ── 3 · CAMBIAR LADO ────────────────────────────────────────────────────
 
 describe("3 · cambiar lado mueve a los diez a la vez", () => {
   it("espeja la pista entera y los equipos siguen enfrentados", () => {
-    const local = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", true);
-    const rival = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", true);
-    expect(local).toEqual({ left: 93, top: 50 });
-    expect(rival).toEqual({ left: 7, top: 50 });
+    const local = proy(SISTEMA_1_2_2[0], "team", true);
+    const rival = proy(SISTEMA_1_2_2[0], "opponent", true);
     expect(local.left).toBeGreaterThan(50);
     expect(rival.left).toBeLessThan(50);
+    expect(local.left).toBeCloseTo(100 - proy(SISTEMA_1_2_2[0], "team", false).left, 10);
+    expect(rival.left).toBeCloseTo(proy(SISTEMA_1_2_2[0], "team", false).left, 10);
   });
 
   it("las porterías se intercambian, no desaparecen", () => {
@@ -128,23 +220,20 @@ describe("3 · cambiar lado mueve a los diez a la vez", () => {
   it("volver a cambiar deja todo como estaba", () => {
     for (const slot of SISTEMA_1_2_2) {
       for (const side of ["team", "opponent"] as const) {
-        const ida = formationPositionToSharedPitch(slot, side, true);
-        const vuelta = formationPositionToSharedPitch(
-          { left: 100 - (side === "opponent" ? 100 - ida.left : ida.left), top: ida.top },
-          side,
-          false,
-        );
-        expect(vuelta.top).toBe(slot.top);
+        const ida = proy(slot, side, true);
+        const vuelta = proy(slot, side, false);
+        expect(ida.top).toBe(vuelta.top);
+        expect(ida.left).toBeCloseTo(100 - vuelta.left, 10);
       }
     }
   });
 
   it("y la distancia entre dos jugadores no cambia al espejar", () => {
-    const a = formationPositionToSharedPitch(SISTEMA_1_2_2[1], "team", false);
-    const b = formationPositionToSharedPitch(SISTEMA_1_2_2[4], "opponent", false);
-    const a2 = formationPositionToSharedPitch(SISTEMA_1_2_2[1], "team", true);
-    const b2 = formationPositionToSharedPitch(SISTEMA_1_2_2[4], "opponent", true);
-    expect(Math.abs(a.left - b.left)).toBe(Math.abs(a2.left - b2.left));
+    const a = proy(SISTEMA_1_2_2[1], "team", false);
+    const b = proy(SISTEMA_1_2_2[4], "opponent", false);
+    const a2 = proy(SISTEMA_1_2_2[1], "team", true);
+    const b2 = proy(SISTEMA_1_2_2[4], "opponent", true);
+    expect(Math.abs(a.left - b.left)).toBeCloseTo(Math.abs(a2.left - b2.left), 10);
   });
 });
 
@@ -162,30 +251,33 @@ describe("4 · el descanso: una sola inversión, y ya viene puesta", () => {
   it("la proyección de CADA jugador sigue sin conocer el periodo", () => {
     // Es la barrera contra la doble inversión: la orientación se decide una
     // vez por render, no una vez por ficha.
-    const fuente = formationPositionToSharedPitch.toString();
+    const fuente = formationPositionToTeamHalf.toString();
     expect(fuente).not.toMatch(/period|Period|SIDE_SWAPS/);
-    expect(formationPositionToSharedPitch.length).toBe(3);
+    expect(formationPositionToTeamHalf.length).toBe(4);
   });
 
   it("1-2 · en la 2ª parte los equipos intercambian portería", () => {
     const primera = sharedPitchFlipped(comoEstaLaApp(false, false));
     const segunda = sharedPitchFlipped(comoEstaLaApp(true, false));
-    const local1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", primera);
-    const local2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", segunda);
-    expect(local1.left).toBe(7);
-    expect(local2.left).toBe(93);
-    const rival1 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", primera);
-    const rival2 = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", segunda);
-    expect(rival1.left).toBe(93);
-    expect(rival2.left).toBe(7);
+    const local1 = proy(SISTEMA_1_2_2[0], "team", primera);
+    const local2 = proy(SISTEMA_1_2_2[0], "team", segunda);
+    expect(local1.left).toBeLessThan(50);
+    expect(local2.left).toBeGreaterThan(50);
+    expect(local1.left).toBeCloseTo(100 - local2.left, 10);
+    const rival1 = proy(SISTEMA_1_2_2[0], "opponent", primera);
+    const rival2 = proy(SISTEMA_1_2_2[0], "opponent", segunda);
+    expect(rival1.left).toBeGreaterThan(50);
+    expect(rival2.left).toBeLessThan(50);
+    // Y el portero sigue junto a SU portería en las dos partes.
+    expect(local2.left).toBeCloseTo(rival1.left, 10);
   });
 
   it("3 · y siguen enfrentados en las cuatro combinaciones", () => {
     for (const segunda of [false, true]) {
       for (const manual of [false, true]) {
         const f = sharedPitchFlipped(comoEstaLaApp(segunda, manual));
-        const por = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "team", f);
-        const porR = formationPositionToSharedPitch(SISTEMA_1_2_2[0], "opponent", f);
+        const por = proy(SISTEMA_1_2_2[0], "team", f);
+        const porR = proy(SISTEMA_1_2_2[0], "opponent", f);
         expect(Math.sign(por.left - 50)).toBe(-Math.sign(porR.left - 50));
       }
     }
@@ -356,24 +448,24 @@ describe("10 · ningún rectángulo se solapa, en píxeles reales", () => {
       expect(placements.every((p) => !p.nudged)).toBe(true);
       for (const p of placements) {
         const origen = entradas.find((e) => e.id === p.id)!;
-        expect(p).toMatchObject(formationPositionToSharedPitch(origen.slot, origen.side, false));
+        expect(p).toMatchObject(formationPositionToTeamHalf(origen.slot, origen.side, false, M));
       }
     }
   });
 
-  it("en 1-1-3 contra 1-1-3 SÍ se tapan cuatro, y solo esos cuatro se mueven", () => {
-    // El cierre local (30) coincide con el pivot rival espejado (30), y el
-    // pivot local (70) con el cierre rival (70): los cuatro en top 50.
+  it("con las mitades, 1-1-3 contra 1-1-3 YA NO se tapa", () => {
+    // Era el defecto de la captura: repartiendo cada sistema por todo el
+    // ancho, el cierre local (30) caía sobre el pivot rival espejado (30) y
+    // el pivot local (70) sobre el cierre rival (70), los cuatro en top 50.
+    // Con cada formación en su mitad, ninguno de los cuatro se cruza.
     const entradas = equipos(SISTEMA_1_1_3, SISTEMA_1_1_3);
-    const { placements } = layoutSharedPitch(entradas, false, ESCRITORIO);
-    const movidos = placements.filter((p) => p.nudged).map((p) => p.id).sort();
-    expect(movidos).toEqual(["L1", "L3", "R1", "R3"]);
-    // Se reparten en torno al centro, uno arriba y otro abajo, sin empujar al
-    // resto: los porteros y los alas siguen exactamente donde estaban.
-    expect(placements.find((p) => p.id === "L1")!.top).toBeLessThan(50);
-    expect(placements.find((p) => p.id === "R3")!.top).toBeGreaterThan(50);
-    expect(placements.find((p) => p.id === "L0")).toMatchObject({ left: 7, top: 50, nudged: false });
-    expect(placements.find((p) => p.id === "L2")).toMatchObject({ left: 70, top: 20, nudged: false });
+    const { placements, fits } = layoutSharedPitch(entradas, false, ESCRITORIO);
+    expect(fits).toBe(true);
+    expect(placements.filter((p) => p.nudged)).toEqual([]);
+    expect(countOverlaps(placements, ESCRITORIO)).toBe(0);
+    expect(countCrossingCenter(placements, ESCRITORIO)).toBe(0);
+    expect(placements.filter((p) => p.side === "team").every((p) => p.left < 50)).toBe(true);
+    expect(placements.filter((p) => p.side === "opponent").every((p) => p.left > 50)).toBe(true);
   });
 
   it("y nunca se separa en horizontal: la banda de cada uno es sagrada", () => {
@@ -389,18 +481,18 @@ describe("10 · ningún rectángulo se solapa, en píxeles reales", () => {
           const { placements } = layoutSharedPitch(entradas, flipped, M);
           for (const p of placements) {
             const origen = entradas.find((e) => e.id === p.id)!;
-            expect(p.left).toBe(formationPositionToSharedPitch(origen.slot, origen.side, flipped).left);
+            expect(p.left).toBe(formationPositionToTeamHalf(origen.slot, origen.side, flipped, M).left);
           }
         }
       }
     }
   });
 
-  it("dos fichas en el MISMO punto acaban a la distancia exigida", () => {
+  it("dos fichas del MISMO equipo en el mismo punto, a la distancia exigida", () => {
     const { placements, fits } = layoutSharedPitch(
       [
-        { id: "L", number: 4, side: "team", slot: { left: 50, top: 50 } },
-        { id: "R", number: 7, side: "opponent", slot: { left: 50, top: 50 } },
+        { id: "A", number: 4, side: "team", slot: { left: 50, top: 50 } },
+        { id: "B", number: 7, side: "team", slot: { left: 50, top: 50 } },
       ],
       false,
       TABLET,
@@ -432,11 +524,11 @@ describe("10 · ningún rectángulo se solapa, en píxeles reales", () => {
     // pista de 746, y con 46 px de ancho se tapan casi del todo. Agruparlas
     // solo cuando el `left` coincide exacto dejaría este caso solapado.
     const entradas: SharedPitchEntry[] = [
-      { id: "L", number: 4, side: "team", slot: { left: 48, top: 50 } },
-      { id: "R", number: 7, side: "opponent", slot: { left: 48, top: 50 } },
+      { id: "A", number: 4, side: "team", slot: { left: 44, top: 50 } },
+      { id: "B", number: 7, side: "team", slot: { left: 50, top: 50 } },
     ];
     const { placements } = layoutSharedPitch(entradas, false, TABLET);
-    expect(placements.map((p) => p.left)).toEqual([48, 52]);
+    expect(placements[0].left).not.toBe(placements[1].left);
     expect(Math.abs(placements[0].left - placements[1].left) / 100 * TABLET.width)
       .toBeLessThan(TABLET.cardWidth + TABLET.gap);
     expect(placements.every((p) => p.nudged)).toBe(true);
@@ -678,11 +770,42 @@ describe("17-19 · cuándo NO se ofrece, y por qué", () => {
     expect(v.measured).toBe(true);
   });
 
-  it("si la pista es tan estrecha que alguien se sale, tampoco", () => {
-    const estrechita = { ...TABLET_DISPONIBILIDAD, width: 200 };
-    const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, estrechita);
+  it("si la pista es tan baja que un ala se sale por arriba, tampoco", () => {
+    // En horizontal ya no puede salirse nadie: la proyección mete cada
+    // formación en su mitad con margen. En vertical sí, porque el eje no se
+    // toca: un ala en el 18 % necesita sitio para media ficha.
+    const bajita = { ...TABLET_DISPONIBILIDAD, height: 100 };
+    const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, bajita);
     expect(v.ok).toBe(false);
     expect(v.outside).toBeGreaterThan(0);
+    expect(v.crossing).toBe(0);
+  });
+
+  it("y nadie puede cruzar la línea central, por estrecha que sea la pista", () => {
+    for (const width of [200, 320, 500, 746, 898, 1400]) {
+      const m = { ...TABLET_DISPONIBILIDAD, width, height: 396 };
+      for (const flipped of [false, true]) {
+        const { placements } = layoutSharedPitch(equipos(SISTEMA_1_1_3, SISTEMA_1_3_1), flipped, m);
+        expect(countCrossingCenter(placements, m), `ancho ${width}`).toBe(0);
+      }
+    }
+  });
+
+  it("y si la pista es tan estrecha que la ficha pisa el centro, tampoco", () => {
+    // Con 90 px de ancho, media ficha son 25,6 puntos porcentuales: aunque la
+    // proyección meta al jugador en su mitad, el RECTÁNGULO cruza la línea.
+    // Es lo único que detecta este contador: ni se sale de la pista ni se
+    // tapa con nadie.
+    const absurda: PitchMetrics = { ...ESCRITORIO, width: 90, height: 396 };
+    const uno: SharedPitchEntry[] = [
+      { id: "A", number: 1, side: "team", slot: { left: 85, top: 50 } },
+    ];
+    const v = sharedPitchViability(uno, false, absurda);
+    expect(v.crossing).toBe(1);
+    expect(v.overlaps).toBe(0);
+    expect(v.outside).toBe(0);
+    expect(v.fits).toBe(true);
+    expect(v.ok).toBe(false);
   });
 
   it("sin medida no se promete nada", () => {
@@ -717,5 +840,87 @@ describe("17-19 · cuándo NO se ofrece, y por qué", () => {
     expect(countOverlaps(juntas, TABLET_DISPONIBILIDAD)).toBe(3);
     expect(countOverlaps([{ left: 10, top: 10 }, { left: 90, top: 90 }], TABLET_DISPONIBILIDAD)).toBe(0);
     expect(countOutside([{ left: 0, top: 50 }, { left: 50, top: 50 }, { left: 50, top: 100 }], TABLET_DISPONIBILIDAD)).toBe(2);
+  });
+});
+
+// ── 20-21 · LAS 25 COMBINACIONES, POR MITADES ───────────────────────────
+//
+// Es la prueba que la implementación anterior no pasaba: repartía los dos
+// sistemas por todo el ancho y los mezclaba alrededor del centro.
+
+describe("20-21 · ningún equipo invade la mitad del otro", () => {
+  const nombres = Object.keys(SISTEMAS_REALES);
+
+  it("las 25 combinaciones, en las dos orientaciones, respetan su mitad", () => {
+    const fallos: string[] = [];
+    for (const a of nombres) {
+      for (const b of nombres) {
+        for (const flipped of [false, true]) {
+          for (const M2 of [ESCRITORIO, TABLET_DISPONIBILIDAD]) {
+            const entradas = equipos(SISTEMAS_REALES[a], SISTEMAS_REALES[b]);
+            const { placements, fits } = layoutSharedPitch(entradas, flipped, M2);
+            const medio = (M2.cardWidth / 2 / M2.width) * 100;
+            const localIzquierda = !flipped;
+            const malos = placements.filter((p) => {
+              const enIzquierda = (p.side === "team") === localIzquierda;
+              return enIzquierda ? p.left + medio >= 50 : p.left - medio <= 50;
+            });
+            const cruzan = countCrossingCenter(placements, M2);
+            const solapes = countOverlaps(placements, M2);
+            const fuera = countOutside(placements, M2);
+            if (!fits || malos.length || cruzan || solapes || fuera) {
+              fallos.push(`${a}/${b}${flipped ? " invertido" : ""} ${M2.width}×${M2.height}: ` +
+                `fits=${fits} invaden=${malos.length} cruzan=${cruzan} solapes=${solapes} fuera=${fuera}`);
+            }
+          }
+        }
+      }
+    }
+    expect(fallos).toEqual([]);
+  });
+
+  it("cada equipo está ENTERO en su mitad, no solo de media", () => {
+    const { placements } = layoutSharedPitch(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, ESCRITORIO);
+    const locales = placements.filter((p) => p.side === "team");
+    const rivales = placements.filter((p) => p.side === "opponent");
+    expect(locales).toHaveLength(5);
+    expect(rivales).toHaveLength(5);
+    const medio = (ESCRITORIO.cardWidth / 2 / ESCRITORIO.width) * 100;
+    expect(Math.max(...locales.map((p) => p.left + medio))).toBeLessThan(50);
+    expect(Math.min(...rivales.map((p) => p.left - medio))).toBeGreaterThan(50);
+  });
+
+  it("al cambiar de lado, cada equipo se lleva su mitad ENTERA", () => {
+    const { placements } = layoutSharedPitch(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), true, ESCRITORIO);
+    const medio = (ESCRITORIO.cardWidth / 2 / ESCRITORIO.width) * 100;
+    expect(Math.min(...placements.filter((p) => p.side === "team").map((p) => p.left - medio))).toBeGreaterThan(50);
+    expect(Math.max(...placements.filter((p) => p.side === "opponent").map((p) => p.left + medio))).toBeLessThan(50);
+  });
+
+  it("y la separación JAMÁS agrupa fichas de equipos distintos", () => {
+    // Aunque dos fichas de equipos distintos cayeran en el mismo punto —lo
+    // que la proyección por mitades ya impide—, no formarían grupo: moverlas
+    // juntas es como se acaba repartiendo a los diez alrededor del centro.
+    const local = { id: "A", side: "team" as const, left: 50, top: 50, nudged: false };
+    const rival = { id: "B", side: "opponent" as const, left: 50, top: 50, nudged: false };
+    const otroLocal = { id: "C", side: "team" as const, left: 50, top: 50, nudged: false };
+    expect(seSeparanJuntas(local, rival, ESCRITORIO)).toBe(false);
+    expect(seSeparanJuntas(local, otroLocal, ESCRITORIO)).toBe(true);
+    // Y una ficha que no se tapa con nadie no entra en ningún grupo.
+    const lejos = { ...otroLocal, id: "D", top: 90 };
+    expect(seSeparanJuntas(local, lejos, ESCRITORIO)).toBe(false);
+  });
+
+  it("el eje vertical del sistema se conserva en las 25 combinaciones", () => {
+    for (const a of nombres) {
+      for (const b of nombres) {
+        const entradas = equipos(SISTEMAS_REALES[a], SISTEMAS_REALES[b]);
+        const { placements } = layoutSharedPitch(entradas, false, ESCRITORIO);
+        for (const p of placements) {
+          const origen = entradas.find((e) => e.id === p.id)!;
+          expect(p.top, `${a}/${b} ${p.id}`).toBe(origen.slot.top);
+        }
+      }
+    }
   });
 });

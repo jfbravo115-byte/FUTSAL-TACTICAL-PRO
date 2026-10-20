@@ -131,6 +131,7 @@ import {
 } from "../services/matchSnapshotService";
 import { generateMatchReport, formatMatchReportAsMarkdown } from "../services/matchReportService";
 import { applyFieldFlip } from "../utils/fieldOrientation";
+import { formatPlayerTime } from "../utils/playerClock";
 import { FutsalPitch } from "../components/field/FutsalPitch";
 import { GoalkeeperOriginMap } from "../components/export/GoalkeeperMaps";
 import { ZoneMapBoard, ZONE_MAP_PAGE } from "../components/export/ZoneMapBoard";
@@ -1229,12 +1230,6 @@ const formatTime = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-};
-
-const formatPlayerTime = (totalSeconds: number) => {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = Math.floor(totalSeconds % 60);
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 
@@ -6939,6 +6934,14 @@ export default function MatchTracker() {
                       players={sharedPlayers}
                       selectedId={selectedActor?.id ?? null}
                       onSelect={tocarFichaEnPista}
+                      // Las MISMAS medidas con las que se ha colocado: si la
+                      // ficha dibujada fuera mayor que la calculada, la
+                      // separación estaría hecha para una ficha que no existe.
+                      metrics={{
+                        ...DEFAULT_PITCH_METRICS,
+                        width: pitchBox.width,
+                        height: pitchBox.height,
+                      }}
                       disabled={isDataLocked}
                     />
                   )}

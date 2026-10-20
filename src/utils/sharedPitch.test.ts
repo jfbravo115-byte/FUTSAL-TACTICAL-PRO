@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BENCH_BAR_PX,
+  DEFAULT_PITCH_METRICS,
   TeamSide,
   BENCH_SPACE_PX,
   PitchMetrics,
@@ -62,7 +63,7 @@ const SISTEMA_1_1_3: PitchSlot[] = [
 ];
 
 /** Medidas reales de escritorio; las pruebas de proyección las comparten. */
-const M: PitchMetrics = { width: 898, height: 362, cardWidth: 46, cardHeight: 44, gap: 4 };
+const M: PitchMetrics = { ...DEFAULT_PITCH_METRICS, width: 898, height: 362 };
 /** Proyección con esas medidas, para no repetirlas en cada línea. */
 const proy = (slot: PitchSlot, side: TeamSide, flipped = false) =>
   formationPositionToTeamHalf(slot, side, flipped, M);
@@ -398,8 +399,9 @@ describe("4 · el descanso: una sola inversión, y ya viene puesta", () => {
 // RECTÁNGULOS no se solapen: dos centros a 24 px con fichas de 44 px siguen
 // tapándose, y eso es lo que un porcentaje fijo no garantizaba.
 
-const ESCRITORIO: PitchMetrics = { width: 898, height: 362, cardWidth: 46, cardHeight: 44, gap: 4 };
-const TABLET: PitchMetrics = { width: 746, height: 265, cardWidth: 46, cardHeight: 44, gap: 4 };
+/** La ficha REAL, con sus dos cronómetros: 72×58. */
+const ESCRITORIO: PitchMetrics = { ...DEFAULT_PITCH_METRICS, width: 898, height: 362 };
+const TABLET: PitchMetrics = { ...DEFAULT_PITCH_METRICS, width: 746, height: 265 };
 
 /** Rectángulo real de una ficha, en píxeles de la pista. */
 const rect = (p: { left: number; top: number }, m: PitchMetrics) => {
@@ -446,9 +448,11 @@ describe("10 · ningún rectángulo se solapa, en píxeles reales", () => {
   }
 
   it("la separación mínima sale de las medidas, no de un número fijo", () => {
-    // 44 + 4 = 48 px. En 362 px de alto son 13,3 %; en 265, 18,1 %.
-    expect(minimumVerticalSeparationPct(ESCRITORIO)).toBeCloseTo((48 / 362) * 100, 5);
-    expect(minimumVerticalSeparationPct(TABLET)).toBeCloseTo((48 / 265) * 100, 5);
+    // Alto de ficha + margen. Con 58 + 4 = 62 px: 17,1 % en una pista de 362
+    // y 23,4 % en una de 265. Sale de las medidas, no de un número elegido.
+    const paso = DEFAULT_PITCH_METRICS.cardHeight + DEFAULT_PITCH_METRICS.gap;
+    expect(minimumVerticalSeparationPct(ESCRITORIO)).toBeCloseTo((paso / 362) * 100, 5);
+    expect(minimumVerticalSeparationPct(TABLET)).toBeCloseTo((paso / 265) * 100, 5);
     expect(minimumVerticalSeparationPct(TABLET)).toBeGreaterThan(
       minimumVerticalSeparationPct(ESCRITORIO),
     );
@@ -731,8 +735,10 @@ describe("13-16 · en 768×1024 la pista 5v5 CABE", () => {
     expect(BENCH_SPACE_PX).toBe(34 + 96);
     expect(TABLET_DISPONIBILIDAD.width).toBe(746);
     expect(TABLET_DISPONIBILIDAD.height).toBe(430 - 130);
-    expect(TABLET_DISPONIBILIDAD.cardWidth).toBe(46);
-    expect(TABLET_DISPONIBILIDAD.cardHeight).toBe(44);
+    // La ficha lleva dorsal, TOT, ROT y nombre: 72×58, y con eso se calcula.
+    expect(TABLET_DISPONIBILIDAD.cardWidth).toBe(72);
+    expect(TABLET_DISPONIBILIDAD.cardHeight).toBe(58);
+    expect(TABLET_DISPONIBILIDAD.cardHeight).toBeGreaterThanOrEqual(56); // mínimo táctil
     // Y la caja validada es MENOR que la pista que se acaba dibujando: lo que
     // se ofrece, cabe.
     expect(TABLET_DISPONIBILIDAD.height).toBeLessThan(TABLET_PISTA_REAL.height);
@@ -795,7 +801,7 @@ describe("13-16 · en 768×1024 la pista 5v5 CABE", () => {
   });
 
   it("un nombre largo no cambia la geometría: la ficha mide lo que mide", () => {
-    // El nombre se recorta en la ficha; el rectángulo es siempre 46×44, que
+    // El nombre se recorta en la ficha; el rectángulo es siempre 72×58, que
     // es justo lo que la separación da por supuesto.
     const v = sharedPitchViability(equipos(SISTEMA_1_2_2, SISTEMA_1_2_2), false, TABLET_DISPONIBILIDAD);
     expect(v.ok).toBe(true);

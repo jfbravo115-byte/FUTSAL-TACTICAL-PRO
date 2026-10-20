@@ -192,12 +192,22 @@ export type PitchMetrics = {
   gap: number;
 };
 
-/** Lo medido en el experimento: 898×362 en escritorio, 746×265 en tablet. */
+/**
+ * Lo medido en el experimento: 898×362 en escritorio, 746×265 en tablet.
+ *
+ * LA FICHA MIDE 72×58 PORQUE LLEVA DOS CRONÓMETROS
+ * ------------------------------------------------
+ * Un jugador sin TOT ni ROT no sirve para decidir una rotación, que es para
+ * lo que se mira la pista. Con «TOT 05:42» y «ROT 01:18» legibles de un
+ * vistazo, la ficha no baja de 72×58, y esa es la medida con la que se
+ * calcula la separación y la que decide si la vista cabe. Encogerla para que
+ * `fits` salga verdadero sería devolver una pista con cronómetros ilegibles.
+ */
 export const DEFAULT_PITCH_METRICS: PitchMetrics = {
   width: 898,
   height: 362,
-  cardWidth: 46,
-  cardHeight: 44,
+  cardWidth: 72,
+  cardHeight: 58,
   gap: 4,
 };
 

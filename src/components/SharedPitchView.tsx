@@ -26,7 +26,12 @@ import React from "react";
 import { Player, Role } from "../types/futsal";
 import { DisciplinaryAura, DisciplinaryCards } from "./DisciplinaryAura";
 import { disciplinaryState } from "../utils/squadModel";
-import { SharedPitchPlacement } from "../utils/sharedPitch";
+import {
+  DEFAULT_PITCH_METRICS,
+  PitchMetrics,
+  SharedPitchPlacement,
+} from "../utils/sharedPitch";
+import { playerClocks } from "../utils/playerClock";
 import { nombreCorto } from "./DualRosterPanel";
 
 /** Lado en el que se dibuja cada portería, para rotularlas. */
@@ -37,6 +42,7 @@ export function SharedPitchPlayers({
   players,
   selectedId,
   onSelect,
+  metrics = DEFAULT_PITCH_METRICS,
   disabled = false,
 }: {
   placements: SharedPitchPlacement[];
@@ -44,6 +50,8 @@ export function SharedPitchPlayers({
   players: Record<string, Player>;
   selectedId?: string | null;
   onSelect: (id: string) => void;
+  /** Las mismas medidas con las que se ha calculado la colocación. */
+  metrics?: PitchMetrics;
   disabled?: boolean;
 }) {
   return (
@@ -54,6 +62,9 @@ export function SharedPitchPlayers({
         const rival = pos.side === "opponent";
         const activo = selectedId === p.id;
         const portero = p.role === Role.GOALKEEPER;
+        // Los MISMOS segundos que lleva el tick del partido y el MISMO
+        // formato que la ficha de la vista focal. Aquí no se cuenta nada.
+        const { tot, rot } = playerClocks(p);
 
         return (
           <button
@@ -62,33 +73,62 @@ export function SharedPitchPlayers({
             data-shared-pitch-side={rival ? "opponent" : "team"}
             data-shared-pitch-nudged={pos.nudged ? "1" : "0"}
             aria-pressed={activo}
-            aria-label={`${rival ? "Rival" : "Local"} ${p.number} ${p.name}`}
+            aria-label={`${rival ? "Rival" : "Local"} ${p.number} ${p.name}, total ${tot}, rotación ${rot}`}
             disabled={disabled}
             onClick={() => onSelect(p.id)}
-            style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 z-[40] min-w-[46px] min-h-[44px] w-[46px] h-[44px]
-              flex flex-col items-center justify-center overflow-hidden transition-all active:scale-95
-              disabled:opacity-40 ${
+            style={{
+              left: `${pos.left}%`,
+              top: `${pos.top}%`,
+              width: metrics.cardWidth,
+              height: metrics.cardHeight,
+            }}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 z-[40] overflow-hidden
+              flex flex-col items-center justify-center gap-px px-1 transition-all active:scale-95
+              disabled:opacity-40 rounded-lg border-2 ${
                 rival
-                  ? "rounded-md border-2 border-double border-red-300/80 bg-red-950/80"
-                  : "rounded-full border-2 border-blue-200/70 bg-blue-600"
-              } ${activo ? "ring-4 ring-white z-[60] scale-110" : ""}`}
+                  ? "border-double border-red-300/80 bg-red-900/85"
+                  : "border-blue-200/70 bg-blue-700/85"
+              } ${activo ? "ring-4 ring-white z-[60] scale-105" : ""}`}
           >
-            <DisciplinaryAura
-              state={disciplinaryState(p)}
-              rounded={rival ? "rounded-md" : "rounded-full"}
-              inset="inset-0"
-            />
+            <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
+
+            {/* 1 · DORSAL, que es lo que se busca primero. Con la marca del
+                equipo al lado: a pleno sol el color es lo primero que se
+                pierde, y confundirse aquí es apuntarle el gol al otro. */}
+            <span className="flex items-baseline gap-1 leading-none">
+              <span className="text-[15px] font-black text-white leading-none tabular-nums">
+                {p.number}
+              </span>
+              <span
+                className={`text-[7px] font-black uppercase leading-none ${
+                  portero ? "text-amber-300" : rival ? "text-red-200" : "text-blue-100"
+                }`}
+              >
+                {portero ? "POR" : rival ? "R" : "J"}
+              </span>
+            </span>
+
+            {/* 2-3 · TOT y ROT, SIEMPRE visibles: sin tocar la ficha, sin
+                desplegar nada. Es lo que decide una rotación. */}
             <span
-              className={`text-[13px] font-black leading-none ${
-                portero ? "text-amber-300" : "text-white"
-              }`}
+              data-shared-pitch-tot
+              className="text-[9px] font-mono font-black text-sky-200 leading-none tabular-nums"
             >
-              {p.number}
+              TOT {tot}
             </span>
-            <span className="text-[6px] font-black uppercase leading-none opacity-80 max-w-[42px] truncate">
-              {portero ? "POR" : rival ? "R" : nombreCorto(p.name)}
+            <span
+              data-shared-pitch-rot
+              className="text-[9px] font-mono font-black text-emerald-300 leading-none tabular-nums"
+            >
+              ROT {rot}
             </span>
+
+            {/* 4 · El nombre, lo último: con el dorsal delante casi nunca
+                hace falta, y si no cabe se recorta —nunca ensancha la ficha—. */}
+            <span className="text-[7px] font-black uppercase leading-none opacity-80 truncate w-full text-center">
+              {nombreCorto(p.name)}
+            </span>
+
             <span className="absolute top-0 right-0">
               <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
             </span>

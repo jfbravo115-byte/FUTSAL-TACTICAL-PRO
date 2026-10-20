@@ -438,7 +438,8 @@ describe("16 · los diez dentro de una sola pista", () => {
     // Y la vista no recalcula nada: solo pinta lo que recibe.
     expect(pistaCodigo).not.toContain("100 - ");
     expect(pistaCodigo).not.toContain("layoutSharedPitch(");
-    expect(pista).toContain("left: `${pos.left}%`, top: `${pos.top}%`");
+    expect(pistaCodigo).toContain("left: `${pos.left}%`");
+    expect(pistaCodigo).toContain("top: `${pos.top}%`");
   });
 
   it("entran los cinco de CADA equipo, cada uno con su sistema", () => {
@@ -450,19 +451,79 @@ describe("16 · los diez dentro de una sola pista", () => {
   });
 
   it("el equipo se distingue sin depender del color", () => {
-    // Forma, borde y rótulo: en una tablet a pleno sol el color es lo primero
-    // que se pierde, y aquí equivocarse es apuntarle el gol al otro equipo.
-    expect(pista).toContain('rounded-md border-2 border-double');
-    expect(pista).toContain('rounded-full border-2');
-    expect(pista).toContain('portero ? "POR" : rival ? "R" : nombreCorto(p.name)');
-    expect(pista).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
-    expect(pista).toContain('aria-label={`${rival ? "Rival" : "Local"} ${p.number} ${p.name}`}');
+    // Borde doble y rótulo junto al dorsal: en una tablet a pleno sol el
+    // color es lo primero que se pierde, y aquí equivocarse es apuntarle el
+    // gol al otro equipo.
+    expect(pistaCodigo).toContain("border-double");
+    expect(pistaCodigo).toContain('portero ? "POR" : rival ? "R" : "J"');
+    expect(pistaCodigo).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
+    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${p.number} ${p.name}');
+    // Y el lector de pantalla oye también los dos cronómetros.
+    expect(pistaCodigo).toContain("total ${tot}, rotación ${rot}");
   });
 
   it("la ficha cumple el objetivo táctil mínimo y se marca al seleccionar", () => {
-    expect(pista).toContain("min-w-[46px] min-h-[44px]");
-    expect(pista).toContain('activo ? "ring-4 ring-white z-[60] scale-110" : ""');
-    expect(pista).toContain("aria-pressed={activo}");
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBeGreaterThanOrEqual(56);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBeGreaterThanOrEqual(56);
+    expect(pistaCodigo).toContain('activo ? "ring-4 ring-white z-[60] scale-105" : ""');
+    expect(pistaCodigo).toContain("aria-pressed={activo}");
+  });
+
+  it("26 · TOT y ROT salen del MISMO reloj que la vista focal", () => {
+    // Un solo tick en toda la aplicación: suma el delta real a los dos
+    // contadores y solo a quien está en pista. La pista 5v5 no añade otro.
+    const tick = trozo("if (matchData.isClockRunning) {", "}, [matchData.isClockRunning]);");
+    expect(tick).toContain("individualTimeSeconds: p.individualTimeSeconds + delta / 1000");
+    expect(tick).toContain("rotationTimeSeconds: (p.rotationTimeSeconds ?? 0) + delta / 1000");
+    expect(tick).toContain("p.isOnPitch");
+    expect((codigo.match(/setInterval\(/g) ?? []).length).toBe(1);
+    // Y la ficha de la pista solo da forma a esos segundos.
+    expect(pistaCodigo).toContain("const { tot, rot } = playerClocks(p);");
+    expect(pistaCodigo).not.toContain("setInterval");
+    expect(pistaCodigo).not.toContain("Date.now()");
+    expect(pistaCodigo).not.toContain("useState");
+  });
+
+  it("y el formato es exactamente el mismo en las dos vistas", () => {
+    // Vivía como constante privada de MatchTracker; ahora las dos vistas y
+    // la exportación importan la misma función.
+    const reloj = readFileSync(resolve(__dirname, "../utils/playerClock.ts"), "utf-8");
+    expect(reloj).toContain("export function formatPlayerTime");
+    expect(codigo).toContain('import { formatPlayerTime } from "../utils/playerClock"');
+    expect(codigo).not.toMatch(/const formatPlayerTime = \(/);
+    const exportUtils = readFileSync(resolve(__dirname, "../lib/exportUtils.ts"), "utf-8");
+    expect(exportUtils).toContain('from "../utils/playerClock"');
+    expect(exportUtils).not.toMatch(/const formatPlayerTime = \(/);
+    // Y la ficha focal sigue leyendo los mismos campos.
+    expect(codigo).toContain("formatPlayerTime(player.individualTimeSeconds)");
+    expect(codigo).toContain("formatPlayerTime(player.rotationTimeSeconds ?? 0)");
+  });
+
+  it("cambiar de vista no toca ni un segundo", () => {
+    // El modo es una preferencia del navegador: no entra en `matchData`, y
+    // quien lo cambia no escribe tiempos.
+    const elegir = cuerpo("const elegirCaptureMode = (modo: CaptureMode)");
+    expect(elegir).not.toContain("individualTimeSeconds");
+    expect(elegir).not.toContain("rotationTimeSeconds");
+    expect(elegir).not.toContain("setMatchData");
+    const deriva = trozo("const sharedViability = sharedPitchViability(", "const [isExporting");
+    expect(deriva).not.toContain("TimeSeconds");
+  });
+
+  it("la sustitución conserva TOT y reinicia ROT solo en una entrada real", () => {
+    const aplicar = cuerpo("const aplicarSustitucion = (sourceId: string, targetId: string)");
+    expect(aplicar).toContain("targetPlayer.isOnPitch && !sourcePlayer.isOnPitch");
+    expect(aplicar).toContain("sourcePlayer.isOnPitch && !targetPlayer.isOnPitch");
+    expect(aplicar).toContain("rotationTimeSeconds:");
+    // TOT no se toca en ningún caso: no aparece en el intercambio.
+    expect(aplicar).not.toContain("individualTimeSeconds");
+  });
+
+  it("y la ficha de la pista dibuja con las MISMAS medidas que se calcularon", () => {
+    expect(codigo).toContain("metrics={{");
+    expect(codigo).toContain("...DEFAULT_PITCH_METRICS,");
+    expect(pistaCodigo).toContain("width: metrics.cardWidth");
+    expect(pistaCodigo).toContain("height: metrics.cardHeight");
   });
 
   it("22-25 · un toque abre el MISMO menú radial de la vista focal", () => {
@@ -522,14 +583,12 @@ describe("16 · los diez dentro de una sola pista", () => {
   it("la ficha que se DIBUJA mide lo que la separación CREE que mide", () => {
     // Si una se cambia y la otra no, la separación se calcula con un tamaño
     // que no existe y las fichas vuelven a taparse sin que falle nada.
-    expect(DEFAULT_PITCH_METRICS.cardWidth).toBe(46);
-    expect(DEFAULT_PITCH_METRICS.cardHeight).toBe(44);
-    expect(pistaCodigo).toContain(
-      `min-w-[${DEFAULT_PITCH_METRICS.cardWidth}px] min-h-[${DEFAULT_PITCH_METRICS.cardHeight}px]`,
-    );
-    expect(pistaCodigo).toContain(
-      `w-[${DEFAULT_PITCH_METRICS.cardWidth}px] h-[${DEFAULT_PITCH_METRICS.cardHeight}px]`,
-    );
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBe(72);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBe(58);
+    expect(pistaCodigo).toContain("width: metrics.cardWidth");
+    expect(pistaCodigo).toContain("height: metrics.cardHeight");
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBeGreaterThanOrEqual(56);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBeGreaterThanOrEqual(56);
   });
 
   it("tocar una ficha es exactamente lo mismo que tocarla en la columna", () => {

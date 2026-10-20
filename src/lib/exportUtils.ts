@@ -13,11 +13,9 @@ import {
   sideName,
 } from "../utils/goalModel";
 
-const formatPlayerTime = (totalSeconds: number) => {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = Math.floor(totalSeconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-};
+// El mismo formato mm:ss que ven las fichas en pista: si la exportación
+// redondeara distinto, el CSV y la pantalla contarían historias distintas.
+import { formatPlayerTime } from "../utils/playerClock";
 
 /** Nombre de la parte para las exportaciones. Nunca el número interno. */
 const PERIOD_CSV_LABEL: Record<number, string> = {

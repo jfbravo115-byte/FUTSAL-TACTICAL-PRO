@@ -85,6 +85,15 @@ import {
   OWN_GOAL_LABEL,
 } from "../utils/goalModel";
 import {
+  CaptureMode,
+  CAPTURE_MODE_LABEL,
+  DUAL_COLUMNS_MIN_WIDTH,
+  DUAL_MIN_WIDTH,
+  readCaptureMode,
+  writeCaptureMode,
+} from "../utils/captureMode";
+import { DualRosterPanel } from "../components/DualRosterPanel";
+import {
   describeRegisteredAction,
   deservesConfirmation,
 } from "../utils/actionSummary";
@@ -1428,6 +1437,129 @@ export default function MatchTracker() {
   const [tiemposSort, setTiemposSort] = useState<"dorsal" | "totAsc" | "totDesc" | "rotDesc">("dorsal");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [pitchView, setPitchView] = useState<"local" | "opponent">("local");
+
+  /**
+   * EXPERIMENTO · modo de captura.
+   *
+   *   focal  la interfaz validada en PR #27: una plantilla desplegada y una
+   *          franja compacta para el otro equipo.
+   *   dual   las dos plantillas en pista a la vez, con selección DIRECTA del
+   *          jugador: el equipo del evento lo decide el jugador que se toca,
+   *          no el panel desplegado.
+   *
+   * La preferencia es del NAVEGADOR, no del partido: no se guarda en
+   * `matchData`, no se sincroniza, no viaja a ninguna exportación. Si el
+   * almacenamiento falla, se trabaja en focal, que es lo ya validado.
+   */
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(() => readCaptureMode());
+  useEffect(() => {
+    writeCaptureMode(captureMode);
+  }, [captureMode]);
+
+  /**
+   * Jugador tocado directamente, con el bando que le corresponde POR SER SUYO.
+   *
+   * Es lo que sustituye a «cambiar de equipo»: el analista toca al jugador y
+   * después la acción. `isOpponent` sale de `player.isOpponent`, nunca de
+   * `pitchView`, que en la vista dual deja de significar «de quién registro».
+   */
+  const [selectedActor, setSelectedActor] = useState<
+    { id: string; isOpponent: boolean } | null
+  >(null);
+
+  /** Ancho real de la ventana, para decidir qué composición cabe. */
+  const [viewportWidth, setViewportWidth] = useState<number>(
+    () => (typeof window === "undefined" ? 1440 : window.innerWidth),
+  );
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  /**
+   * El bando al que va la acción.
+   *
+   * En vista dual manda el JUGADOR tocado: su equipo es el del evento. Solo
+   * cuando no hay ninguno seleccionado —o en vista focal— decide el panel
+   * desplegado, que es el comportamiento validado.
+   */
+  const dualFits = viewportWidth >= DUAL_MIN_WIDTH;
+  const dualColumns = viewportWidth >= DUAL_COLUMNS_MIN_WIDTH;
+  /** Vista dual EFECTIVA: la pedida, y solo donde cabe de verdad. */
+  const dualActive = captureMode === "dual" && dualFits;
+
+  /**
+   * El bando al que va la acción.
+   *
+   * En vista dual manda el JUGADOR tocado: su equipo es el del evento. Solo
+   * cuando no hay ninguno seleccionado —o en vista focal— decide el panel
+   * desplegado, que es el comportamiento validado en PR #27.
+   */
+  const bandoDeAccion = (): boolean =>
+    dualActive && selectedActor ? selectedActor.isOpponent : pitchView === "opponent";
+
+  /** El jugador tocado, o undefined si la acción tendrá que preguntarlo. */
+  const actorDeAccion = (): string | undefined =>
+    dualActive && selectedActor ? selectedActor.id : undefined;
+
+  /**
+   * Selecciona a un jugador por su id, derivando el bando de la PLANTILLA a
+   * la que pertenece. Nunca de `pitchView`: ese es justamente el acoplamiento
+   * que este experimento viene a quitar.
+   */
+  /**
+   * Lanza una acción que necesita jugador.
+   *
+   * Con un jugador ya tocado, el flujo empieza DIRECTAMENTE en el detalle
+   * imprescindible —subtipo o zona—: el paso «¿quién?» sobra porque la
+   * respuesta ya está en pantalla. Sin jugador, se pregunta, y en vista dual
+   * se preguntan LAS DOS plantillas: nunca se reutiliza en silencio el último
+   * jugador, que es como se le acaba atribuyendo una acción a quien no la hizo.
+   */
+  const lanzarConJugador = (type: ActionType) => {
+    const actor = actorDeAccion();
+    const isOpponent = bandoDeAccion();
+    const detalle: "subtype" | "origin" =
+      type === ActionType.STEAL || type === ActionType.LOSS ? "subtype" : "origin";
+    setPendingAction({
+      type,
+      isOpponent,
+      ...(actor ? { playerId: actor, step: detalle } : { step: "player" as const }),
+      ...(actor ? {} : { anyTeam: dualActive }),
+    });
+  };
+
+  /** Solo UNO de los dos banquillos abierto a la vez: no caben los dos. */
+  const [openBench, setOpenBench] = useState<"team" | "opponent" | null>(null);
+
+  /** Los cinco en pista de un equipo, sin cuerpo técnico. */
+  const rosterEnPista = (opponent: boolean) =>
+    matchData.players.filter(
+      (p) =>
+        !!p.isOpponent === opponent &&
+        p.isOnPitch &&
+        p.role !== Role.COACH &&
+        p.role !== Role.DELEGATE,
+    );
+
+  /** Sus suplentes. El panel los muestra solo al desplegar el banquillo. */
+  const rosterBanquillo = (opponent: boolean) =>
+    matchData.players.filter(
+      (p) =>
+        !!p.isOpponent === opponent &&
+        !p.isOnPitch &&
+        p.role !== Role.COACH &&
+        p.role !== Role.DELEGATE,
+    );
+
+  const selectActor = (playerId: string) => {
+    const p = matchData.players.find((x) => x.id === playerId);
+    if (!p) return;
+    setSelectedActor((prev) =>
+      prev?.id === playerId ? null : { id: p.id, isOpponent: !!p.isOpponent },
+    );
+  };
   // ── ORIENTACIÓN VISUAL DEL CAMPO ──────────────────────────────────────
   // isFieldFlipped afecta ÚNICAMENTE a qué lado de la pantalla (izquierda/
   // derecha) se dibuja cada equipo en la vista táctica. NO toca isOpponent,
@@ -1466,6 +1598,10 @@ export default function MatchTracker() {
   const [lastRegistered, setLastRegistered] = useState<GameEvent | null>(null);
   const lastRegisteredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmRegistered = (event: GameEvent) => {
+    // La selección NO se arrastra al siguiente registro: la acción siguiente
+    // vuelve a empezar por el jugador. Reutilizar en silencio al último es
+    // como se le acaba apuntando una acción a quien no la hizo.
+    setSelectedActor(null);
     if (!deservesConfirmation(event)) return;
     if (lastRegisteredTimer.current) clearTimeout(lastRegisteredTimer.current);
     setLastRegistered(event);
@@ -1547,6 +1683,13 @@ export default function MatchTracker() {
     goalieResponse?: GoalieResponseDeclared;
     exitOutcome?: ExitOutcome;
     step: "origin" | "target" | "player" | "subtype" | "response" | "exitOutcome" | null;
+    /**
+     * EXPERIMENTO · el paso «¿quién?» ofrece LAS DOS plantillas.
+     *
+     * En vista dual no hay un equipo «desplegado», así que preguntar solo por
+     * uno obligaría a volver atrás. Al elegir, el bando se deriva del jugador.
+     */
+    anyTeam?: boolean;
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -6210,8 +6353,39 @@ export default function MatchTracker() {
               con un anillo y con `aria-pressed`, no solo con el color: en
               una tablet a pleno sol el color es lo primero que se pierde. */}
           <div className="flex-shrink-0">
+            {/* EXPERIMENTO · conmutador de modo. Es una preferencia del
+                navegador: no toca el partido, ni el marcador, ni un solo
+                evento, y no viaja a ninguna exportación. */}
+            <div className="flex items-center gap-1 pb-1">
+              <span className="text-[7px] font-black uppercase tracking-widest text-slate-500 mr-auto">
+                Experimento · modo de captura
+              </span>
+              {(["focal", "dual"] as const).map((m) => {
+                const activo = captureMode === m;
+                const cabe = m === "focal" || dualFits;
+                return (
+                  <button
+                    key={m}
+                    data-capture-mode-button={m}
+                    aria-pressed={activo}
+                    disabled={!cabe}
+                    title={cabe ? undefined : "Necesita al menos 768 px de ancho"}
+                    onClick={() => setCaptureMode(m)}
+                    className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-all disabled:opacity-30 ${
+                      activo
+                        ? "bg-violet-500 text-slate-950 border-violet-300"
+                        : "bg-black/20 text-slate-400 border-white/10"
+                    }`}
+                  >
+                    {CAPTURE_MODE_LABEL[m]}
+                  </button>
+                );
+              })}
+            </div>
             <div className="text-[7px] font-black uppercase tracking-widest text-slate-500 px-1 pb-0.5">
-              Equipo seleccionado · registra las acciones de la pista
+              {dualActive
+                ? "Pista mostrada · las acciones las decide el jugador que tocas"
+                : "Equipo seleccionado · registra las acciones de la pista"}
             </div>
             <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/10 gap-1">
               {([
@@ -6412,6 +6586,38 @@ export default function MatchTracker() {
                 }
               </div>
 
+              {/* ── EXPERIMENTO · LAS DOS PLANTILLAS ────────────────────
+                  A partir de 1024 px van a los lados del campo; entre 768 y
+                  1023 no caben tres columnas utilizables y se colocan en
+                  filas, local arriba y rival abajo, con el campo en medio.
+                  Por debajo de 768 no hay vista dual: la interfaz validada ya
+                  resuelve ese caso mejor que dos plantillas ilegibles. */}
+              <div
+                data-capture-mode={dualActive ? "dual" : "focal"}
+                data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}
+                className={`flex-1 min-h-0 overflow-hidden ${
+                  dualActive && dualColumns
+                    ? "grid grid-cols-[132px_1fr_132px] gap-1.5"
+                    : "flex flex-col"
+                }`}
+              >
+                {dualActive && (
+                  <DualRosterPanel
+                    teamName={matchData.teamName || "LOCAL"}
+                    logo={matchData.teamLogo}
+                    isOpponent={false}
+                    onPitch={rosterEnPista(false)}
+                    bench={rosterBanquillo(false)}
+                    selectedId={selectedActor?.id ?? null}
+                    onSelect={selectActor}
+                    benchOpen={openBench === "team"}
+                    onToggleBench={() => setOpenBench((b) => (b === "team" ? null : "team"))}
+                    onBenchSelect={executeSwap}
+                    orientation={dualColumns ? "column" : "row"}
+                    disabled={isDataLocked}
+                  />
+                )}
+
               {/* CENTER: PITCH VISUAL */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                 {/* PITCH VISUAL - HORIZONTAL ORIENTATION */}
@@ -6534,20 +6740,64 @@ export default function MatchTracker() {
                 </div>
               </div>
 
+                {dualActive && (
+                  <DualRosterPanel
+                    teamName={matchData.opponentName || "RIVAL"}
+                    logo={matchData.opponentLogo}
+                    isOpponent
+                    onPitch={rosterEnPista(true)}
+                    bench={rosterBanquillo(true)}
+                    selectedId={selectedActor?.id ?? null}
+                    onSelect={selectActor}
+                    benchOpen={openBench === "opponent"}
+                    onToggleBench={() => setOpenBench((b) => (b === "opponent" ? null : "opponent"))}
+                    onBenchSelect={executeSwap}
+                    orientation={dualColumns ? "column" : "row"}
+                    disabled={isDataLocked}
+                  />
+                )}
+              </div>
+
+              {/* EXPERIMENTO · a quién se le apuntará lo siguiente. */}
+              {dualActive && (
+                <div
+                  data-selected-actor={selectedActor?.id ?? ""}
+                  className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest border-t border-white/10 shrink-0 ${
+                    selectedActor
+                      ? selectedActor.isOpponent
+                        ? "bg-red-950/40 text-red-200"
+                        : "bg-blue-950/40 text-blue-200"
+                      : "bg-black/20 text-slate-500"
+                  }`}
+                >
+                  {selectedActor
+                    ? (() => {
+                        const p = matchData.players.find((x) => x.id === selectedActor.id);
+                        const equipo = selectedActor.isOpponent
+                          ? matchData.opponentName || "RIVAL"
+                          : matchData.teamName || "LOCAL";
+                        return p ? `#${p.number} ${p.name} · ${equipo}` : equipo;
+                      })()
+                    : "Toca un jugador y después la acción"}
+                </div>
+              )}
+
               {/* BOTTOM BAR: QUICK ACTIONS (horizontal) */}
               <div className="w-full flex flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll">
 
                 {/* Match Actions */}
                 <button
-                  onClick={() => setPendingAction({ type: ActionType.GOAL, step: "player", isOpponent: pitchView === 'opponent' })}
-                  className={`flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:opacity-80 transition-all font-black shadow-lg border ${pitchView === 'opponent' ? 'bg-red-600/30 text-red-500 border-red-500/50' : 'bg-green-600/30 text-green-400 border-green-500/50'}`}
+                  data-action-button="gol"
+                  onClick={() => lanzarConJugador(ActionType.GOAL)}
+                  className={`flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:opacity-80 transition-all font-black shadow-lg border ${bandoDeAccion() ? 'bg-red-600/30 text-red-500 border-red-500/50' : 'bg-green-600/30 text-green-400 border-green-500/50'}`}
                 >
                   <Trophy size={16} />
                   <span className="text-[7px] uppercase">Gol</span>
                 </button>
                 
                 <button
-                  onClick={() => setPendingAction({ type: ActionType.SHOT, step: "player", isOpponent: pitchView === 'opponent' })}
+                  data-action-button="tiro"
+                  onClick={() => lanzarConJugador(ActionType.SHOT)}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-slate-700 transition-all font-black shadow-lg bg-white/10 border border-white/20 text-slate-200"
                 >
                   <Target size={16} />
@@ -6555,7 +6805,8 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => handleFoul(pitchView === 'local')}
+                  data-action-button="falta"
+                  onClick={() => handleFoul(!bandoDeAccion(), actorDeAccion())}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-orange-600/30 text-slate-200 hover:text-orange-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <AlertTriangle size={16} />
@@ -6563,7 +6814,8 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => handleFreeKickPlay(pitchView === 'opponent')}
+                  data-action-button="jfalta"
+                  onClick={() => handleFreeKickPlay(bandoDeAccion(), actorDeAccion())}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-600/30 text-slate-200 hover:text-emerald-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <PlayCircle size={16} />
@@ -6571,7 +6823,8 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => setPendingCorner({ isOpponent: pitchView === 'opponent' })}
+                  data-action-button="corner"
+                  onClick={() => setPendingCorner({ isOpponent: bandoDeAccion() })}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-violet-600/30 text-slate-200 hover:text-violet-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <Flag size={16} />
@@ -6579,7 +6832,8 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => setPendingAction({ type: ActionType.STEAL, isOpponent: pitchView === 'opponent', step: 'subtype' })}
+                  data-action-button="recup"
+                  onClick={() => lanzarConJugador(ActionType.STEAL)}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-cyan-600/30 text-slate-200 hover:text-cyan-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <Zap size={16} />
@@ -6587,7 +6841,8 @@ export default function MatchTracker() {
                 </button>
 
                 <button
-                  onClick={() => setPendingAction({ type: ActionType.LOSS, isOpponent: pitchView === 'opponent', step: 'subtype' })}
+                  data-action-button="perd"
+                  onClick={() => lanzarConJugador(ActionType.LOSS)}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-red-600/30 text-slate-200 hover:text-red-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <RefreshCw size={16} />
@@ -6610,7 +6865,7 @@ export default function MatchTracker() {
                   Cambiar de equipo aquí NO toca Atacamos/Defendemos: la fase
                   es de NUESTRO equipo pase lo que pase, también en una
                   acción del rival. */}
-              {(() => {
+              {!dualActive && (() => {
                 const otroEsRival = pitchView === "local";
                 const nombreOtro = (otroEsRival ? matchData.opponentName : matchData.teamName) || (otroEsRival ? "RIVAL" : "LOCAL");
                 const acciones: { id: string; label: string; onClick: () => void }[] = [
@@ -7450,23 +7705,37 @@ export default function MatchTracker() {
                       </label>
                       <PlayerSelector
                         players={matchData.players.filter(p =>
-                          (pendingAction.type === ActionType.GOAL ||
-                            pendingAction.type === ActionType.OWN_GOAL ||
-                            pendingAction.type === ActionType.SHOT)
-                          ? p.isOpponent === pendingAction.isOpponent
-                          : true
+                          pendingAction.anyTeam
+                            ? true
+                            : (pendingAction.type === ActionType.GOAL ||
+                                pendingAction.type === ActionType.OWN_GOAL ||
+                                pendingAction.type === ActionType.SHOT)
+                              ? p.isOpponent === pendingAction.isOpponent
+                              : true
                         )}
-                        onSelect={(id) =>
+                        groupByTeam={pendingAction.anyTeam}
+                        teamNames={{
+                          team: matchData.teamName || "LOCAL",
+                          opponent: matchData.opponentName || "RIVAL",
+                        }}
+                        onSelect={(id) => {
+                          const elegido = matchData.players.find((p) => p.id === id);
                           setPendingAction((prev) => ({
                             ...prev!,
                             playerId: id,
-                            // Con un penalti ya declarado no hay sector que
-                            // preguntar: se pasa directamente a la portería.
-                            step: isRuleDeterminedOrigin(prev?.setPiece ?? null)
-                              ? "target"
-                              : "origin",
-                          }))
-                        }
+                            // El bando sale del JUGADOR elegido, no del panel.
+                            ...(prev?.anyTeam && elegido
+                              ? { isOpponent: !!elegido.isOpponent }
+                              : {}),
+                            // Un subtipo pendiente se pregunta antes que la zona.
+                            step:
+                              prev?.type === ActionType.STEAL || prev?.type === ActionType.LOSS
+                                ? "subtype"
+                                : isRuleDeterminedOrigin(prev?.setPiece ?? null)
+                                  ? "target"
+                                  : "origin",
+                          }));
+                        }}
                         selectedId={pendingAction.playerId}
                         showOnlyRoles={
                           pendingAction.type === GoalieAction.GOAL_CONCEDED
@@ -8820,12 +9089,58 @@ const PlayerSelector = ({
   onSelect,
   selectedId,
   showOnlyRoles,
+  groupByTeam,
+  teamNames,
 }: {
   players: Player[];
   onSelect: (id: string) => void;
   selectedId?: string;
   showOnlyRoles?: Role[];
-}) => (
+  /** EXPERIMENTO: separa visualmente las dos plantillas y las rotula. */
+  groupByTeam?: boolean;
+  teamNames?: { team: string; opponent: string };
+}) => {
+  const elegibles = players.filter((p) => {
+    if (showOnlyRoles) return showOnlyRoles.includes(p.role);
+    return p.role !== Role.COACH && p.role !== Role.DELEGATE && p.isOnPitch;
+  });
+
+  if (groupByTeam) {
+    return (
+      <div className="space-y-2 max-h-56 overflow-y-auto p-1 custom-scrollbar">
+        {([
+          { opp: false, nombre: teamNames?.team ?? "LOCAL", color: "text-blue-300 border-blue-500/40" },
+          { opp: true, nombre: teamNames?.opponent ?? "RIVAL", color: "text-red-300 border-red-500/40" },
+        ]).map(({ opp, nombre, color }) => (
+          <div key={String(opp)} data-player-group={opp ? "opponent" : "team"}>
+            <div className={`text-[8px] font-black uppercase tracking-widest border-b pb-0.5 mb-1 ${color}`}>
+              {nombre}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {elegibles
+                .filter((p) => !!p.isOpponent === opp)
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    data-pick-player={p.id}
+                    onClick={() => onSelect(p.id)}
+                    className={`p-2 rounded-xl border-2 flex flex-col items-center gap-1 transition-all min-h-[44px]
+                      ${selectedId === p.id ? "bg-blue-600 border-white" : "bg-white/5 border-white/10 opacity-80 hover:opacity-100"}`}
+                  >
+                    <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[9px] ${p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : "bg-black/40 text-white"}`}>
+                      {p.number}
+                    </div>
+                    <span className="text-[8px] font-black uppercase truncate w-full text-center">{p.name}</span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
   <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
     {players
       .filter((p) => {
@@ -8851,7 +9166,8 @@ const PlayerSelector = ({
         </button>
       ))}
   </div>
-);
+  );
+};
 
 const BenchRadialMenu = ({
   onSelect,

@@ -85,14 +85,25 @@ import {
   OWN_GOAL_LABEL,
 } from "../utils/goalModel";
 import {
+  CAPTURE_MODES,
   CaptureMode,
   CAPTURE_MODE_LABEL,
-  dualLayoutFor,
-  dualUnavailableReason,
+  captureUnavailableReason,
+  columnsLayoutFor,
+  isCaptureModeAvailable,
+  effectiveCaptureMode,
   readCaptureMode,
   writeCaptureMode,
 } from "../utils/captureMode";
 import { DualRosterPanel } from "../components/DualRosterPanel";
+import { SharedPitchBenches, SharedPitchPlayers } from "../components/SharedPitchView";
+import {
+  DEFAULT_PITCH_METRICS,
+  TeamSide,
+  defendedGoalSide,
+  layoutSharedPitch,
+  sharedPitchFlipped,
+} from "../utils/sharedPitch";
 import {
   describeRegisteredAction,
   deservesConfirmation,
@@ -1506,20 +1517,28 @@ export default function MatchTracker() {
    * ninguna —en columnas se esconde un jugador por equipo, en filas el campo
    * baja a 58 px de alto— así que ahí la vista dual simplemente no se ofrece.
    */
-  const dualLayout = dualLayoutFor(viewportWidth, viewportHeight);
-  const dualFits = dualLayout !== null;
+  const dualLayout = columnsLayoutFor(viewportWidth, viewportHeight);
   const dualColumns = dualLayout === "columns";
-  const dualUnavailable = dualUnavailableReason(viewportWidth, viewportHeight);
+  const dualUnavailable = captureUnavailableReason(captureMode, viewportWidth, viewportHeight);
 
   /**
-   * Vista dual EFECTIVA: la pedida, y solo donde cabe.
+   * El modo EFECTIVO: el pedido, y solo donde cabe.
    *
-   * Si la pantalla gira y deja de caber, esto pasa a false solo: la pantalla
-   * vuelve a focal sin tocar el jugador seleccionado, los eventos, el
-   * marcador, la fase ni el partido. Y vuelve a dual sola cuando vuelve a
-   * haber sitio, porque la preferencia guardada no se ha reescrito.
+   * Si la pantalla gira y deja de caber, esto vuelve a focal solo, sin tocar
+   * el jugador seleccionado, los eventos, el marcador, la fase ni el partido.
+   * Y recupera el modo elegido cuando vuelve a haber sitio, porque la
+   * preferencia guardada no se ha reescrito.
    */
-  const dualActive = captureMode === "dual" && dualFits;
+  const modoEfectivo = effectiveCaptureMode(captureMode, viewportWidth, viewportHeight);
+  const columnsActive = modoEfectivo === "columns";
+  const pitchActive = modoEfectivo === "pitch";
+
+  /**
+   * Los dos modos nuevos comparten lo esencial: el jugador se toca DIRECTO,
+   * sin elegir equipo antes. Lo que cambia entre ellos es dónde están las
+   * fichas —a los lados o dentro de la pista—, no cómo se registra.
+   */
+  const dualActive = columnsActive || pitchActive;
 
   /**
    * El bando al que va la acción.
@@ -1572,6 +1591,30 @@ export default function MatchTracker() {
       ...(actor ? { playerId: actor, step: detalle } : { step: "player" as const, anyTeam: true }),
     });
   };
+
+  /**
+   * MEDIDA REAL de la pista, para separar fichas en píxeles y no en vaguedades.
+   *
+   * El umbral de viewport decide si la vista se ofrece; esto decide cuánto hay
+   * que separar a quien se tape. Son dos cosas distintas: la ventana puede ser
+   * ancha y la pista haber quedado baja por el resto de la interfaz.
+   */
+  const [pitchBox, setPitchBox] = useState<{ width: number; height: number }>({
+    width: DEFAULT_PITCH_METRICS.width,
+    height: DEFAULT_PITCH_METRICS.height,
+  });
+  useEffect(() => {
+    const el = pitchRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const medir = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) setPitchBox({ width: r.width, height: r.height });
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pitchActive, activeTab]);
 
   /** Solo UNO de los dos banquillos abierto a la vez: no caben los dos. */
   const [openBench, setOpenBench] = useState<"team" | "opponent" | null>(null);
@@ -1627,6 +1670,39 @@ export default function MatchTracker() {
     // UI/táctico; el reloj ya tiene su propio guardado throttled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFieldFlipped, gameState, rivalGameState, isDataLocked, phaseOfPlay, showRecoveryPrompt]);
+
+  /**
+   * LA PISTA COMPARTIDA · los diez colocados sobre un solo campo.
+   *
+   * La orientación se resuelve UNA vez aquí —`sharedPitchFlipped` combina el
+   * cambio manual de lado con el del descanso— y la proyección de cada jugador
+   * la recibe ya hecha. Si se resolviera por ficha, la segunda parte se
+   * invertiría diez veces.
+   *
+   * Es transformación de PRESENTACIÓN: no toca `pitchPosition`, ni el evento,
+   * ni el dato guardado. `attackDirection` sigue mandando en el dato.
+   */
+  const sharedFlipped = sharedPitchFlipped(isFieldFlipped, matchData.period);
+  const sharedEntries = ([false, true] as const).flatMap((opponent) => {
+    const sistema = PITCH_SYSTEMS[opponent ? rivalGameState : gameState]
+      || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
+    return rosterEnPista(opponent).flatMap((p) => {
+      const idx = effectiveSlotIndex(p.pitchPosition, sistema.length);
+      // pitchPosition inválido: no se dibuja. Nunca cae al slot del portero,
+      // que es exactamente el error que `lineupIntegrity` vino a cerrar.
+      if (idx === null) return [];
+      const side: TeamSide = opponent ? "opponent" : "team";
+      return [{ id: p.id, number: p.number, side, slot: sistema[idx] }];
+    });
+  });
+  const sharedLayout = layoutSharedPitch(sharedEntries, sharedFlipped, {
+    ...DEFAULT_PITCH_METRICS,
+    width: pitchBox.width,
+    height: pitchBox.height,
+  });
+  /** Índice por id para que la vista no vuelva a recorrer la plantilla. */
+  const sharedPlayers: Record<string, Player> = {};
+  for (const p of matchData.players) sharedPlayers[p.id] = p;
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
@@ -6403,16 +6479,16 @@ export default function MatchTracker() {
               <span className="text-[7px] font-black uppercase tracking-widest text-slate-500 mr-auto">
                 Experimento · modo de captura
               </span>
-              {(["focal", "dual"] as const).map((m) => {
+              {CAPTURE_MODES.map((m) => {
                 const activo = captureMode === m;
-                const cabe = m === "focal" || dualFits;
+                const cabe = isCaptureModeAvailable(m, viewportWidth, viewportHeight);
                 return (
                   <button
                     key={m}
                     data-capture-mode-button={m}
                     aria-pressed={activo}
                     disabled={!cabe}
-                    title={cabe ? undefined : "Necesita al menos 768 px de ancho"}
+                    title={captureUnavailableReason(m, viewportWidth, viewportHeight) ?? undefined}
                     onClick={() => elegirCaptureMode(m)}
                     className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-all disabled:opacity-30 ${
                       activo
@@ -6645,15 +6721,15 @@ export default function MatchTracker() {
                   Por debajo de 768 no hay vista dual: la interfaz validada ya
                   resuelve ese caso mejor que dos plantillas ilegibles. */}
               <div
-                data-capture-mode={dualActive ? "dual" : "focal"}
-                data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}
+                data-capture-mode={modoEfectivo}
+                data-dual-layout={columnsActive ? (dualColumns ? "columns" : "rows") : "none"}
                 className={`flex-1 min-h-0 overflow-hidden ${
-                  dualActive && dualColumns
+                  columnsActive && dualColumns
                     ? "grid grid-cols-[132px_1fr_132px] grid-rows-1 gap-1.5"
                     : "flex flex-col"
                 }`}
               >
-                {dualActive && (
+                {columnsActive && (
                   <DualRosterPanel
                     teamName={matchData.teamName || "LOCAL"}
                     logo={matchData.teamLogo}
@@ -6673,7 +6749,18 @@ export default function MatchTracker() {
               {/* CENTER: PITCH VISUAL */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                 {/* PITCH VISUAL - HORIZONTAL ORIENTATION */}
-                <div ref={pitchRef} className={`relative w-full flex-1 min-h-0 bg-gradient-to-r ${pitchView === 'local' ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30' : 'from-slate-900/40 to-red-950/40 border-red-500/30'} rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
+                <div ref={pitchRef} className={`relative w-full flex-1 min-h-0 bg-gradient-to-r ${
+                  // En 5v5 están los dos equipos: el fondo no puede decir «estoy
+                  // en el rival». Se pinta cada mitad del color de quien la
+                  // defiende, que es información, no decoración.
+                  pitchActive
+                    ? (sharedFlipped
+                        ? 'from-red-950/35 via-slate-900/40 to-blue-950/35 border-violet-400/30'
+                        : 'from-blue-950/35 via-slate-900/40 to-red-950/35 border-violet-400/30')
+                    : pitchView === 'local'
+                      ? 'from-blue-950/40 to-slate-900/40 border-blue-500/30'
+                      : 'from-slate-900/40 to-red-950/40 border-red-500/30'
+                } rounded-xl border-2 shadow-2xl overflow-hidden flex items-center justify-center`}>
                   {/* Grid Marks */}
                   <div className="absolute inset-0 grid grid-cols-10 grid-rows-8 opacity-5 z-0">
                     {Array.from({ length: 80 }).map((_, i) => (
@@ -6697,10 +6784,45 @@ export default function MatchTracker() {
                     
                     <div className="absolute left-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
                     <div className="absolute right-[12%] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/40 rounded-full"></div>
+
+                    {/* En 5v5, de quién es cada portería. En el descanso los
+                        rótulos se cruzan con los equipos: es la única señal de
+                        que el cambio de campo ya está aplicado al dibujo. */}
+                    {pitchActive && (["left", "right"] as const).map((lado) => {
+                      const esLocal = defendedGoalSide("team", sharedFlipped) === lado;
+                      return (
+                        <span
+                          key={lado}
+                          data-shared-goal={lado}
+                          data-shared-goal-side={esLocal ? "team" : "opponent"}
+                          className={`absolute top-1 ${lado === "left" ? "left-1" : "right-1"} px-1 rounded text-[7px] font-black uppercase tracking-widest ${
+                            esLocal ? "text-blue-300 bg-blue-950/60" : "text-red-300 bg-red-950/60"
+                          }`}
+                        >
+                          {(esLocal ? matchData.teamName || "LOCAL" : matchData.opponentName || "RIVAL").slice(0, 10)}
+                        </span>
+                      );
+                    })}
                   </div>
 
+                  {/* ── EXPERIMENTO · PISTA 5v5 ───────────────────────────
+                      Los diez dentro del mismo campo, pulsables directamente.
+                      Aquí NO se editan posiciones ni se arrastra: eso sigue en
+                      focal y en columnas. Esta vista es para registrar, y un
+                      arrastre accidental sobre diez fichas juntas movería la
+                      alineación sin que nadie lo pidiera. */}
+                  {pitchActive && (
+                    <SharedPitchPlayers
+                      placements={sharedLayout.placements}
+                      players={sharedPlayers}
+                      selectedId={selectedActor?.id ?? null}
+                      onSelect={selectActor}
+                      disabled={isDataLocked}
+                    />
+                  )}
+
                   {/* Tactical Slots and Players */}
-                  {(() => {
+                  {!pitchActive && (() => {
                     const currentGameState = pitchView === 'local' ? gameState : rivalGameState;
                     const isOpp = pitchView === 'opponent';
                     const currentSlots = PITCH_SYSTEMS[currentGameState] || PITCH_SYSTEMS[GameState.FOUR_VS_FOUR];
@@ -6790,9 +6912,25 @@ export default function MatchTracker() {
                     );
                   })()}
                 </div>
+
+                {/* Los banquillos, FUERA del campo: dentro taparían a quien
+                    juega, y mezclarlos invita a apuntarle una acción a quien
+                    está sentado. Solo uno abierto a la vez. */}
+                {pitchActive && (
+                  <SharedPitchBenches
+                    teamName={matchData.teamName || "LOCAL"}
+                    opponentName={matchData.opponentName || "RIVAL"}
+                    teamBench={rosterBanquillo(false)}
+                    opponentBench={rosterBanquillo(true)}
+                    open={openBench}
+                    onToggle={(lado) => setOpenBench((b) => (b === lado ? null : lado))}
+                    onSelect={executeSwap}
+                    disabled={isDataLocked}
+                  />
+                )}
               </div>
 
-                {dualActive && (
+                {columnsActive && (
                   <DualRosterPanel
                     teamName={matchData.opponentName || "RIVAL"}
                     logo={matchData.opponentLogo}

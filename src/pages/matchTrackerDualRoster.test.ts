@@ -16,15 +16,24 @@ import { resolve } from "node:path";
 import {
   CAPTURE_MODE_KEY,
   CAPTURE_MODE_LABEL,
-  dualLayoutFor,
-  dualUnavailableReason,
+  captureUnavailableReason,
+  columnsLayoutFor,
+  effectiveCaptureMode,
   isCaptureMode,
+  normalizeCaptureMode,
   readCaptureMode,
   writeCaptureMode,
 } from "../utils/captureMode";
 
 const fuente = readFileSync(resolve(__dirname, "./MatchTracker.tsx"), "utf-8");
 const panel = readFileSync(resolve(__dirname, "../components/DualRosterPanel.tsx"), "utf-8");
+const pista = readFileSync(resolve(__dirname, "../components/SharedPitchView.tsx"), "utf-8");
+/** La pista 5v5 sin comentarios: lo que se afirma es sobre el código. */
+const pistaCodigo = pista
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split("\n")
+  .map((l) => l.replace(/\/\/.*$/, ""))
+  .join("\n");
 
 const codigo = fuente
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -63,6 +72,8 @@ describe("1-3 · el equipo lo decide el jugador, no el panel", () => {
     expect(codigo).toContain("<DualRosterPanel");
     expect(codigo.match(/<DualRosterPanel/g) ?? []).toHaveLength(2);
     expect(codigo).toContain("isOpponent={false}");
+    // Y son de la vista COLUMNAS: en 5v5 las fichas están dentro del campo.
+    expect((codigo.match(/\{columnsActive && \(\s*<DualRosterPanel/g) ?? [])).toHaveLength(2);
     expect(codigo).toContain("isOpponent\n                    onPitch={rosterEnPista(true)}");
     expect(panel).toContain("data-roster-player={p.id}");
     expect(panel).toContain('data-roster-side={isOpponent ? "opponent" : "team"}');
@@ -194,7 +205,10 @@ describe("11-12 · el modo es una preferencia, no un dato", () => {
 
   it("vive en el navegador y aguanta que el almacenamiento falle", () => {
     expect(CAPTURE_MODE_KEY).toBe("futsal_capture_mode_v1");
-    expect(isCaptureMode("dual")).toBe(true);
+    expect(isCaptureMode("columns")).toBe(true);
+    expect(isCaptureMode("pitch")).toBe(true);
+    expect(isCaptureMode("dual")).toBe(false);
+    expect(normalizeCaptureMode("dual")).toBe("columns");
     expect(isCaptureMode("otra")).toBe(false);
     const original = globalThis.localStorage;
     // Sin almacenamiento se trabaja en la interfaz validada.
@@ -206,7 +220,7 @@ describe("11-12 · el modo es una preferencia, no un dato", () => {
       configurable: true,
     });
     expect(readCaptureMode()).toBe("focal");
-    expect(() => writeCaptureMode("dual")).not.toThrow();
+    expect(() => writeCaptureMode("columns")).not.toThrow();
     Object.defineProperty(globalThis, "localStorage", { value: original, configurable: true });
   });
 
@@ -224,7 +238,9 @@ describe("11-12 · el modo es una preferencia, no un dato", () => {
     store.set(CAPTURE_MODE_KEY, "{}");
     expect(readCaptureMode()).toBe("focal");
     store.set(CAPTURE_MODE_KEY, "dual");
-    expect(readCaptureMode()).toBe("dual");
+    expect(readCaptureMode()).toBe("columns");
+    store.set(CAPTURE_MODE_KEY, "pitch");
+    expect(readCaptureMode()).toBe("pitch");
     writeCaptureMode("focal");
     expect(store.get(CAPTURE_MODE_KEY)).toBe("focal");
     if (original) Object.defineProperty(globalThis, "localStorage", original);
@@ -241,41 +257,46 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     expect(snap).not.toContain("captureMode");
   });
 
-  it("14 · la vista dual solo se ofrece donde CABE, medido en los cuatro tamaños", () => {
+  it("14 · cada modo solo se ofrece donde CABE, medido en los cuatro tamaños", () => {
     // Los cuatro de la validación, y el porqué de cada uno.
-    expect(dualLayoutFor(1440, 900)).toBe("columns");
-    expect(dualLayoutFor(768, 1024)).toBe("rows");
-    expect(dualLayoutFor(1024, 768)).toBeNull(); // columnas esconden un jugador; filas dejan el campo en 58 px
-    expect(dualLayoutFor(375, 812)).toBeNull();
-    expect(codigo).toContain("const dualLayout = dualLayoutFor(viewportWidth, viewportHeight);");
-    expect(codigo).toContain('const dualActive = captureMode === "dual" && dualFits;');
+    expect(columnsLayoutFor(1440, 900)).toBe("columns");
+    expect(columnsLayoutFor(768, 1024)).toBe("rows");
+    expect(columnsLayoutFor(1024, 768)).toBeNull(); // columnas esconden un jugador; filas dejan el campo en 58 px
+    expect(columnsLayoutFor(375, 812)).toBeNull();
+    expect(effectiveCaptureMode("pitch", 1024, 768)).toBe("focal");
+    expect(effectiveCaptureMode("pitch", 1440, 900)).toBe("pitch");
+    expect(codigo).toContain("const dualLayout = columnsLayoutFor(viewportWidth, viewportHeight);");
+    expect(codigo).toContain("const modoEfectivo = effectiveCaptureMode(captureMode, viewportWidth, viewportHeight);");
     // Y el botón se deshabilita donde no cabe, en vez de mentir.
-    expect(codigo).toContain('const cabe = m === "focal" || dualFits;');
+    expect(codigo).toContain("const cabe = isCaptureModeAvailable(m, viewportWidth, viewportHeight);");
   });
 
   it("y donde no cabe se dice por qué, en vez de dejar un botón mudo", () => {
-    expect(dualUnavailableReason(1024, 768)).toBe(
-      "Vista dual no disponible con esta altura de pantalla",
+    expect(captureUnavailableReason("columns", 1024, 768)).toBe(
+      "Vista columnas no disponible con esta altura de pantalla",
     );
-    expect(dualUnavailableReason(375, 812)).toBe(
-      "Vista dual no disponible con esta anchura de pantalla",
+    expect(captureUnavailableReason("pitch", 375, 812)).toBe(
+      "Vista pista 5v5 no disponible con esta anchura de pantalla",
     );
-    expect(dualUnavailableReason(1440, 900)).toBeNull();
-    expect(dualUnavailableReason(768, 1024)).toBeNull();
+    expect(captureUnavailableReason("columns", 1440, 900)).toBeNull();
+    expect(captureUnavailableReason("columns", 768, 1024)).toBeNull();
     expect(codigo).toContain("data-dual-unavailable");
+    // Y el título del botón apagado dice lo mismo que la línea de abajo.
+    expect(codigo).toContain("title={captureUnavailableReason(m, viewportWidth, viewportHeight) ?? undefined}");
   });
 
   it("girar la pantalla la devuelve a focal sin tocar el partido", () => {
-    // `dualActive` es derivado: si deja de caber pasa a false solo. No hay
+    // `modoEfectivo` es derivado: si deja de caber vuelve a focal solo. No hay
     // ningún efecto que reescriba el partido, el jugador ni la fase.
-    expect(codigo).toContain("const dualFits = dualLayout !== null;");
-    const deriva = codigo.slice(codigo.indexOf("const dualLayout = dualLayoutFor("), codigo.indexOf("const bandoDeAccion"));
+    expect(codigo).toContain('const columnsActive = modoEfectivo === "columns";');
+    expect(codigo).toContain('const pitchActive = modoEfectivo === "pitch";');
+    const deriva = codigo.slice(codigo.indexOf("const dualLayout = columnsLayoutFor("), codigo.indexOf("const bandoDeAccion"));
     for (const prohibido of ["setMatchData", "setSelectedActor", "applyPhaseOfPlay", "setPitchView", "writeCaptureMode"]) {
       expect(deriva).not.toContain(prohibido);
     }
   });
 
-  it("una vista dual que no cabe NO se guarda en preferencias", () => {
+  it("un modo que no cabe NO se guarda en preferencias", () => {
     // Solo el botón escribe, y el botón está deshabilitado donde no cabe.
     expect(codigo).toContain("const elegirCaptureMode = (modo: CaptureMode) => {");
     expect(codigo).toContain("onClick={() => elegirCaptureMode(m)}");
@@ -283,7 +304,7 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     expect((codigo.match(/writeCaptureMode\(/g) ?? []).length).toBe(1);
   });
 
-  it("en vista dual no quedan dos caminos para lo mismo", () => {
+  it("en los modos nuevos no quedan dos caminos para lo mismo", () => {
     // Ni la franja rápida del otro equipo ni su panel lateral: la plantilla
     // del rival ya está junto al campo. Mantener el panel estrangulaba el
     // campo a 238 px a 1024×768, medido.
@@ -302,14 +323,17 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
   it("15 · la composición cambia por ancho medido, no por suposición", () => {
     expect(codigo).toContain('const dualColumns = dualLayout === "columns";');
     expect(codigo).toContain('"grid grid-cols-[132px_1fr_132px] grid-rows-1 gap-1.5"');
-    expect(codigo).toContain('data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}');
+    expect(codigo).toContain('data-dual-layout={columnsActive ? (dualColumns ? "columns" : "rows") : "none"}');
+    expect(codigo).toContain("data-capture-mode={modoEfectivo}");
     expect(panel).toContain('orientation === "row"');
   });
 
-  it("los dos modos tienen rótulo legible, no un identificador", () => {
-    expect(CAPTURE_MODE_LABEL.dual).toBe("Vista dual");
+  it("los tres modos tienen rótulo legible, no un identificador", () => {
     expect(CAPTURE_MODE_LABEL.focal).toBe("Vista focal");
+    expect(CAPTURE_MODE_LABEL.columns).toBe("Vista columnas");
+    expect(CAPTURE_MODE_LABEL.pitch).toBe("Vista pista 5v5");
     expect(codigo).toContain("{CAPTURE_MODE_LABEL[m]}");
+    expect(codigo).toContain("CAPTURE_MODES.map((m) => {");
   });
 });
 
@@ -342,5 +366,149 @@ describe("no se reutiliza en silencio el último jugador", () => {
   it("y el paso de jugador deriva el bando del elegido", () => {
     expect(codigo).toContain("isOpponent: !!elegido.isOpponent");
     expect(codigo).toContain('data-player-group={opp ? "opponent" : "team"}');
+  });
+});
+
+// ── 16-19 · LA PISTA 5v5 ────────────────────────────────────────────────
+//
+// Lo que se protege aquí es lo que distingue esta vista de las otras dos: que
+// los diez salgan de la MISMA función de colocación ya probada, que la
+// orientación se resuelva una sola vez, y que tocar una ficha dentro del campo
+// sea exactamente lo mismo que tocarla en la columna.
+
+describe("16 · los diez dentro de una sola pista", () => {
+  it("se dibujan desde la colocación probada, no desde coordenadas a mano", () => {
+    expect(codigo).toContain("<SharedPitchPlayers");
+    expect(codigo).toContain("placements={sharedLayout.placements}");
+    expect(codigo).toContain("const sharedLayout = layoutSharedPitch(sharedEntries, sharedFlipped, {");
+    // Y la vista no recalcula nada: solo pinta lo que recibe.
+    expect(pistaCodigo).not.toContain("100 - ");
+    expect(pistaCodigo).not.toContain("layoutSharedPitch(");
+    expect(pista).toContain("left: `${pos.left}%`, top: `${pos.top}%`");
+  });
+
+  it("entran los cinco de CADA equipo, cada uno con su sistema", () => {
+    const entradas = trozo("const sharedEntries =", "const sharedLayout =");
+    expect(entradas).toContain("([false, true] as const).flatMap");
+    expect(entradas).toContain("PITCH_SYSTEMS[opponent ? rivalGameState : gameState]");
+    expect(entradas).toContain("rosterEnPista(opponent)");
+    expect(entradas).toContain('const side: TeamSide = opponent ? "opponent" : "team";');
+  });
+
+  it("el equipo se distingue sin depender del color", () => {
+    // Forma, borde y rótulo: en una tablet a pleno sol el color es lo primero
+    // que se pierde, y aquí equivocarse es apuntarle el gol al otro equipo.
+    expect(pista).toContain('rounded-md border-2 border-double');
+    expect(pista).toContain('rounded-full border-2');
+    expect(pista).toContain('portero ? "POR" : rival ? "R" : nombreCorto(p.name)');
+    expect(pista).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
+    expect(pista).toContain('aria-label={`${rival ? "Rival" : "Local"} ${p.number} ${p.name}`}');
+  });
+
+  it("la ficha cumple el objetivo táctil mínimo y se marca al seleccionar", () => {
+    expect(pista).toContain("min-w-[46px] min-h-[44px]");
+    expect(pista).toContain('activo ? "ring-4 ring-white z-[60] scale-110" : ""');
+    expect(pista).toContain("aria-pressed={activo}");
+  });
+
+  it("tocar una ficha es exactamente lo mismo que tocarla en la columna", () => {
+    // Un solo camino: `selectActor`. Si la pista tuviera el suyo, habría dos
+    // reglas para decidir de quién es la acción.
+    expect(codigo).toContain("onSelect={selectActor}");
+    expect((codigo.match(/onSelect=\{selectActor\}/g) ?? []).length).toBe(3);
+    expect(pista).not.toContain("setPendingAction");
+    expect(pista).not.toContain("isOpponent:");
+  });
+
+  it("en 5v5 el bando sale del jugador tocado, igual que en columnas", () => {
+    // Si la captura directa cubriera solo `columns`, en 5v5 se tocaría la
+    // ficha de un rival y la acción se le apuntaría al equipo del panel
+    // desplegado: el error exacto que este experimento viene a cerrar.
+    expect(codigo).toContain("const dualActive = columnsActive || pitchActive;");
+    const bando = trozo("const bandoDeAccion = ()", "const actorDeAccion");
+    expect(bando).toContain("dualActive && selectedActor");
+    const lanzar = cuerpo("const lanzarConJugador = (type: ActionType)");
+    expect(lanzar).toContain("if (!dualActive) {");
+    // Y la selección se suelta igual tras registrar, en los tres modos.
+    const conf = trozo("const confirmRegistered = (event: GameEvent)", "const undoLastRegistered");
+    expect(conf).toContain("setSelectedActor(null);");
+  });
+
+  it("en 5v5 no se arrastra ni se editan posiciones", () => {
+    // Diez fichas juntas y arrastrables es una alineación cambiada sin querer.
+    expect(codigo).toContain("{!pitchActive && (() => {");
+    expect(pista).not.toContain("drag");
+    expect(pista).not.toContain("setMatchData");
+    expect(pista).not.toContain("pitchPosition");
+  });
+
+  it("y una alineación antigua con posición inválida no se dibuja", () => {
+    const entradas = trozo("const sharedEntries =", "const sharedLayout =");
+    expect(entradas).toContain("effectiveSlotIndex(p.pitchPosition, sistema.length)");
+    expect(entradas).toContain("if (idx === null) return [];");
+  });
+});
+
+describe("17 · la orientación se resuelve UNA vez", () => {
+  it("el descanso entra por `sharedPitchFlipped`, con el periodo del partido", () => {
+    expect(codigo).toContain("const sharedFlipped = sharedPitchFlipped(isFieldFlipped, matchData.period);");
+    // Una sola llamada: resolverla por ficha invertiría la pista diez veces.
+    expect((codigo.match(/sharedPitchFlipped\(/g) ?? []).length).toBe(1);
+  });
+
+  it("las porterías se rotulan con el equipo que las defiende", () => {
+    expect(codigo).toContain('defendedGoalSide("team", sharedFlipped) === lado');
+    expect(codigo).toContain("data-shared-goal={lado}");
+    expect(codigo).toContain('data-shared-goal-side={esLocal ? "team" : "opponent"}');
+  });
+
+  it("y el dato del cambio de campo sigue siendo el de siempre", () => {
+    // `attackDirection` manda en el evento; esta vista no lo toca.
+    const bloque = trozo("const sharedFlipped =", "const sharedPlayers");
+    expect(bloque).not.toContain("attackDirection");
+    expect(bloque).not.toContain("setMatchData");
+    expect(bloque).not.toContain("originGrid");
+  });
+});
+
+describe("18 · la separación usa la pista MEDIDA, no la supuesta", () => {
+  it("se mide el campo real con ResizeObserver", () => {
+    expect(codigo).toContain("const ro = new ResizeObserver(medir);");
+    expect(codigo).toContain("const r = el.getBoundingClientRect();");
+    expect(codigo).toContain("if (r.width > 0 && r.height > 0) setPitchBox({ width: r.width, height: r.height });");
+  });
+
+  it("y esa medida es la que decide cuánto separar", () => {
+    const layout = trozo("const sharedLayout = layoutSharedPitch(", "const sharedPlayers");
+    expect(layout).toContain("...DEFAULT_PITCH_METRICS");
+    expect(layout).toContain("width: pitchBox.width");
+    expect(layout).toContain("height: pitchBox.height");
+  });
+
+  it("si el navegador no tiene ResizeObserver, se sigue capturando", () => {
+    expect(codigo).toContain('if (!el || typeof ResizeObserver === "undefined") return;');
+    expect(codigo).toContain("width: DEFAULT_PITCH_METRICS.width");
+  });
+});
+
+describe("19 · los banquillos, fuera del campo", () => {
+  it("van debajo de la pista y usan la sustitución existente", () => {
+    expect(codigo).toContain("<SharedPitchBenches");
+    expect(codigo).toContain("onSelect={executeSwap}");
+    expect(pista).not.toContain("SUBSTITUTION");
+    expect(pista).not.toContain("setMatchData");
+  });
+
+  it("solo uno abierto a la vez, con el mismo estado que en columnas", () => {
+    expect(codigo).toContain("open={openBench}");
+    expect(codigo).toContain("onToggle={(lado) => setOpenBench((b) => (b === lado ? null : lado))}");
+    expect(pista).toContain('data-shared-bench-toggle={lado}');
+    expect(pista).toContain("const abierto = lados.find((l) => l.lado === open);");
+  });
+
+  it("y un suplente no se puede confundir con alguien que está jugando", () => {
+    expect(pista).toContain("data-shared-bench-player={p.id}");
+    expect(pista).toContain("data-shared-pitch-player={p.id}");
+    expect(pista).toContain("Sin suplentes");
   });
 });

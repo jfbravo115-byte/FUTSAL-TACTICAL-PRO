@@ -1583,6 +1583,19 @@ export default function MatchTracker() {
     width: DEFAULT_PITCH_METRICS.width,
     height: DEFAULT_PITCH_METRICS.height,
   });
+  /**
+   * El ESPACIO COMÚN: lo que ocupan juntos la pista y lo que la acompaña
+   * —plantillas laterales en columnas, banquillos en 5v5—.
+   *
+   * Es la única referencia que no cambia con el modo, y por eso es la que
+   * decide. La pista medida sirve para dibujar; para decidir si la vista 5v5
+   * cabe hace falta saber cuánto sitio habría en 5v5, no cuánto queda ahora.
+   */
+  const [arenaBox, setArenaBox] = useState<{ width: number; height: number }>({
+    width: DEFAULT_PITCH_METRICS.width,
+    height: DEFAULT_PITCH_METRICS.height + 100,
+  });
+  const arenaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = pitchRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -1605,6 +1618,26 @@ export default function MatchTracker() {
     // decide si la vista 5v5 se puede ofrecer, así que hace falta tenerla
     // también estando en focal o en columnas.
   }, [activeTab]);
+
+  useEffect(() => {
+    const el = arenaRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const medir = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      setArenaBox((prev) =>
+        Math.abs(prev.width - r.width) < 0.5 && Math.abs(prev.height - r.height) < 0.5
+          ? prev
+          : { width: r.width, height: r.height },
+      );
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeTab]);
+
+
 
   /** Solo UNO de los dos banquillos abierto a la vez: no caben los dos. */
   const [openBench, setOpenBench] = useState<"team" | "opponent" | null>(null);
@@ -1706,7 +1739,11 @@ export default function MatchTracker() {
   const sharedViability = sharedPitchViability(
     sharedEntries,
     sharedFlipped,
-    pitchBoxForAvailability(pitchBox),
+    // Sobre el espacio COMÚN menos lo máximo que pueden ocupar los
+    // banquillos. Así la pista del 5v5 nunca baja de lo que se validó, ni
+    // cuando se despliega un banquillo, ni al venir de columnas, donde la
+    // pista está encogida por las plantillas laterales.
+    pitchBoxForAvailability(arenaBox),
   );
 
   /**
@@ -1737,6 +1774,8 @@ export default function MatchTracker() {
    * fichas —a los lados o dentro de la pista—, no cómo se registra.
    */
   const dualActive = columnsActive || pitchActive;
+
+
 
   const [isExporting, setIsExporting] = useState(false);
   const [exportingType, setExportingType] = useState<'TEAM' | 'GK' | 'TACTICAL' | 'PIZARRA' | 'TRACKING' | 'HISTORIAL' | null>(null);
@@ -6783,6 +6822,7 @@ export default function MatchTracker() {
                   Por debajo de 768 no hay vista dual: la interfaz validada ya
                   resuelve ese caso mejor que dos plantillas ilegibles. */}
               <div
+                ref={arenaRef}
                 data-capture-mode={modoEfectivo}
                 data-dual-layout={columnsActive ? (dualColumns ? "columns" : "rows") : "none"}
                 className={`flex-1 min-h-0 overflow-hidden ${

@@ -382,18 +382,22 @@ export function sharedPitchViability(
 }
 
 /**
- * Lo que le queda a la pista cuando se le pone debajo la barra de banquillos.
+ * EL SUELO DE LA PISTA · lo que se le descuenta al espacio disponible.
  *
- * La disponibilidad se evalúa SIEMPRE sobre esta caja reducida, se esté en el
- * modo que se esté. Es lo que impide el baile: la pista del 5v5 nunca es más
- * pequeña que la que se mide en focal o en columnas menos esta barra, así que
- * si la vista se ofrece es porque cabe, y una vez dentro sigue cabiendo.
+ * La disponibilidad se evalúa siempre sobre el espacio vertical que ocupan
+ * juntos la pista y los banquillos, menos lo PEOR que los banquillos pueden
+ * llegar a ocupar: la barra plegada más la lista desplegada, que tiene altura
+ * máxima propia. Así la pista nunca baja de la caja que se validó, pase lo
+ * que pase con el banquillo, y la vista no puede entrar y salir sola.
  */
 export const BENCH_BAR_PX = 34;
+/** Alto máximo de la lista de suplentes desplegada; más allá, se desplaza. */
+export const BENCH_OPEN_MAX_PX = 96;
+export const BENCH_SPACE_PX = BENCH_BAR_PX + BENCH_OPEN_MAX_PX;
 
 export function pitchBoxForAvailability(
   box: { width: number; height: number },
   metrics: PitchMetrics = DEFAULT_PITCH_METRICS,
 ): PitchMetrics {
-  return { ...metrics, width: box.width, height: Math.max(0, box.height - BENCH_BAR_PX) };
+  return { ...metrics, width: box.width, height: Math.max(0, box.height - BENCH_SPACE_PX) };
 }

@@ -156,7 +156,10 @@ export function SharedPitchBenches({
       {abierto && (
         <div
           data-shared-bench={abierto.lado}
-          className="flex gap-1 flex-wrap pt-1"
+          /* Alto acotado y con desplazamiento propio: si la lista pudiera
+             crecer sin tope, al abrirla la pista encogería por debajo de lo
+             que se validó y las fichas volverían a juntarse. */
+          className="flex gap-1 flex-wrap pt-1 max-h-[96px] overflow-y-auto custom-scrollbar"
         >
           {/* Sin nadie tocado en la pista no se sabe quién sale, y adivinarlo
               es como se acaba sacando al que no era. Se dice, en vez de dejar

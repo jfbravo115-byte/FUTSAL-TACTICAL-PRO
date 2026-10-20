@@ -275,17 +275,29 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     expect(codigo).toContain("const cabe = isCaptureModeAvailable(m, captureAv);");
   });
 
-  it("la disponibilidad de la pista sale de la pista MEDIDA, no de la ventana", () => {
+  it("la disponibilidad sale del ESPACIO MEDIDO, no de la ventana", () => {
     const v = trozo("const sharedViability = sharedPitchViability(", "const captureAv =");
     expect(v).toContain("sharedEntries");
     expect(v).toContain("sharedFlipped");
-    expect(v).toContain("pitchBoxForAvailability(pitchBox)");
+    expect(v).toContain("pitchBoxForAvailability(arenaBox)");
     expect(codigo).toContain("const captureAv = captureAvailability(viewportWidth, viewportHeight, sharedViability);");
-    // Y la medida se toma SIEMPRE, no solo estando ya en 5v5: si solo se
-    // midiera dentro, nunca se sabría si se puede entrar.
-    const efecto = trozo("const el = pitchRef.current;", "}, [activeTab]);");
+    // Y se mide el contenedor COMÚN, no la pista: en columnas la pista está
+    // encogida por las plantillas laterales, y el 5v5 tendrá todo ese sitio.
+    expect(codigo).toContain("ref={arenaRef}");
+    const efecto = trozo("const el = arenaRef.current;", "}, [activeTab]);");
     expect(efecto).toContain("new ResizeObserver(medir)");
     expect(efecto).not.toContain("pitchActive");
+    expect(efecto).not.toContain("modoEfectivo");
+  });
+
+  it("y la pista nunca baja de lo validado por abrir un banquillo", () => {
+    // Al desplegar la lista, lo que ocupa se lo quita a la pista. Por eso la
+    // caja validada ya descuenta la barra MÁS la lista, y la lista tiene alto
+    // máximo con desplazamiento propio.
+    expect(pistaCodigo).toContain("max-h-[96px] overflow-y-auto");
+    const sp = readFileSync(resolve(__dirname, "../utils/sharedPitch.ts"), "utf-8");
+    expect(sp).toContain("export const BENCH_SPACE_PX = BENCH_BAR_PX + BENCH_OPEN_MAX_PX;");
+    expect(sp).toContain("height: Math.max(0, box.height - BENCH_SPACE_PX)");
   });
 
   it("y se recalcula sola cuando cambian formaciones, cambios o tamaño", () => {

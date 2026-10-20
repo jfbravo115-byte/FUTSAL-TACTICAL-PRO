@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BENCH_BAR_PX,
+  BENCH_SPACE_PX,
   PitchMetrics,
   PitchSlot,
   SharedPitchEntry,
@@ -521,9 +522,16 @@ describe("11-12 · una sustitución redibuja sola", () => {
 // disponibilidad se evalúa sobre esa caja MENOS la barra de banquillos, que
 // es el suelo: la pista del 5v5 nunca es más pequeña que eso.
 
-/** Lo medido en el preview a 768×1024, en modo columnas. */
-const TABLET_BOX = { width: 746, height: 262 };
+/**
+ * Lo medido en el Deploy Preview a 768×1024: el espacio común que ocupan la
+ * pista y lo que la acompaña es 430 px de alto por 746 de ancho —en 5v5, una
+ * pista de 396 y la barra de banquillos de 34—. La disponibilidad se evalúa
+ * sobre ese espacio menos lo máximo que los banquillos pueden ocupar.
+ */
+const TABLET_BOX = { width: 746, height: 430 };
 const TABLET_DISPONIBILIDAD = pitchBoxForAvailability(TABLET_BOX, ESCRITORIO);
+/** La pista real que se dibuja en 5v5 a ese tamaño, también medida. */
+const TABLET_PISTA_REAL: PitchMetrics = { ...ESCRITORIO, width: 746, height: 396 };
 
 /**
  * Los sistemas REALES de la aplicación (`PITCH_SYSTEMS`), copiados aquí para
@@ -580,12 +588,19 @@ const casos = [
 ] as const;
 
 describe("13-16 · en 768×1024 la pista 5v5 CABE", () => {
-  it("la caja de disponibilidad es la pista medida menos la barra", () => {
+  it("la caja de disponibilidad descuenta TODO lo que puede ocupar el banquillo", () => {
+    // La barra plegada y, además, la lista desplegada, que tiene alto máximo.
+    // Si solo se descontara la barra, abrir el banquillo encogería la pista
+    // por debajo de lo validado y las fichas volverían a juntarse.
     expect(BENCH_BAR_PX).toBe(34);
+    expect(BENCH_SPACE_PX).toBe(34 + 96);
     expect(TABLET_DISPONIBILIDAD.width).toBe(746);
-    expect(TABLET_DISPONIBILIDAD.height).toBe(262 - 34);
+    expect(TABLET_DISPONIBILIDAD.height).toBe(430 - 130);
     expect(TABLET_DISPONIBILIDAD.cardWidth).toBe(46);
     expect(TABLET_DISPONIBILIDAD.cardHeight).toBe(44);
+    // Y la caja validada es MENOR que la pista que se acaba dibujando: lo que
+    // se ofrece, cabe.
+    expect(TABLET_DISPONIBILIDAD.height).toBeLessThan(TABLET_PISTA_REAL.height);
   });
 
   for (const [nombre, local, rival] of casos) {
@@ -679,17 +694,22 @@ describe("17-19 · cuándo NO se ofrece, y por qué", () => {
   });
 
   it("la caja de disponibilidad es SUELO: lo que se ofrece, cabe", () => {
-    // Entrar exige que quepa en la caja reducida; una vez dentro, la pista
-    // real es mayor o igual. Por eso el modo no puede entrar y salir solo.
-    const real = { ...ESCRITORIO, width: TABLET_BOX.width, height: TABLET_BOX.height };
-    const reducida = pitchBoxForAvailability(TABLET_BOX, ESCRITORIO);
-    expect(reducida.height).toBeLessThan(real.height);
+    // Entrar exige que quepa en la caja reducida; la pista que se dibuja es
+    // mayor. Por eso el modo no puede entrar y salir solo, ni al desplegar un
+    // banquillo, ni al venir de columnas con la pista encogida.
     const entries = equipos(SISTEMA_1_1_3, SISTEMA_1_1_3);
-    expect(sharedPitchViability(entries, false, reducida).ok).toBe(true);
-    expect(sharedPitchViability(entries, false, real).ok).toBe(true);
-    // Y el móvil, con su pista pequeña, sigue sin ofrecerla.
-    const movil = pitchBoxForAvailability({ width: 343, height: 200 }, ESCRITORIO);
-    expect(sharedPitchViability(entries, false, movil).ok).toBe(false);
+    expect(sharedPitchViability(entries, false, TABLET_DISPONIBILIDAD).ok).toBe(true);
+    expect(sharedPitchViability(entries, false, TABLET_PISTA_REAL).ok).toBe(true);
+    // Con el banquillo abierto la pista baja a 300 px, que es exactamente la
+    // caja validada: sigue cabiendo.
+    const conBanquilloAbierto = { ...TABLET_PISTA_REAL, height: 430 - BENCH_SPACE_PX };
+    expect(sharedPitchViability(entries, false, conBanquilloAbierto).ok).toBe(true);
+    // Y donde el espacio común no da ni para dos filas de fichas, no se
+    // ofrece: 240 px de espacio dejan 110 de pista, y en 110 no caben dos
+    // fichas de 44 separadas.
+    const apretado = pitchBoxForAvailability({ width: 343, height: 240 }, ESCRITORIO);
+    expect(apretado.height).toBe(110);
+    expect(sharedPitchViability(entries, false, apretado).ok).toBe(false);
   });
 
   it("cuenta de verdad los solapes y las fichas fuera", () => {

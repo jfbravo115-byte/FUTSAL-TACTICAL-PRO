@@ -87,9 +87,8 @@ import {
 import {
   CaptureMode,
   CAPTURE_MODE_LABEL,
-  DUAL_COLUMNS_MIN_HEIGHT,
-  DUAL_COLUMNS_MIN_WIDTH,
-  DUAL_MIN_WIDTH,
+  dualLayoutFor,
+  dualUnavailableReason,
   readCaptureMode,
   writeCaptureMode,
 } from "../utils/captureMode";
@@ -1453,9 +1452,18 @@ export default function MatchTracker() {
    * almacenamiento falla, se trabaja en focal, que es lo ya validado.
    */
   const [captureMode, setCaptureMode] = useState<CaptureMode>(() => readCaptureMode());
-  useEffect(() => {
-    writeCaptureMode(captureMode);
-  }, [captureMode]);
+
+  /**
+   * Cambiar de modo es lo ÚNICO que escribe la preferencia.
+   *
+   * No se persiste en cada render: así un viewport que no puede mostrar la
+   * vista dual nunca la deja guardada, y volver a una pantalla grande
+   * recupera lo que el analista eligió de verdad.
+   */
+  const elegirCaptureMode = (modo: CaptureMode) => {
+    setCaptureMode(modo);
+    writeCaptureMode(modo);
+  };
 
   /**
    * Jugador tocado directamente, con el bando que le corresponde POR SER SUYO.
@@ -1491,13 +1499,26 @@ export default function MatchTracker() {
    * cuando no hay ninguno seleccionado —o en vista focal— decide el panel
    * desplegado, que es el comportamiento validado.
    */
-  const dualFits = viewportWidth >= DUAL_MIN_WIDTH;
-  // Las columnas piden ancho Y alto: cinco fichas apiladas más su cabecera
-  // no caben en 768 px de alto, y las dos últimas acababan debajo de la barra
-  // de acciones. Sin alto suficiente se usan las filas.
-  const dualColumns =
-    viewportWidth >= DUAL_COLUMNS_MIN_WIDTH && viewportHeight >= DUAL_COLUMNS_MIN_HEIGHT;
-  /** Vista dual EFECTIVA: la pedida, y solo donde cabe de verdad. */
+  /**
+   * La composición que CABE en este viewport, o null si ninguna.
+   *
+   * Lo decide `utils/captureMode` con los umbrales medidos. A 1024×768 no cabe
+   * ninguna —en columnas se esconde un jugador por equipo, en filas el campo
+   * baja a 58 px de alto— así que ahí la vista dual simplemente no se ofrece.
+   */
+  const dualLayout = dualLayoutFor(viewportWidth, viewportHeight);
+  const dualFits = dualLayout !== null;
+  const dualColumns = dualLayout === "columns";
+  const dualUnavailable = dualUnavailableReason(viewportWidth, viewportHeight);
+
+  /**
+   * Vista dual EFECTIVA: la pedida, y solo donde cabe.
+   *
+   * Si la pantalla gira y deja de caber, esto pasa a false solo: la pantalla
+   * vuelve a focal sin tocar el jugador seleccionado, los eventos, el
+   * marcador, la fase ni el partido. Y vuelve a dual sola cuando vuelve a
+   * haber sitio, porque la preferencia guardada no se ha reescrito.
+   */
   const dualActive = captureMode === "dual" && dualFits;
 
   /**
@@ -6392,7 +6413,7 @@ export default function MatchTracker() {
                     aria-pressed={activo}
                     disabled={!cabe}
                     title={cabe ? undefined : "Necesita al menos 768 px de ancho"}
-                    onClick={() => setCaptureMode(m)}
+                    onClick={() => elegirCaptureMode(m)}
                     className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-all disabled:opacity-30 ${
                       activo
                         ? "bg-violet-500 text-slate-950 border-violet-300"
@@ -6404,6 +6425,15 @@ export default function MatchTracker() {
                 );
               })}
             </div>
+            {/* Por qué no se puede, en vez de un botón apagado y mudo. */}
+            {dualUnavailable && (
+              <div
+                data-dual-unavailable
+                className="text-[7px] font-black uppercase tracking-widest text-slate-500 px-1 pb-1"
+              >
+                {dualUnavailable}
+              </div>
+            )}
             <div className="text-[7px] font-black uppercase tracking-widest text-slate-500 px-1 pb-0.5">
               {dualActive
                 ? "Pista mostrada · las acciones las decide el jugador que tocas"

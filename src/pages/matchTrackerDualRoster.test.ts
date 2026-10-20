@@ -16,9 +16,8 @@ import { resolve } from "node:path";
 import {
   CAPTURE_MODE_KEY,
   CAPTURE_MODE_LABEL,
-  DUAL_COLUMNS_MIN_HEIGHT,
-  DUAL_COLUMNS_MIN_WIDTH,
-  DUAL_MIN_WIDTH,
+  dualLayoutFor,
+  dualUnavailableReason,
   isCaptureMode,
   readCaptureMode,
   writeCaptureMode,
@@ -242,14 +241,46 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
     expect(snap).not.toContain("captureMode");
   });
 
-  it("14 · por debajo de 768 px no hay vista dual", () => {
-    expect(DUAL_MIN_WIDTH).toBe(768);
-    expect(DUAL_COLUMNS_MIN_WIDTH).toBe(1024);
-    expect(DUAL_COLUMNS_MIN_HEIGHT).toBe(820);
-    expect(codigo).toContain("const dualFits = viewportWidth >= DUAL_MIN_WIDTH;");
+  it("14 · la vista dual solo se ofrece donde CABE, medido en los cuatro tamaños", () => {
+    // Los cuatro de la validación, y el porqué de cada uno.
+    expect(dualLayoutFor(1440, 900)).toBe("columns");
+    expect(dualLayoutFor(768, 1024)).toBe("rows");
+    expect(dualLayoutFor(1024, 768)).toBeNull(); // columnas esconden un jugador; filas dejan el campo en 58 px
+    expect(dualLayoutFor(375, 812)).toBeNull();
+    expect(codigo).toContain("const dualLayout = dualLayoutFor(viewportWidth, viewportHeight);");
     expect(codigo).toContain('const dualActive = captureMode === "dual" && dualFits;');
     // Y el botón se deshabilita donde no cabe, en vez de mentir.
     expect(codigo).toContain('const cabe = m === "focal" || dualFits;');
+  });
+
+  it("y donde no cabe se dice por qué, en vez de dejar un botón mudo", () => {
+    expect(dualUnavailableReason(1024, 768)).toBe(
+      "Vista dual no disponible con esta altura de pantalla",
+    );
+    expect(dualUnavailableReason(375, 812)).toBe(
+      "Vista dual no disponible con esta anchura de pantalla",
+    );
+    expect(dualUnavailableReason(1440, 900)).toBeNull();
+    expect(dualUnavailableReason(768, 1024)).toBeNull();
+    expect(codigo).toContain("data-dual-unavailable");
+  });
+
+  it("girar la pantalla la devuelve a focal sin tocar el partido", () => {
+    // `dualActive` es derivado: si deja de caber pasa a false solo. No hay
+    // ningún efecto que reescriba el partido, el jugador ni la fase.
+    expect(codigo).toContain("const dualFits = dualLayout !== null;");
+    const deriva = codigo.slice(codigo.indexOf("const dualLayout = dualLayoutFor("), codigo.indexOf("const bandoDeAccion"));
+    for (const prohibido of ["setMatchData", "setSelectedActor", "applyPhaseOfPlay", "setPitchView", "writeCaptureMode"]) {
+      expect(deriva).not.toContain(prohibido);
+    }
+  });
+
+  it("una vista dual que no cabe NO se guarda en preferencias", () => {
+    // Solo el botón escribe, y el botón está deshabilitado donde no cabe.
+    expect(codigo).toContain("const elegirCaptureMode = (modo: CaptureMode) => {");
+    expect(codigo).toContain("onClick={() => elegirCaptureMode(m)}");
+    expect(codigo).not.toContain("useEffect(() => {\n    writeCaptureMode(captureMode);");
+    expect((codigo.match(/writeCaptureMode\(/g) ?? []).length).toBe(1);
   });
 
   it("en vista dual no quedan dos caminos para lo mismo", () => {
@@ -269,7 +300,7 @@ describe("13-15 · el experimento no toca el partido ni rompe el móvil", () => 
   });
 
   it("15 · la composición cambia por ancho medido, no por suposición", () => {
-    expect(codigo).toContain("viewportWidth >= DUAL_COLUMNS_MIN_WIDTH && viewportHeight >= DUAL_COLUMNS_MIN_HEIGHT");
+    expect(codigo).toContain('const dualColumns = dualLayout === "columns";');
     expect(codigo).toContain('"grid grid-cols-[132px_1fr_132px] grid-rows-1 gap-1.5"');
     expect(codigo).toContain('data-dual-layout={dualActive ? (dualColumns ? "columns" : "rows") : "none"}');
     expect(panel).toContain('orientation === "row"');

@@ -21,26 +21,49 @@ export const CAPTURE_MODE_LABEL: Record<CaptureMode, string> = {
 };
 
 /**
- * Anchos mínimos, fijados POR MEDICIÓN y no por intuición.
+ * Umbrales de las dos composiciones, fijados POR MEDICIÓN.
  *
- *   DUAL_COLUMNS_MIN_WIDTH  las dos plantillas a los lados del campo.
- *   DUAL_MIN_WIDTH          composición en filas: local arriba, rival abajo.
+ * COLUMNAS · las dos plantillas a los lados del campo.
+ *   Piden ancho Y alto: cada plantilla apila cinco fichas de 44 px más su
+ *   cabecera, y a 1024×768 las dos últimas quedaban por debajo de la barra de
+ *   acciones —medido con `elementFromPoint`: inalcanzables—.
  *
- * Por debajo del segundo no hay vista dual: dos plantillas completas en un
- * móvil salen ilegibles, y la interfaz validada ya resuelve ese caso.
+ * FILAS · local sobre el campo y rival debajo.
+ *   Caben en menos ancho, pero se comen alto: a 1024×768 el campo quedaba en
+ *   758×58, que no es un campo. Por eso piden más alto que las columnas.
  */
 export const DUAL_COLUMNS_MIN_WIDTH = 1024;
-export const DUAL_MIN_WIDTH = 768;
+export const DUAL_COLUMNS_MIN_HEIGHT = 820;
+export const DUAL_ROWS_MIN_WIDTH = 768;
+export const DUAL_ROWS_MIN_HEIGHT = 900;
+
+/** Compatibilidad: el ancho por debajo del cual no hay vista dual posible. */
+export const DUAL_MIN_WIDTH = DUAL_ROWS_MIN_WIDTH;
+
+export type DualLayout = "columns" | "rows" | null;
 
 /**
- * Alto mínimo para las columnas laterales.
+ * Qué composición cabe DE VERDAD en este viewport, o null.
  *
- * No basta con el ancho: en columna cada plantilla apila cinco fichas de 44 px
- * más su cabecera, y a 1024×768 las dos últimas quedaban por debajo de la
- * barra de acciones —medido con `elementFromPoint`: inalcanzables—. Con menos
- * alto se usan las filas, que a ese tamaño sí caben enteras.
+ * Es la única función que decide si la vista dual está disponible. Un modo que
+ * no cabe no se ofrece, no se activa y no se guarda: enseñar diez fichas con
+ * un campo de 58 px de alto es peor que no enseñarlas.
  */
-export const DUAL_COLUMNS_MIN_HEIGHT = 820;
+export function dualLayoutFor(width: number, height: number): DualLayout {
+  if (width >= DUAL_COLUMNS_MIN_WIDTH && height >= DUAL_COLUMNS_MIN_HEIGHT) return "columns";
+  if (width >= DUAL_ROWS_MIN_WIDTH && height >= DUAL_ROWS_MIN_HEIGHT) return "rows";
+  return null;
+}
+
+/**
+ * Por qué no cabe, para decirlo en una línea discreta en vez de dejar un
+ * botón apagado sin explicación. null cuando sí cabe.
+ */
+export function dualUnavailableReason(width: number, height: number): string | null {
+  if (dualLayoutFor(width, height)) return null;
+  if (width >= DUAL_ROWS_MIN_WIDTH) return "Vista dual no disponible con esta altura de pantalla";
+  return "Vista dual no disponible con esta anchura de pantalla";
+}
 
 export function isCaptureMode(raw: unknown): raw is CaptureMode {
   return raw === "focal" || raw === "dual";

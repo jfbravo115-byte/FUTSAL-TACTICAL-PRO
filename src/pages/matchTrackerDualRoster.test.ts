@@ -526,6 +526,26 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(pistaCodigo).toContain("height: metrics.cardHeight");
   });
 
+  it("27 · el color de carga se calcula con los mismos datos, sin otro reloj", () => {
+    // Las escalas cuelgan del mismo mapa de jugadores que pinta los tiempos:
+    // se recalculan en cada render, sin estado ni temporizador propios.
+    expect(pistaCodigo).toContain("const escalas = bothTeamsTimeScales(Object.values(players));");
+    expect(pistaCodigo).toContain("timeLoadColor(p.individualTimeSeconds, suEquipo.tot)");
+    expect(pistaCodigo).toContain("timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot)");
+    expect(pistaCodigo).not.toMatch(/setInterval|setTimeout|Date\.now|useEffect/);
+    // Y sigue habiendo un solo temporizador en toda la aplicación.
+    expect((codigo.match(/setInterval\(/g) ?? []).length).toBe(1);
+  });
+
+  it("y las dos escalas no se cruzan ni mezclan equipos", () => {
+    const escala = readFileSync(resolve(__dirname, "../utils/timeLoadColor.ts"), "utf-8");
+    // TOT con los totales, ROT con las rotaciones. Nunca al revés.
+    expect(escala).toContain("tot: delEquipo.map((p) => safeSeconds(p.individualTimeSeconds))");
+    expect(escala).toContain("rot: delEquipo.filter((p) => p.isOnPitch).map((p) => safeSeconds(p.rotationTimeSeconds))");
+    expect(escala).toContain("!!p.isOpponent === isOpponent");
+    expect(pistaCodigo).toContain("const suEquipo = rival ? escalas.opponent : escalas.team;");
+  });
+
   it("22-25 · un toque abre el MISMO menú radial de la vista focal", () => {
     // Era el otro defecto: la ficha solo seleccionaba, y para registrar había
     // que ir a la barra común. Ahora el toque abre el radial que ya existe.

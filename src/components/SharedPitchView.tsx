@@ -32,6 +32,11 @@ import {
   SharedPitchPlacement,
 } from "../utils/sharedPitch";
 import { playerClocks } from "../utils/playerClock";
+import {
+  bothTeamsTimeScales,
+  timeLoadAriaLabel,
+  timeLoadColor,
+} from "../utils/timeLoadColor";
 import { nombreCorto } from "./DualRosterPanel";
 
 /** Lado en el que se dibuja cada portería, para rotularlas. */
@@ -54,6 +59,10 @@ export function SharedPitchPlayers({
   metrics?: PitchMetrics;
   disabled?: boolean;
 }) {
+  // Las dos escalas de los dos equipos, de una vez por render y a partir de
+  // los MISMOS datos que pintan los cronómetros: ni un temporizador más.
+  const escalas = bothTeamsTimeScales(Object.values(players));
+
   return (
     <>
       {placements.map((pos) => {
@@ -65,6 +74,11 @@ export function SharedPitchPlayers({
         // Los MISMOS segundos que lleva el tick del partido y el MISMO
         // formato que la ficha de la vista focal. Aquí no se cuenta nada.
         const { tot, rot } = playerClocks(p);
+        // Dos escalas INDEPENDIENTES: el que más ha jugado puede acabar de
+        // entrar, y es justo ese cruce el que decide una rotación.
+        const suEquipo = rival ? escalas.opponent : escalas.team;
+        const colorTot = timeLoadColor(p.individualTimeSeconds, suEquipo.tot);
+        const colorRot = timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot);
 
         return (
           <button
@@ -109,18 +123,37 @@ export function SharedPitchPlayers({
             </span>
 
             {/* 2-3 · TOT y ROT, SIEMPRE visibles: sin tocar la ficha, sin
-                desplegar nada. Es lo que decide una rotación. */}
+                desplegar nada. Es lo que decide una rotación.
+
+                Cada uno en su cápsula y con SU escala: el color no toca el
+                cuerpo de la ficha, que es lo que identifica al equipo. Y el
+                color no va solo: lleva su flecha y su rótulo hablado, porque
+                a pleno sol el color es lo primero que se pierde. */}
             <span
               data-shared-pitch-tot
-              className="text-[9px] font-mono font-black text-sky-200 leading-none tabular-nums"
+              data-load-level={colorTot.level}
+              aria-label={timeLoadAriaLabel("tot", tot, colorTot.level)}
+              style={{
+                color: colorTot.foreground,
+                backgroundColor: colorTot.background,
+                borderColor: colorTot.border,
+              }}
+              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center"
             >
-              TOT {tot}
+              TOT {tot}<span data-load-marker className="pl-px">{colorTot.marker}</span>
             </span>
             <span
               data-shared-pitch-rot
-              className="text-[9px] font-mono font-black text-emerald-300 leading-none tabular-nums"
+              data-load-level={colorRot.level}
+              aria-label={timeLoadAriaLabel("rot", rot, colorRot.level)}
+              style={{
+                color: colorRot.foreground,
+                backgroundColor: colorRot.background,
+                borderColor: colorRot.border,
+              }}
+              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center"
             >
-              ROT {rot}
+              ROT {rot}<span data-load-marker className="pl-px">{colorRot.marker}</span>
             </span>
 
             {/* 4 · El nombre, lo último: con el dorsal delante casi nunca

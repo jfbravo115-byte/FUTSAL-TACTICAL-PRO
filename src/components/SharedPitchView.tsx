@@ -37,7 +37,7 @@ import {
   timeLoadAriaLabel,
   timeLoadColor,
 } from "../utils/timeLoadColor";
-import { formatJerseyNumber, isUnknownNumber, playerLabel } from "../utils/jerseyNumber";
+import { formatJerseyNumber, isJerseyUnknown, playerLabel } from "../utils/jerseyNumber";
 import { useLongPress } from "../hooks/useLongPress";
 import { nombreCorto } from "./DualRosterPanel";
 
@@ -135,7 +135,7 @@ function FichaEnPista({
   const suEquipo = rival ? escalas.opponent : escalas.team;
   const colorTot = timeLoadColor(p.individualTimeSeconds, suEquipo.tot);
   const colorRot = timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot);
-  const sinDorsal = isUnknownNumber(p.number);
+  const sinDorsal = isJerseyUnknown(p);
 
   return (
           <button
@@ -144,7 +144,7 @@ function FichaEnPista({
             data-shared-pitch-nudged={pos.nudged ? "1" : "0"}
             data-long-press={pending ? "1" : "0"}
             aria-pressed={activo}
-            aria-label={`${rival ? "Rival" : "Local"} ${formatJerseyNumber(p.number)} ${playerLabel(p, todos)}, total ${tot}, rotación ${rot}. Mantén pulsado para cambiar el dorsal`}
+            aria-label={`${rival ? "Rival" : "Local"} ${formatJerseyNumber(p)} ${playerLabel(p, todos)}, total ${tot}, rotación ${rot}. Mantén pulsado para cambiar el dorsal`}
             disabled={disabled}
             {...handlers}
             style={{
@@ -179,7 +179,7 @@ function FichaEnPista({
                 pierde, y confundirse aquí es apuntarle el gol al otro. */}
             <span className="flex items-baseline gap-1 leading-none">
               <span className="text-[15px] font-black text-white leading-none tabular-nums">
-                {formatJerseyNumber(p.number)}
+                {formatJerseyNumber(p)}
               </span>
               <span
                 className={`text-[7px] font-black uppercase leading-none ${
@@ -378,7 +378,7 @@ function FichaDeBanquillo({
       data-shared-bench-player={p.id}
       data-long-press={pending ? "1" : "0"}
       disabled={disabled && !onEditNumber}
-      aria-label={`${formatJerseyNumber(p.number)} ${p.name}. Mantén pulsado para cambiar el dorsal`}
+      aria-label={`${formatJerseyNumber(p)} ${p.name}. Mantén pulsado para cambiar el dorsal`}
       {...handlers}
       onClick={(e) => {
         handlers.onClick(e);
@@ -390,7 +390,7 @@ function FichaDeBanquillo({
     >
       <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
       <span className="shrink-0 w-6 h-6 rounded bg-black/50 flex items-center justify-center text-[10px] font-black">
-        {formatJerseyNumber(p.number)}
+        {formatJerseyNumber(p)}
       </span>
       <span className="text-[8px] font-black uppercase truncate max-w-[70px]">
         {nombreCorto(p.name)}

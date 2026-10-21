@@ -15,16 +15,18 @@ import {
   JERSEY_ERROR_TEXT,
   JERSEY_MAX,
   JERSEY_MIN,
-  UNKNOWN_NUMBER,
   duplicateHolder,
   formatJerseyNumber,
-  isUnknownNumber,
+  isJerseyUnknown,
   parseJerseyInput,
   playerLabel,
 } from "../utils/jerseyNumber";
 
 export type JerseyDecision =
+  /** Asignar un dorsal concreto. El 0 es uno válido como cualquier otro. */
   | { tipo: "guardar"; number: number }
+  /** Volver a «todavía no lo sé», sin tocar nada más del jugador. */
+  | { tipo: "desconocido" }
   | { tipo: "intercambiar"; conId: string };
 
 export function JerseyNumberEditor({
@@ -44,19 +46,20 @@ export function JerseyNumberEditor({
   onClose: () => void;
 }) {
   const [texto, setTexto] = React.useState(
-    isUnknownNumber(player.number) ? "" : String(player.number),
+    isJerseyUnknown(player) ? "" : String(player.number),
   );
   const parsed = parseJerseyInput(texto);
   const propuesto = parsed.ok ? parsed.value : null;
+  // Dejar el suyo tal cual no es un duplicado; proponer el de otro, sí.
+  const esElSuyo = propuesto === player.number && !isJerseyUnknown(player);
   const choca =
-    propuesto !== null && propuesto !== player.number
-      ? duplicateHolder(players, player.id, propuesto)
-      : null;
+    propuesto !== null && !esElSuyo ? duplicateHolder(players, player.id, propuesto) : null;
   const equipo = player.isOpponent ? opponentName || "RIVAL" : teamName || "MI EQUIPO";
 
   const guardar = () => {
     if (!parsed.ok || propuesto === null) return;
-    onConfirm({ tipo: "guardar", number: propuesto });
+    // Un campo vacío es «todavía no lo sé», no el dorsal 0.
+    onConfirm(texto.trim() === "" ? { tipo: "desconocido" } : { tipo: "guardar", number: propuesto });
   };
 
   return (
@@ -85,7 +88,7 @@ export function JerseyNumberEditor({
             {playerLabel(player, players)}
           </span>
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-            Dorsal actual · {formatJerseyNumber(player.number)}
+            Dorsal actual · {formatJerseyNumber(player)}
           </span>
         </div>
 
@@ -135,7 +138,7 @@ export function JerseyNumberEditor({
         <div className="grid grid-cols-2 gap-2">
           <button
             data-jersey-unknown
-            onClick={() => onConfirm({ tipo: "guardar", number: UNKNOWN_NUMBER })}
+            onClick={() => onConfirm({ tipo: "desconocido" })}
             className="py-2 rounded-xl border border-white/15 bg-white/5 text-[9px] font-black uppercase tracking-widest text-slate-300"
           >
             Dorsal desconocido
@@ -159,7 +162,7 @@ export function JerseyNumberEditor({
         </button>
 
         <p className="text-[8px] uppercase tracking-widest text-slate-600 text-center leading-tight">
-          Dorsal de {JERSEY_MIN} a {JERSEY_MAX} · vacío = sin asignar · no toca el reloj
+          Dorsal de {JERSEY_MIN} a {JERSEY_MAX} · vacío o «desconocido» = sin asignar · no toca el reloj
         </p>
       </div>
     </>

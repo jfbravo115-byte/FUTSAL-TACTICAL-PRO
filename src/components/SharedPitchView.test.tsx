@@ -367,7 +367,7 @@ describe("4 · toque corto registra, pulsación mantenida edita el dorsal", () =
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
-    const p = jugador({ id: "p1", number: 0 });
+    const p = jugador({ id: "p1", number: 0, jerseyNumberKnown: false });
     act(() => {
       root.render(
         <SharedPitchPlayers

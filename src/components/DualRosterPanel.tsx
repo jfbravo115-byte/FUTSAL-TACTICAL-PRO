@@ -15,6 +15,7 @@
  * tablet a pleno sol el color es lo primero que se pierde, y confundir las dos
  * plantillas aquí significa apuntarle la acción al equipo equivocado.
  */
+import { formatJerseyNumber } from "../utils/jerseyNumber";
 import React from "react";
 import { Player, Role } from "../types/futsal";
 import { DisciplinaryAura, DisciplinaryCards } from "./DisciplinaryAura";
@@ -91,7 +92,7 @@ export function DualRosterPanel({
             p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : activo ? "bg-black/30" : "bg-black/50 text-white"
           }`}
         >
-          {p.number}
+          {formatJerseyNumber(p)}
         </span>
         <span className="text-[9px] font-black uppercase truncate min-w-0">
           {nombreCorto(p.name)}
@@ -166,7 +167,7 @@ export function DualRosterPanel({
               >
                 <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
                 <span className="shrink-0 w-5 h-5 rounded bg-black/50 flex items-center justify-center text-[9px] font-black">
-                  {p.number}
+                  {formatJerseyNumber(p)}
                 </span>
                 <span className="text-[8px] font-black uppercase truncate">{nombreCorto(p.name)}</span>
               </button>

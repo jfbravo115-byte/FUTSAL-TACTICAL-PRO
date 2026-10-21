@@ -52,7 +52,7 @@ function abrir(player: Player, players: Player[]) {
 
 describe("1 · lo que muestra y lo que guarda", () => {
   it("enseña equipo, identificación, dorsal actual y teclado numérico", () => {
-    const p = jug({ number: 0 });
+    const p = jug({ number: 0, jerseyNumberKnown: false });
     const { q, desmontar } = abrir(p, [p]);
     expect(q("[data-jersey-editor]")!.textContent).toContain("EQUIPO VISITANTE");
     expect(q("[data-jersey-editor]")!.textContent).toContain("RIVAL A");   // aún sin dorsal
@@ -64,7 +64,7 @@ describe("1 · lo que muestra y lo que guarda", () => {
   });
 
   it("guarda el número tecleado, con ceros y espacios normalizados", () => {
-    const p = jug({ number: 0 });
+    const p = jug({ number: 0, jerseyNumberKnown: false });
     const { q, escribir, decisiones, desmontar } = abrir(p, [p]);
     escribir("007");
     act(() => { q("[data-jersey-save]")!.click(); });
@@ -72,10 +72,28 @@ describe("1 · lo que muestra y lo que guarda", () => {
     desmontar();
   });
 
-  it("«dorsal desconocido» devuelve a sin asignar", () => {
+  it("«dorsal desconocido» NO es guardar un 0: es su propia decisión", () => {
     const p = jug({ number: 7 });
     const { q, decisiones, desmontar } = abrir(p, [p]);
     act(() => { q("[data-jersey-unknown]")!.click(); });
+    expect(decisiones).toEqual([{ tipo: "desconocido" }]);
+    desmontar();
+  });
+
+  it("y dejar el campo VACÍO también es «desconocido», no el dorsal 0", () => {
+    const p = jug({ number: 7 });
+    const { q, escribir, decisiones, desmontar } = abrir(p, [p]);
+    escribir("");
+    act(() => { q("[data-jersey-save]")!.click(); });
+    expect(decisiones).toEqual([{ tipo: "desconocido" }]);
+    desmontar();
+  });
+
+  it("el dorsal 0 TECLEADO sí se guarda como dorsal real", () => {
+    const p = jug({ number: 7 });
+    const { q, escribir, decisiones, desmontar } = abrir(p, [p]);
+    escribir("0");
+    act(() => { q("[data-jersey-save]")!.click(); });
     expect(decisiones).toEqual([{ tipo: "guardar", number: 0 }]);
     desmontar();
   });
@@ -111,7 +129,10 @@ describe("1 · lo que muestra y lo que guarda", () => {
 });
 
 describe("2 · duplicados", () => {
-  const rival = [jug({ id: "r1", number: 0 }), jug({ id: "r2", number: 7, name: "PJ RIVAL 2" })];
+  const rival = [
+    jug({ id: "r1", number: 0, jerseyNumberKnown: false }),
+    jug({ id: "r2", number: 7, name: "PJ RIVAL 2" }),
+  ];
 
   it("avisa de quién lleva ya ese dorsal y NO deja guardarlo", () => {
     const { q, escribir, desmontar } = abrir(rival[0], rival);
@@ -129,15 +150,60 @@ describe("2 · duplicados", () => {
     desmontar();
   });
 
+  it("el camino completo r3 → 10: aviso, botón e intercambio con r2", () => {
+    // El escenario exacto: r2 lleva el 10 y r3 el 7; se edita r3.
+    const equipo = [
+      jug({ id: "r2", number: 10, name: "PJ RIVAL 1" }),
+      jug({ id: "r3", number: 7, name: "PJ RIVAL 2" }),
+    ];
+    const { q, escribir, decisiones, desmontar } = abrir(equipo[1], equipo);
+    escribir("10");
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("El dorsal 10 ya está asignado a PJ RIVAL 1");
+    expect(q("[data-jersey-swap]")).not.toBeNull();
+    expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
+    act(() => { q("[data-jersey-swap]")!.click(); });
+    expect(decisiones).toEqual([{ tipo: "intercambiar", conId: "r2" }]);
+    desmontar();
+  });
+
+  it("y el mismo editor con un dorsal LIBRE: ni aviso ni botón, solo guardar", () => {
+    const equipo = [
+      jug({ id: "r2", number: 10, name: "PJ RIVAL 1" }),
+      jug({ id: "r3", number: 7, name: "PJ RIVAL 2" }),
+    ];
+    const { q, escribir, decisiones, desmontar } = abrir(equipo[1], equipo);
+    escribir("99");
+    expect(q("[data-jersey-duplicate]")).toBeNull();
+    expect(q("[data-jersey-swap]")).toBeNull();
+    expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(false);
+    act(() => { q("[data-jersey-save]")!.click(); });
+    expect(decisiones).toEqual([{ tipo: "guardar", number: 99 }]);
+    desmontar();
+  });
+
   it("el dorsal del OTRO equipo no estorba", () => {
     const mezcla = [
-      jug({ id: "r1", number: 0, isOpponent: true }),
+      jug({ id: "r1", number: 0, jerseyNumberKnown: false, isOpponent: true }),
       jug({ id: "L1", number: 7, isOpponent: false, name: "Nuestro siete" }),
     ];
     const { q, escribir, desmontar } = abrir(mezcla[0], mezcla);
     escribir("7");
     expect(q("[data-jersey-duplicate]")).toBeNull();
     expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(false);
+    desmontar();
+  });
+
+  it("un pendiente que pide el 0 SÍ choca con quien ya lleva el 0 real", () => {
+    // El caso que distingue la marca del número: el editado está por conocer
+    // —su 0 es relleno— y otro compañero lleva el dorsal 0 de verdad.
+    const equipo = [
+      jug({ id: "r1", number: 0, jerseyNumberKnown: false }),
+      jug({ id: "r2", number: 0, jerseyNumberKnown: true, name: "EL CERO" }),
+    ];
+    const { q, escribir, desmontar } = abrir(equipo[0], equipo);
+    escribir("0");
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("ya está asignado a EL CERO");
+    expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
     desmontar();
   });
 

@@ -421,7 +421,7 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shot
 
           {/* Center info */}
           <div className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-[#0E1015] border-2 border-white/20 flex flex-col items-center justify-center z-10 shadow-xl">
-            <span className="text-xl font-black text-white">#{formatJerseyNumber(player.number)}</span>
+            <span className="text-xl font-black text-white">#{formatJerseyNumber(player)}</span>
             {isGoalkeeper ? (
               <span className="text-[7px] text-amber-400 font-black uppercase">{savePercentage}% par.</span>
             ) : (

@@ -1,3 +1,4 @@
+import { formatJerseyNumber } from "../utils/jerseyNumber";
 import { MatchData, Period, ActionType } from "../types/futsal";
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { formatDestinationLabel } from "../utils/goalZones";
@@ -128,7 +129,9 @@ export function buildPlayersCsv(matchData: MatchData): string {
     "rojas",
   ];
   const rows = report.playersUsed.map((p) => [
-    p.number,
+    // El dorsal se escribe como se lee en pantalla: `?` mientras no se
+    // conozca. La columna es para leerla, no para calcular con ella.
+    formatJerseyNumber(p),
     p.name,
     p.role,
     p.totLabel,
@@ -160,7 +163,7 @@ function esc(value: unknown): string {
 export function buildPrintableReportHtml(matchData: MatchData): string {
   const report = generateMatchReport(matchData);
   const players = report.playersUsed.map((p) => `
-    <tr><td>${p.number}</td><td>${esc(p.name)}</td><td>${p.totLabel}</td><td>${p.rotLabel || "—"}</td><td>${p.rotationsCount}</td><td>${p.goals}</td><td>${p.attempts}</td><td>${p.steals + p.interceptions}</td><td>${p.losses + p.errors}</td></tr>`).join("");
+    <tr><td>${formatJerseyNumber(p)}</td><td>${esc(p.name)}</td><td>${p.totLabel}</td><td>${p.rotLabel || "—"}</td><td>${p.rotationsCount}</td><td>${p.goals}</td><td>${p.attempts}</td><td>${p.steals + p.interceptions}</td><td>${p.losses + p.errors}</td></tr>`).join("");
   const zones = report.zoneDistribution.length
     ? report.zoneDistribution.map((z) => `<span class="pill">${esc(z.label)}: ${z.count}</span>`).join("")
     : "<span>Sin acciones con zona registrada.</span>";

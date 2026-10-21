@@ -160,6 +160,25 @@ export type PlayerStats = {
 export type Player = {
   id: string;
   number: number;
+  /**
+   * ¿Se conoce de verdad este dorsal?
+   *
+   * Un partido puede empezar sin la alineación rival delante, y entonces el
+   * número que se ve en pantalla es inventado. Hacía falta distinguir tres
+   * cosas que antes se confundían en el mismo `0`:
+   *
+   *   · un dorsal REAL 0, que algunas competiciones permiten;
+   *   · un dorsal TODAVÍA DESCONOCIDO;
+   *   · el 0 histórico del cuerpo técnico, que nunca fue un dorsal.
+   *
+   * Por eso la señal es esta marca y no un valor reservado: ningún número
+   * queda prohibido y nada colisiona.
+   *
+   * AUSENTE SIGNIFICA CONOCIDO. Es lo que hace compatible cualquier partido
+   * guardado antes de que esto existiera —donde el dorsal siempre estaba
+   * puesto— sin migrar ni reescribir nada.
+   */
+  jerseyNumberKnown?: boolean;
   name: string;
   role: Role;
   isOnPitch: boolean;

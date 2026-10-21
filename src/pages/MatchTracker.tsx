@@ -99,7 +99,12 @@ import {
 import { DualRosterPanel } from "../components/DualRosterPanel";
 import { SharedPitchBenches, SharedPitchPlayers } from "../components/SharedPitchView";
 import { JerseyDecision, JerseyNumberEditor } from "../components/JerseyNumberEditor";
-import { setPlayerNumber, swapPlayerNumbers } from "../utils/jerseyNumber";
+import {
+  formatJerseyNumber,
+  markJerseyUnknown,
+  setPlayerNumber,
+  swapPlayerNumbers,
+} from "../utils/jerseyNumber";
 import {
   DEFAULT_PITCH_METRICS,
   TeamSide,
@@ -784,7 +789,7 @@ const StatsExportTemplate = React.forwardRef<
               <div className="flex justify-between items-center border-b border-white/10 pb-8">
                 <div className="flex items-center gap-6">
                   <div className={`w-20 h-20 ${isOpponent ? 'bg-red-600 shadow-[0_10px_30px_rgba(220,38,38,0.3)]' : 'bg-blue-600 shadow-[0_10px_30px_rgba(37,99,235,0.3)]'} rounded-3xl flex items-center justify-center text-3xl font-black text-white`}>
-                    {p.number}
+                    {formatJerseyNumber(p)}
                   </div>
                   <div className="flex flex-col">
                     <h2 className="text-3xl font-black uppercase italic tracking-tighter text-white">
@@ -1011,7 +1016,7 @@ const StatsExportTemplate = React.forwardRef<
                       ...group.map(p => (
                         <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                           <td style={{ padding: '4px 6px', color: 'white', fontWeight: 700, fontSize: 10 }}>
-                            <span style={{ color: accent, marginRight: 4, fontWeight: 900 }}>{p.number}</span>{p.name}
+                            <span style={{ color: accent, marginRight: 4, fontWeight: 900 }}>{formatJerseyNumber(p)}</span>{p.name}
                           </td>
                           {ITEMS.map(it => (
                             <td key={it.key} style={{ textAlign: 'center', padding: '4px 4px', color: it.fn(p) > 0 ? it.color : '#334155', fontWeight: it.fn(p) > 0 ? 900 : 400, fontSize: 10 }}>
@@ -1112,7 +1117,7 @@ const StatsExportTemplate = React.forwardRef<
                   return (
                     <div key={p.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                       <div style={{ fontSize: 9, fontWeight: 900, color: 'white', textAlign: 'center', textTransform: 'uppercase' }}>
-                        <span style={{ color: '#64748b', marginRight: 4 }}>#{p.number}</span>{p.name.split(' ')[0]}
+                        <span style={{ color: '#64748b', marginRight: 4 }}>#{formatJerseyNumber(p)}</span>{p.name.split(' ')[0]}
                       </div>
                       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
                         {[1,2,3,4,5].map(lv => (
@@ -1655,7 +1660,9 @@ export default function MatchTracker() {
       players:
         decision.tipo === "guardar"
           ? setPlayerNumber(prev.players, id, decision.number)
-          : swapPlayerNumbers(prev.players, id, decision.conId),
+          : decision.tipo === "desconocido"
+            ? markJerseyUnknown(prev.players, id)
+            : swapPlayerNumbers(prev.players, id, decision.conId),
     }));
     setEditingJerseyId(null);
   };
@@ -3879,7 +3886,7 @@ export default function MatchTracker() {
                       <tbody>
                         {team.players.map(p => { const pos = getPosLabel(p); return (
                           <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
-                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}</td>
+                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{formatJerseyNumber(p)}</span>{p.name}</td>
                             <td style={{ padding: '5px 4px', textAlign: 'center' }}><span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>{pos.label}</span></td>
                             {ITEMS.map(it => { const v = it.fn(p); const isCard = it.label === 'Tarjetas'; return (<td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>{isCard && v > 0 ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}` : v}</td>); })}
                           </tr>
@@ -3958,7 +3965,7 @@ export default function MatchTracker() {
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}>
-                        <span style={{ color: accent, marginRight: 2 }}>#{p.number}</span>{p.name.split(' ')[0]}
+                        <span style={{ color: accent, marginRight: 2 }}>#{formatJerseyNumber(p)}</span>{p.name.split(' ')[0]}
                         <span style={{ display: 'inline-block', fontSize: 7, padding: '1px 3px', borderRadius: 3, background: '#f1f5f9', color: '#64748b', marginLeft: 4 }}>{mins}min</span>
                       </div>
                       <svg width={88} height={88} viewBox="0 0 88 88">
@@ -4029,7 +4036,7 @@ export default function MatchTracker() {
                       <tbody>
                         {team.players.map(p => { const pos = getPosLabel(p); return (
                           <tr key={p.id} style={{ borderBottom: '0.5px solid #f1f5f9' }}>
-                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{p.number}</span>{p.name}</td>
+                            <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 600, fontSize: 10 }}><span style={{ color: team.accent, marginRight: 4, fontWeight: 700 }}>{formatJerseyNumber(p)}</span>{p.name}</td>
                             <td style={{ padding: '5px 4px', textAlign: 'center' }}><span style={{ display: 'inline-block', fontSize: 8, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: pos.bg, color: pos.color }}>{pos.label}</span></td>
                             {ITEMS.map(it => { const v = it.fn(p); const isCard = it.label === 'Tarjetas'; return (<td key={it.label} style={{ padding: '5px 4px', textAlign: 'center', color: v > 0 ? it.color : '#cbd5e1', fontWeight: v > 0 ? 700 : 400, fontSize: 10 }}>{isCard && v > 0 ? `${p.stats.yellowCards > 0 ? p.stats.yellowCards + 'A' : ''}${p.stats.redCards > 0 ? p.stats.redCards + 'R' : ''}` : v}</td>); })}
                           </tr>
@@ -4095,7 +4102,7 @@ export default function MatchTracker() {
                         const pos = getPosLabel(p);
                         return (
                           <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{p.number}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{formatJerseyNumber(p)}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
                             <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
                               {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
@@ -5592,7 +5599,7 @@ export default function MatchTracker() {
                           {matchData.players
                             .filter(p => !!p.isOpponent === showRivalStats && p.role !== Role.COACH && p.role !== Role.DELEGATE)
                             .map(p => (
-                              <option key={p.id} value={p.id}>{p.number} - {p.name}</option>
+                              <option key={p.id} value={p.id}>{formatJerseyNumber(p)} - {p.name}</option>
                             ))
                           }
                         </select>
@@ -6054,7 +6061,7 @@ export default function MatchTracker() {
                                     <div
                                       className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs border relative ${p.role === Role.GOALKEEPER ? "bg-amber-500/20 border-amber-500/40 text-amber-500" : "bg-black/40 border-white/10 text-white"}`}
                                     >
-                                      {p.number}
+                                      {formatJerseyNumber(p)}
                                       {p.isStarter && (
                                         <div className="absolute -top-1 -right-1 bg-amber-500 text-black p-0.5 rounded-sm shadow-sm">
                                           <Trophy size={6} fill="currentColor" />
@@ -6453,7 +6460,7 @@ export default function MatchTracker() {
                                 >
                                   <input
                                     type="number"
-                                    value={player.number}
+                                    value={formatJerseyNumber(player)}
                                     onChange={(e) => updatePlayer(player.id, { number: parseInt(e.target.value) || 0 })}
                                     className="w-8 bg-black/40 border border-white/10 rounded-lg py-1 text-[10px] font-black text-white text-center"
                                   />
@@ -6513,7 +6520,7 @@ export default function MatchTracker() {
                                 >
                                   <input
                                     type="number"
-                                    value={player.number}
+                                    value={formatJerseyNumber(player)}
                                     onChange={(e) => updatePlayer(player.id, { number: parseInt(e.target.value) || 0 })}
                                     className="w-8 bg-black/40 border border-white/10 rounded-lg py-1 text-[10px] font-black text-white text-center"
                                   />
@@ -7129,7 +7136,7 @@ export default function MatchTracker() {
                         const equipo = selectedActor.isOpponent
                           ? matchData.opponentName || "RIVAL"
                           : matchData.teamName || "LOCAL";
-                        return p ? `#${p.number} ${p.name} · ${equipo}` : equipo;
+                        return p ? `#${formatJerseyNumber(p)} ${p.name} · ${equipo}` : equipo;
                       })()
                     : "Toca un jugador y después la acción"}
                 </div>
@@ -7336,7 +7343,7 @@ export default function MatchTracker() {
                         >
                           <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
                           <span className="w-5 h-5 shrink-0 rounded bg-black/50 border border-white/10 flex items-center justify-center text-[9px] font-black">
-                            {p.number}
+                            {formatJerseyNumber(p)}
                           </span>
                           <span className="text-[8px] font-black uppercase text-slate-300 truncate">
                             {p.name.split(" ")[0]}
@@ -7388,7 +7395,7 @@ export default function MatchTracker() {
                   >
                     <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
                     <div className="w-5 h-5 rounded bg-black/40 flex items-center justify-center font-black text-[10px] shrink-0 border border-white/10">
-                      {p.number}
+                      {formatJerseyNumber(p)}
                     </div>
                     <div className="flex flex-col items-center min-w-0">
                       <span className="text-[8px] font-black text-white uppercase truncate w-full px-0.5 text-center">
@@ -8827,7 +8834,7 @@ export default function MatchTracker() {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="text-lg font-black text-emerald-400 w-8 text-center flex-shrink-0">
-                            {p.number}
+                            {formatJerseyNumber(p)}
                           </span>
                           <span className="text-base font-bold text-white uppercase truncate">{p.name}</span>
                         </div>
@@ -8859,7 +8866,7 @@ export default function MatchTracker() {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="text-lg font-black text-slate-400 w-8 text-center flex-shrink-0">
-                            {p.number}
+                            {formatJerseyNumber(p)}
                           </span>
                           <span className="text-base font-bold text-slate-200 uppercase truncate">{p.name}</span>
                         </div>
@@ -9261,7 +9268,7 @@ const FutsalHeatMap = ({
                   getZonePlayers(selectedZone).map((p, i) => (
                     <div key={i} className="bg-white/5 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-3 shadow-lg">
                       <div className="w-6 h-6 rounded-lg bg-blue-600/20 flex items-center justify-center text-[10px] font-black text-blue-400 border border-blue-500/20">
-                        {p.number}
+                        {formatJerseyNumber(p)}
                       </div>
                       <span className="text-[10px] font-black text-white uppercase">{p.name}</span>
                       <div className="h-4 w-px bg-white/10 mx-1" />
@@ -9417,7 +9424,7 @@ const GoalHeatMap = ({
                 {getZonePlayers(selectedZone).length > 0 ? (
                   getZonePlayers(selectedZone).map((p, i) => (
                     <div key={i} className="flex items-center gap-3 bg-white/5 border border-white/5 px-4 py-2 rounded-2xl">
-                      <span className="text-[10px] font-black text-slate-400">#{p.number}</span>
+                      <span className="text-[10px] font-black text-slate-400">#{formatJerseyNumber(p)}</span>
                       <span className="text-[10px] font-black text-white uppercase">{p.name}</span>
                       <div className="h-3 w-px bg-white/10" />
                       <span className="text-[10px] font-black text-blue-400">{p.count}</span>
@@ -9505,7 +9512,7 @@ const PlayerSelector = ({
                       ${selectedId === p.id ? "bg-blue-600 border-white" : "bg-white/5 border-white/10 opacity-80 hover:opacity-100"}`}
                   >
                     <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[9px] ${p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : "bg-black/40 text-white"}`}>
-                      {p.number}
+                      {formatJerseyNumber(p)}
                     </div>
                     <span className="text-[8px] font-black uppercase truncate w-full text-center">{p.name}</span>
                   </button>
@@ -9535,7 +9542,7 @@ const PlayerSelector = ({
           <div
             className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[9px] ${p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : "bg-black/40 text-white"}`}
           >
-            {p.number}
+            {formatJerseyNumber(p)}
           </div>
           <span className="text-[8px] font-black uppercase truncate w-full text-center">
             {p.name}
@@ -9639,7 +9646,7 @@ const BenchRadialMenu = ({
                 >
                   <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-2xl" />
                   <span className="text-[11px] font-black leading-none">
-                    {p.number}
+                    {formatJerseyNumber(p)}
                   </span>
                   <div className="flex items-center gap-1">
                     <span className={`text-[7px] font-bold uppercase truncate max-w-[40px] leading-tight ${themeText}`}>
@@ -9699,7 +9706,7 @@ const PlayerCard = ({
       <div className={`absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-full border shadow-lg z-20
         ${player.isOpponent ? "bg-red-600 border-red-400" : "bg-blue-600 border-blue-400"}
       `}>
-        <span className="text-[10px] font-black text-white leading-none">{player.number}</span>
+        <span className="text-[10px] font-black text-white leading-none">{formatJerseyNumber(player)}</span>
       </div>
 
       <div className="flex flex-col items-center gap-0.5 w-full px-1 py-1">

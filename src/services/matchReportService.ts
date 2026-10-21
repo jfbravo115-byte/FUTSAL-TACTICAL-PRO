@@ -52,6 +52,8 @@ import {
 export type MatchReportPlayerLine = {
   id: string;
   number: number;
+  /** Ausente = conocido, igual que en `Player`. Ver `utils/jerseyNumber`. */
+  jerseyNumberKnown?: boolean;
   name: string;
   role: Role;
   isOnPitch: boolean;
@@ -309,6 +311,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       return {
       id: p.id,
       number: p.number,
+      jerseyNumberKnown: p.jerseyNumberKnown,
       name: p.name,
       role: p.role,
       isOnPitch: p.isOnPitch,

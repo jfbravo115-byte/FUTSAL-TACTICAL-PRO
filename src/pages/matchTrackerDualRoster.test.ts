@@ -457,7 +457,7 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(pistaCodigo).toContain("border-double");
     expect(pistaCodigo).toContain('portero ? "POR" : rival ? "R" : "J"');
     expect(pistaCodigo).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
-    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${formatJerseyNumber(p.number)} ${playerLabel(p, todos)}');
+    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${formatJerseyNumber(p)} ${playerLabel(p, todos)}');
     // Y el lector de pantalla oye también los dos cronómetros.
     expect(pistaCodigo).toContain("total ${tot}, rotación ${rot}");
   });
@@ -473,7 +473,10 @@ describe("16 · los diez dentro de una sola pista", () => {
     const aplicar = cuerpo("const aplicarDorsal = (decision: JerseyDecision)");
     // Solo escribe `players`, y a través de las dos funciones del modelo.
     expect(aplicar).toContain("setPlayerNumber(prev.players, id, decision.number)");
+    expect(aplicar).toContain("markJerseyUnknown(prev.players, id)");
     expect(aplicar).toContain("swapPlayerNumbers(prev.players, id, decision.conId)");
+    // El intercambio cruza al EDITADO con quien lleva el dorsal, en ese orden.
+    expect(aplicar).toMatch(/swapPlayerNumbers\(prev\.players, id, decision\.conId\)/);
     // Nada de eventos, marcador, fase, reloj, formación ni tiempos.
     for (const prohibido of [
       "events:", "handleAction", "applyPhaseOfPlay", "setPhaseOfPlay", "isClockRunning",
@@ -484,6 +487,41 @@ describe("16 · los diez dentro de una sola pista", () => {
     }
     // Y con el partido bloqueado no escribe.
     expect(aplicar).toContain("if (!id || isDataLocked) return;");
+  });
+
+  it("«desconocido» es una marca propia, no el dorsal 0", () => {
+    const modelo = readFileSync(resolve(__dirname, "../utils/jerseyNumber.ts"), "utf-8");
+    expect(modelo).toContain("export function isJerseyUnknown");
+    expect(modelo).toContain("p.jerseyNumberKnown === false");
+    expect(modelo).toContain("jerseyNumberKnown: true");   // asignar lo deja conocido
+    expect(modelo).toContain("jerseyNumberKnown: false");  // y «desconocido» lo quita
+    const tipos = readFileSync(resolve(__dirname, "../types/futsal.ts"), "utf-8");
+    expect(tipos).toContain("jerseyNumberKnown?: boolean;");
+    // Y el rival por defecto nace provisional, porque sus dorsales se inventan.
+    const prematch = readFileSync(resolve(__dirname, "./PreMatch.tsx"), "utf-8");
+    // Los cinco del once rival, cada uno en su línea (el sexto hallazgo es
+    // el comentario que explica por qué).
+    expect((prematch.match(/jerseyNumberKnown: false, number:/g) ?? []).length).toBe(5);
+    // El cuerpo técnico NO lleva marca: su 0 no es un dorsal por conocer.
+    const staff = prematch.slice(prematch.indexOf("auto_coach_rival"));
+    expect(staff.slice(0, 400)).not.toContain("jerseyNumberKnown");
+  });
+
+  it("y TODAS las superficies pintan el dorsal con el mismo formateador", () => {
+    for (const [ruta, veces] of [
+      ["./MatchTracker.tsx", 1],
+      ["../components/DualRosterPanel.tsx", 1],
+      ["../components/SharedPitchView.tsx", 1],
+      ["../components/PlayerActionRadialMenu.tsx", 1],
+      ["../services/matchExportService.ts", 1],
+    ] as const) {
+      const fuente = readFileSync(resolve(__dirname, ruta), "utf-8");
+      expect(fuente, ruta).toContain("formatJerseyNumber");
+      expect((fuente.match(/formatJerseyNumber/g) ?? []).length, ruta).toBeGreaterThanOrEqual(veces);
+    }
+    // Y el informe lleva la marca consigo, para que el PDF y el CSV la vean.
+    const informe = readFileSync(resolve(__dirname, "../services/matchReportService.ts"), "utf-8");
+    expect(informe).toContain("jerseyNumberKnown: p.jerseyNumberKnown");
   });
 
   it("el editor se abre desde la pista, desde el banquillo y desde el radial", () => {

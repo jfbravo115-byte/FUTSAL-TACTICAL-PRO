@@ -156,11 +156,12 @@ export function SharedPitchPlayers({
               ROT {rot}<span data-load-marker className="pl-px">{colorRot.marker}</span>
             </span>
 
-            {/* 4 · El nombre, lo último: con el dorsal delante casi nunca
-                hace falta, y si no cabe se recorta —nunca ensancha la ficha—. */}
-            <span className="text-[7px] font-black uppercase leading-none opacity-80 truncate w-full text-center">
-              {nombreCorto(p.name)}
-            </span>
+            {/* El nombre corto YA NO se dibuja. Con las dos cápsulas dentro,
+                el contenido desbordaba la ficha 6 px —medido en el preview— y
+                recortaba el dorsal por arriba. Entre encoger los cronómetros,
+                agrandar la ficha o quitar el nombre, se quita el nombre: el
+                dorsal identifica, y el nombre completo sigue en el
+                `aria-label` para quien use lector de pantalla. */}
 
             <span className="absolute top-0 right-0">
               <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />

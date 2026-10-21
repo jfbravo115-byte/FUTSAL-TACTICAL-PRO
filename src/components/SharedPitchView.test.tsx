@@ -132,13 +132,23 @@ describe("1 · los diez enseñan dorsal, TOT y ROT sin tocar nada", () => {
     desmontar();
   });
 
-  it("un nombre larguísimo no ensancha la ficha: se recorta", () => {
+  it("un nombre larguísimo no ensancha la ficha ni empuja a los cronómetros", () => {
+    // El nombre no se dibuja: con las dos cápsulas dentro, el contenido
+    // desbordaba la ficha 6 px y recortaba el dorsal por arriba —medido en el
+    // preview—. El dorsal identifica y el nombre entero sigue en el rótulo
+    // hablado, que es donde hace falta.
     const p = jugador({ name: "Rodríguez-Fernández de la Torre y Villalobos" });
     const { host, desmontar } = pintar([p], [sitio("p1", "team", 20)]);
     const ficha = host.querySelector('[data-shared-pitch-player="p1"]') as HTMLElement;
     expect(ficha.style.width).toBe(`${DEFAULT_PITCH_METRICS.cardWidth}px`);
+    expect(ficha.style.height).toBe(`${DEFAULT_PITCH_METRICS.cardHeight}px`);
     expect(ficha.className).toContain("overflow-hidden");
-    expect([...ficha.querySelectorAll("span")].some((s) => s.className.includes("truncate"))).toBe(true);
+    expect(ficha.textContent).not.toContain("Rodríguez");
+    expect(ficha.getAttribute("aria-label")).toContain("Rodríguez-Fernández de la Torre y Villalobos");
+    // Lo que sí se ve: dorsal, rol y los dos cronómetros. Nada más.
+    expect(ficha.textContent).toContain("7");
+    expect(ficha.textContent).toContain("TOT");
+    expect(ficha.textContent).toContain("ROT");
     desmontar();
   });
 

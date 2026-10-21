@@ -246,7 +246,11 @@ function FichaEnPista({
             {sinDorsal && (
               <span
                 data-provisional-label
-                className="absolute bottom-0 left-0 right-0 text-[6px] font-black uppercase tracking-widest text-white/70 leading-none"
+                /* `h-[7px]` con su propio `leading`: sin altura fija, la caja
+                   de línea del tipo se pasaba 1 px del borde inferior y la
+                   ficha declaraba desbordamiento. No cambia nada visible:
+                   la etiqueta es de 6 px y sigue entera. */
+                className="absolute bottom-0 left-0 right-0 h-[7px] overflow-hidden text-[6px] font-black uppercase tracking-widest text-white/70 leading-[7px]"
               >
                 {playerLabel(p, todos).replace(/^(LOCAL|RIVAL) /, "")}
               </span>

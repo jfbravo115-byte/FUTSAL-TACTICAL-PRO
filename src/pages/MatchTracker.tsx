@@ -102,6 +102,7 @@ import { JerseyDecision, JerseyNumberEditor } from "../components/JerseyNumberEd
 import {
   formatJerseyNumber,
   markJerseyUnknown,
+  reassignJerseyNumber,
   setPlayerNumber,
   swapPlayerNumbers,
 } from "../utils/jerseyNumber";
@@ -1662,7 +1663,9 @@ export default function MatchTracker() {
           ? setPlayerNumber(prev.players, id, decision.number)
           : decision.tipo === "desconocido"
             ? markJerseyUnknown(prev.players, id)
-            : swapPlayerNumbers(prev.players, id, decision.conId),
+            : decision.tipo === "reasignar"
+              ? reassignJerseyNumber(prev.players, id, decision.conId)
+              : swapPlayerNumbers(prev.players, id, decision.conId),
     }));
     setEditingJerseyId(null);
   };

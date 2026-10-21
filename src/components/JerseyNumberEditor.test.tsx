@@ -137,15 +137,40 @@ describe("2 · duplicados", () => {
   it("avisa de quién lleva ya ese dorsal y NO deja guardarlo", () => {
     const { q, escribir, desmontar } = abrir(rival[0], rival);
     escribir("7");
-    expect(q("[data-jersey-duplicate]")!.textContent).toContain("ya está asignado a PJ RIVAL 2");
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("pertenece a PJ RIVAL 2");
     expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
     desmontar();
   });
 
-  it("y ofrece INTERCAMBIAR como camino principal", () => {
+  it("si el editado NO tenía dorsal, ofrece REASIGNAR y lo explica", () => {
+    // No es un intercambio: el editado no tiene nada que dar a cambio, así
+    // que el otro se queda sin dorsal conocido. El texto lo dice.
     const { q, escribir, decisiones, desmontar } = abrir(rival[0], rival);
     escribir("7");
-    act(() => { q("[data-jersey-swap]")!.click(); });
+    const aviso = q("[data-jersey-duplicate]")!;
+    expect(aviso.textContent).toContain("El dorsal 7 pertenece a PJ RIVAL 2");
+    expect(aviso.textContent).toContain("quedará con dorsal desconocido");
+    const boton = q("[data-jersey-swap]")!;
+    expect(boton.dataset.jerseyTakeover).toBe("reasignar");
+    expect(boton.textContent).toContain("Reasignar");
+    act(() => { boton.click(); });
+    expect(decisiones).toEqual([{ tipo: "reasignar", conId: "r2" }]);
+    desmontar();
+  });
+
+  it("y si el editado SÍ tenía dorsal, sigue siendo un intercambio", () => {
+    const conDorsal = [
+      jug({ id: "r1", number: 4, jerseyNumberKnown: true, name: "PJ RIVAL 1" }),
+      jug({ id: "r2", number: 7, name: "PJ RIVAL 2" }),
+    ];
+    const { q, escribir, decisiones, desmontar } = abrir(conDorsal[0], conDorsal);
+    escribir("7");
+    const aviso = q("[data-jersey-duplicate]")!;
+    expect(aviso.textContent).toContain("ya está asignado a PJ RIVAL 2");
+    expect(aviso.textContent).not.toContain("desconocido");
+    const boton = q("[data-jersey-swap]")!;
+    expect(boton.dataset.jerseyTakeover).toBe("intercambiar");
+    act(() => { boton.click(); });
     expect(decisiones).toEqual([{ tipo: "intercambiar", conId: "r2" }]);
     desmontar();
   });
@@ -202,7 +227,7 @@ describe("2 · duplicados", () => {
     ];
     const { q, escribir, desmontar } = abrir(equipo[0], equipo);
     escribir("0");
-    expect(q("[data-jersey-duplicate]")!.textContent).toContain("ya está asignado a EL CERO");
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("pertenece a EL CERO");
     expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
     desmontar();
   });

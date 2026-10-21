@@ -475,6 +475,8 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(aplicar).toContain("setPlayerNumber(prev.players, id, decision.number)");
     expect(aplicar).toContain("markJerseyUnknown(prev.players, id)");
     expect(aplicar).toContain("swapPlayerNumbers(prev.players, id, decision.conId)");
+    // Y la reasignación, que NO es un intercambio, tiene su propia rama.
+    expect(aplicar).toContain("reassignJerseyNumber(prev.players, id, decision.conId)");
     // El intercambio cruza al EDITADO con quien lleva el dorsal, en ese orden.
     expect(aplicar).toMatch(/swapPlayerNumbers\(prev\.players, id, decision\.conId\)/);
     // Nada de eventos, marcador, fase, reloj, formación ni tiempos.
@@ -487,6 +489,30 @@ describe("16 · los diez dentro de una sola pista", () => {
     }
     // Y con el partido bloqueado no escribe.
     expect(aplicar).toContain("if (!id || isDataLocked) return;");
+  });
+
+  it("29 · quien no tenía dorsal REASIGNA, no intercambia", () => {
+    const modelo = readFileSync(resolve(__dirname, "../utils/jerseyNumber.ts"), "utf-8");
+    expect(modelo).toContain("export function reassignJerseyNumber");
+    expect(modelo).toContain("export function takeoverKind");
+    // El que cede se queda SIN dorsal conocido, conservando el suyo por debajo.
+    const reasignar = modelo.slice(modelo.indexOf("export function reassignJerseyNumber"));
+    expect(reasignar.slice(0, 700)).toContain("{ ...p, jerseyNumberKnown: false }");
+    expect(reasignar.slice(0, 700)).not.toContain("number: a.number");
+    // Y el editor lo dice con todas las letras.
+    const editor = readFileSync(resolve(__dirname, "../components/JerseyNumberEditor.tsx"), "utf-8");
+    expect(editor).toContain("Reasignar dorsal");
+    expect(editor).toContain("quedará con dorsal desconocido");
+    expect(editor).toContain('data-jersey-takeover={reasigna ? "reasignar" : "intercambiar"}');
+  });
+
+  it("y la etiqueta provisional ya no desborda la ficha", () => {
+    expect(pistaCodigo).toContain('h-[7px] overflow-hidden');
+    expect(pistaCodigo).toContain("leading-[7px]");
+    // Sin tocar el tamaño de la ficha ni el de los cronómetros.
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBe(72);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBe(58);
+    expect(pistaCodigo).toContain("text-[9px] font-mono font-black leading-[11px]");
   });
 
   it("«desconocido» es una marca propia, no el dorsal 0", () => {

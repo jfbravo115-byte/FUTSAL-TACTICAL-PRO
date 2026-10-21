@@ -17,6 +17,8 @@ import {
   parseJerseyInput,
   playerLabel,
   provisionalLabel,
+  reassignJerseyNumber,
+  takeoverKind,
   setPlayerNumber,
   shortJerseyLabel,
   swapPlayerNumbers,
@@ -353,5 +355,132 @@ describe("6 · intercambio r3 ↔ r2 y asignación libre", () => {
       nuevo.filter((p, i) => p.number !== antes[i].number).map((p) => p.id);
     expect(cambiados(cruzado)).toEqual(["r2", "r3"]);
     expect(cambiados(libre)).toEqual(["r3"]);
+  });
+});
+
+// ── 7 · REASIGNAR NO ES INTERCAMBIAR ────────────────────────────────────
+//
+// Un jugador sin dorsal no tiene nada que dar a cambio: su `number` es un
+// relleno que nadie confirmó. Entregárselo al otro le inventaba un dorsal.
+
+describe("7 · desconocido que pide el dorsal de otro", () => {
+  /** A está por conocer, con un relleno interno 10; B lleva el 99 de verdad. */
+  const escenario = () => [
+    jug({
+      id: "r3", number: 10, jerseyNumberKnown: false, name: "PJ RIVAL 2", isOpponent: true,
+      pitchPosition: 2, individualTimeSeconds: 240, rotationTimeSeconds: 40,
+      stats: { ...jug().stats, fouls: 1, yellowCards: 1 },
+    }),
+    jug({
+      id: "r2", number: 99, name: "PJ RIVAL 1", isOpponent: true,
+      pitchPosition: 1, individualTimeSeconds: 600, rotationTimeSeconds: 120,
+      stats: { ...jug().stats, goals: 2 },
+    }),
+    jug({ id: "L1", number: 99, isOpponent: false }),   // el 99 LOCAL no entra
+  ];
+
+  it("la operación que toca es REASIGNAR, no intercambiar", () => {
+    const [a, b] = escenario();
+    expect(takeoverKind(a)).toBe("reasignar");
+    expect(takeoverKind(b)).toBe("intercambiar");
+  });
+
+  it("A recibe el 99 y queda conocido; B se queda SIN dorsal conocido", () => {
+    const antes = escenario();
+    const despues = reassignJerseyNumber(antes, "r3", "r2");
+    const a = despues.find((p) => p.id === "r3")!;
+    const b = despues.find((p) => p.id === "r2")!;
+    expect(a.number).toBe(99);
+    expect(a.jerseyNumberKnown).toBe(true);
+    expect(formatJerseyNumber(a)).toBe("99");
+    expect(b.jerseyNumberKnown).toBe(false);
+    expect(formatJerseyNumber(b)).toBe("?");
+  });
+
+  it("y el relleno 10 de A NUNCA aparece como dorsal de B", () => {
+    const despues = reassignJerseyNumber(escenario(), "r3", "r2");
+    const b = despues.find((p) => p.id === "r2")!;
+    expect(b.number).not.toBe(10);        // conserva el suyo, no el de A
+    expect(formatJerseyNumber(b)).not.toBe("10");
+    expect(isJerseyUnknown(b)).toBe(true);
+    // Y ese número oculto tampoco ocupa dorsal: el 99 lo lleva A.
+    expect(duplicateHolder(despues, "L1", 99)).toBeNull();          // otro equipo
+    const tercero = [...despues, jug({ id: "r9", number: 1, isOpponent: true })];
+    expect(duplicateHolder(tercero, "r9", 99)?.id).toBe("r3");      // A, no B
+  });
+
+  it("no toca id, tiempos, estadísticas, tarjetas, posición ni equipo", () => {
+    const antes = escenario();
+    const despues = reassignJerseyNumber(antes, "r3", "r2");
+    for (const id of ["r3", "r2", "L1"]) {
+      const x = antes.find((p) => p.id === id)!;
+      const y = despues.find((p) => p.id === id)!;
+      expect(y.id).toBe(x.id);
+      expect(y.individualTimeSeconds).toBe(x.individualTimeSeconds);
+      expect(y.rotationTimeSeconds).toBe(x.rotationTimeSeconds);
+      expect(y.stats).toEqual(x.stats);
+      expect(y.pitchPosition).toBe(x.pitchPosition);
+      expect(y.isOnPitch).toBe(x.isOnPitch);
+      expect(y.isOpponent).toBe(x.isOpponent);
+      expect(y.role).toBe(x.role);
+      // Salvo número y marca, cada jugador es el mismo.
+      expect({ ...y, number: x.number, jerseyNumberKnown: x.jerseyNumberKnown }).toEqual(x);
+    }
+    expect(despues).toHaveLength(antes.length);
+  });
+
+  it("el tercero no se entera, y el 99 del otro equipo sigue intacto", () => {
+    const antes = escenario();
+    const despues = reassignJerseyNumber(antes, "r3", "r2");
+    expect(despues.find((p) => p.id === "L1")).toEqual(antes.find((p) => p.id === "L1"));
+  });
+
+  it("conocido ↔ conocido conserva el intercambio de siempre", () => {
+    const antes = [
+      jug({ id: "r3", number: 7, isOpponent: true }),
+      jug({ id: "r2", number: 99, isOpponent: true }),
+    ];
+    const despues = swapPlayerNumbers(antes, "r3", "r2");
+    expect(despues.find((p) => p.id === "r3")!.number).toBe(99);
+    expect(despues.find((p) => p.id === "r2")!.number).toBe(7);
+    expect(despues.every((p) => p.jerseyNumberKnown === true)).toBe(true);
+  });
+
+  it("el número interno de un desconocido NO cuenta como ocupado", () => {
+    // Un conocido pide el 10, que solo coincide con el relleno de A:
+    // dorsal libre, sin aviso y sin reasignación.
+    const ps = escenario();
+    expect(duplicateHolder(ps, "r2", 10)).toBeNull();
+    const despues = setPlayerNumber(ps, "r2", 10);
+    expect(despues.find((p) => p.id === "r2")!.number).toBe(10);
+    expect(despues.find((p) => p.id === "r3")).toEqual(ps.find((p) => p.id === "r3"));
+  });
+
+  it("un desconocido que pide un dorsal LIBRE solo se cambia a sí mismo", () => {
+    const antes = escenario();
+    expect(duplicateHolder(antes, "r3", 4)).toBeNull();
+    const despues = setPlayerNumber(antes, "r3", 4);
+    expect(despues.find((p) => p.id === "r3")!.number).toBe(4);
+    expect(despues.find((p) => p.id === "r3")!.jerseyNumberKnown).toBe(true);
+    expect(despues.find((p) => p.id === "r2")).toEqual(antes.find((p) => p.id === "r2"));
+    expect(despues.find((p) => p.id === "L1")).toEqual(antes.find((p) => p.id === "L1"));
+  });
+
+  it("dos desconocidos siguen siendo jugadores distintos tras la reasignación", () => {
+    const ps = [
+      ...escenario(),
+      jug({ id: "r4", number: 8, jerseyNumberKnown: false, isOpponent: true }),
+    ];
+    const despues = reassignJerseyNumber(ps, "r3", "r2");
+    const sinDorsal = despues.filter((p) => isJerseyUnknown(p));
+    expect(sinDorsal.map((p) => p.id).sort()).toEqual(["r2", "r4"]);
+    const etiquetas = sinDorsal.map((p) => provisionalLabel(p, despues));
+    expect(new Set(etiquetas).size).toBe(2);
+  });
+
+  it("reasignar con uno mismo, o con alguien que no existe, no hace nada", () => {
+    const antes = escenario();
+    expect(reassignJerseyNumber(antes, "r3", "r3")).toBe(antes);
+    expect(reassignJerseyNumber(antes, "r3", "NOPE")).toBe(antes);
   });
 });

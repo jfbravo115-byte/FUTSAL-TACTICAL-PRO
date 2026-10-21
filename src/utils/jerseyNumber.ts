@@ -193,6 +193,43 @@ export function markJerseyUnknown(players: Player[], playerId: string): Player[]
   );
 }
 
+/**
+ * ¿Qué operación toca cuando el dorsal pedido ya lo lleva otro?
+ *
+ * No siempre es un intercambio. Si quien edita TODAVÍA NO TIENE DORSAL, no
+ * hay nada que dar a cambio: su `number` es un relleno que nadie ha
+ * confirmado, y entregárselo al otro inventaría un dorsal.
+ */
+export type JerseyTakeover = "intercambiar" | "reasignar";
+
+export function takeoverKind(editado: Player | undefined | null): JerseyTakeover {
+  return isJerseyUnknown(editado) ? "reasignar" : "intercambiar";
+}
+
+/**
+ * REASIGNAR · el que no tenía dorsal se queda con el de otro.
+ *
+ * A toma el número de B y pasa a conocido. B NO recibe nada a cambio: se
+ * queda sin dorsal conocido y se muestra como `?`, conservando por debajo su
+ * propio número —no el relleno de A— por si hubo un error y hay que
+ * devolvérselo. Ese número ya no se enseña ni ocupa dorsal: para eso manda
+ * `jerseyNumberKnown`.
+ *
+ * No es simétrico, y por eso no se llama intercambio.
+ */
+export function reassignJerseyNumber(players: Player[], fromId: string, holderId: string): Player[] {
+  const a = players.find((p) => p.id === fromId);
+  const b = players.find((p) => p.id === holderId);
+  if (!a || !b || a.id === b.id) return players;
+  return players.map((p) =>
+    p.id === fromId
+      ? { ...p, number: b.number, jerseyNumberKnown: true }
+      : p.id === holderId
+        ? { ...p, jerseyNumberKnown: false }   // conserva SU número, oculto
+        : p,
+  );
+}
+
 export function swapPlayerNumbers(players: Player[], aId: string, bId: string): Player[] {
   const a = players.find((p) => p.id === aId);
   const b = players.find((p) => p.id === bId);

@@ -97,7 +97,7 @@ export function SharedPitchPlayers({
               height: metrics.cardHeight,
             }}
             className={`absolute -translate-x-1/2 -translate-y-1/2 z-[40] overflow-hidden
-              flex flex-col items-center justify-center gap-px px-1 transition-all active:scale-95
+              flex flex-col items-center justify-center gap-px px-0.5 transition-all active:scale-95
               disabled:opacity-40 rounded-lg border-2 ${
                 rival
                   ? "border-double border-red-300/80 bg-red-900/85"
@@ -138,7 +138,10 @@ export function SharedPitchPlayers({
                 backgroundColor: colorTot.background,
                 borderColor: colorTot.border,
               }}
-              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center"
+              /* `whitespace-nowrap`: «TOT 01:54↑» cabía por los pelos y se
+                 partía en dos líneas, lo que subía la cápsula a 24 px y
+                 desbordaba la ficha recortando el dorsal —medido—. */
+              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center whitespace-nowrap"
             >
               TOT {tot}<span data-load-marker className="pl-px">{colorTot.marker}</span>
             </span>
@@ -151,7 +154,10 @@ export function SharedPitchPlayers({
                 backgroundColor: colorRot.background,
                 borderColor: colorRot.border,
               }}
-              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center"
+              /* `whitespace-nowrap`: «TOT 01:54↑» cabía por los pelos y se
+                 partía en dos líneas, lo que subía la cápsula a 24 px y
+                 desbordaba la ficha recortando el dorsal —medido—. */
+              className="w-full rounded border px-0.5 text-[9px] font-mono font-black leading-[11px] tabular-nums text-center whitespace-nowrap"
             >
               ROT {rot}<span data-load-marker className="pl-px">{colorRot.marker}</span>
             </span>

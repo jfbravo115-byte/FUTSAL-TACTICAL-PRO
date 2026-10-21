@@ -537,6 +537,18 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect((codigo.match(/setInterval\(/g) ?? []).length).toBe(1);
   });
 
+  it("el cronómetro no se parte en dos líneas: la ficha no desborda", () => {
+    // Medido en el preview: sin esto, «TOT 01:54↑» se partía, la cápsula
+    // subía a 24 px y el contenido se salía 6 px recortando el dorsal.
+    expect((pistaCodigo.match(/whitespace-nowrap/g) ?? []).length).toBe(2);
+    expect(pistaCodigo).toContain("leading-[11px]");
+    // El nombre ya no se dibuja en la ficha de la pista; en el banquillo sí,
+    // que es donde hay sitio y hace falta para elegir al que entra.
+    const ficha = pistaCodigo.slice(0, pistaCodigo.indexOf("SharedPitchBenches"));
+    expect(ficha).not.toContain("nombreCorto(p.name)");
+    expect(ficha).toContain("aria-label");
+  });
+
   it("y las dos escalas no se cruzan ni mezclan equipos", () => {
     const escala = readFileSync(resolve(__dirname, "../utils/timeLoadColor.ts"), "utf-8");
     // TOT con los totales, ROT con las rotaciones. Nunca al revés.

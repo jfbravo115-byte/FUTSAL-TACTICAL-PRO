@@ -20,6 +20,7 @@ import {
   isJerseyUnknown,
   parseJerseyInput,
   playerLabel,
+  takeoverKind,
 } from "../utils/jerseyNumber";
 
 export type JerseyDecision =
@@ -27,7 +28,10 @@ export type JerseyDecision =
   | { tipo: "guardar"; number: number }
   /** Volver a «todavía no lo sé», sin tocar nada más del jugador. */
   | { tipo: "desconocido" }
-  | { tipo: "intercambiar"; conId: string };
+  /** Los dos tenían dorsal: se cruzan. */
+  | { tipo: "intercambiar"; conId: string }
+  /** El editado no tenía: toma el del otro, que se queda sin dorsal. */
+  | { tipo: "reasignar"; conId: string };
 
 export function JerseyNumberEditor({
   player,
@@ -55,6 +59,7 @@ export function JerseyNumberEditor({
   const choca =
     propuesto !== null && !esElSuyo ? duplicateHolder(players, player.id, propuesto) : null;
   const equipo = player.isOpponent ? opponentName || "RIVAL" : teamName || "MI EQUIPO";
+  const reasigna = takeoverKind(player) === "reasignar";
 
   const guardar = () => {
     if (!parsed.ok || propuesto === null) return;
@@ -117,20 +122,30 @@ export function JerseyNumberEditor({
           </p>
         )}
 
-        {/* Un duplicado silencioso es un partido mal apuntado: se avisa y se
-            ofrece el intercambio, que es lo que suele haber pasado de verdad
-            —dos dorsales cruzados—. */}
+        {/* Un duplicado silencioso es un partido mal apuntado. Lo que se
+            ofrece depende de quién edita:
+
+            · si ya tenía dorsal, los dos se cruzan —suele ser eso: dos
+              números apuntados al revés—;
+            · si NO tenía, no hay nada que dar a cambio, así que el otro se
+              queda sin dorsal conocido. No es simétrico y no se llama
+              intercambio. */}
         {choca && (
           <div data-jersey-duplicate className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-2 flex flex-col gap-2">
             <p className="text-[9px] font-black uppercase text-amber-300 leading-tight">
-              El dorsal {propuesto} ya está asignado a {playerLabel(choca, players)}
+              {reasigna
+                ? `El dorsal ${propuesto} pertenece a ${playerLabel(choca, players)}. Al reasignarlo, ese jugador quedará con dorsal desconocido.`
+                : `El dorsal ${propuesto} ya está asignado a ${playerLabel(choca, players)}`}
             </p>
             <button
               data-jersey-swap
-              onClick={() => onConfirm({ tipo: "intercambiar", conId: choca.id })}
+              data-jersey-takeover={reasigna ? "reasignar" : "intercambiar"}
+              onClick={() =>
+                onConfirm({ tipo: reasigna ? "reasignar" : "intercambiar", conId: choca.id })
+              }
               className="w-full py-2 rounded-xl bg-amber-500 text-black text-[10px] font-black uppercase tracking-widest"
             >
-              Intercambiar dorsales
+              {reasigna ? "Reasignar dorsal" : "Intercambiar dorsales"}
             </button>
           </div>
         )}

@@ -457,7 +457,7 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(pistaCodigo).toContain("border-double");
     expect(pistaCodigo).toContain('portero ? "POR" : rival ? "R" : "J"');
     expect(pistaCodigo).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
-    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${p.number} ${p.name}');
+    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${formatJerseyNumber(p.number)} ${playerLabel(p, todos)}');
     // Y el lector de pantalla oye también los dos cronómetros.
     expect(pistaCodigo).toContain("total ${tot}, rotación ${rot}");
   });
@@ -467,6 +467,49 @@ describe("16 · los diez dentro de una sola pista", () => {
     expect(DEFAULT_PITCH_METRICS.cardHeight).toBeGreaterThanOrEqual(56);
     expect(pistaCodigo).toContain('activo ? "ring-4 ring-white z-[60] scale-105" : ""');
     expect(pistaCodigo).toContain("aria-pressed={activo}");
+  });
+
+  it("28 · el dorsal se edita sin tocar nada más del partido", () => {
+    const aplicar = cuerpo("const aplicarDorsal = (decision: JerseyDecision)");
+    // Solo escribe `players`, y a través de las dos funciones del modelo.
+    expect(aplicar).toContain("setPlayerNumber(prev.players, id, decision.number)");
+    expect(aplicar).toContain("swapPlayerNumbers(prev.players, id, decision.conId)");
+    // Nada de eventos, marcador, fase, reloj, formación ni tiempos.
+    for (const prohibido of [
+      "events:", "handleAction", "applyPhaseOfPlay", "setPhaseOfPlay", "isClockRunning",
+      "matchClock", "individualTimeSeconds", "rotationTimeSeconds", "pitchPosition",
+      "setGameState", "setRivalGameState", "savePartido", "syncTacticalPro",
+    ]) {
+      expect(aplicar, prohibido).not.toContain(prohibido);
+    }
+    // Y con el partido bloqueado no escribe.
+    expect(aplicar).toContain("if (!id || isDataLocked) return;");
+  });
+
+  it("el editor se abre desde la pista, desde el banquillo y desde el radial", () => {
+    expect(codigo).toContain("onEditNumber={(id) => setEditingJerseyId(id)}");
+    expect((codigo.match(/onEditNumber=\{\(id\) => setEditingJerseyId\(id\)\}/g) ?? []).length).toBe(2);
+    expect(codigo).toContain("<JerseyNumberEditor");
+    // El camino accesible del radial cierra el anillo antes de abrir el editor.
+    const salida = trozo("onEditNumber={() => {", "}}");
+    expect(salida).toContain("setActiveActionPlayerId(null);");
+    expect(salida).toContain("setEditingJerseyId(id);");
+    const radial = readFileSync(resolve(__dirname, "../components/PlayerActionRadialMenu.tsx"), "utf-8");
+    expect(radial).toContain("data-radial-edit-number");
+    expect(radial).toContain("Editar dorsal");
+  });
+
+  it("y el gesto no es una mezcla frágil de click y doble click", () => {
+    const gesto = readFileSync(resolve(__dirname, "../utils/longPress.ts"), "utf-8");
+    expect(gesto).toContain("export const LONG_PRESS_MS = 1200;");
+    expect(gesto).toContain("shouldSwallowClick");
+    expect(pistaCodigo).toContain("useLongPress({");
+    expect(pistaCodigo).not.toContain("onDoubleClick");
+    const hook = readFileSync(resolve(__dirname, "../hooks/useLongPress.ts"), "utf-8");
+    for (const evento of ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu"]) {
+      expect(hook, evento).toContain(evento);
+    }
+    expect(hook).toContain("m.dispose()");
   });
 
   it("26 · TOT y ROT salen del MISMO reloj que la vista focal", () => {

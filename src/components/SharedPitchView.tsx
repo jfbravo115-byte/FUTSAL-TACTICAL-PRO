@@ -37,6 +37,8 @@ import {
   timeLoadAriaLabel,
   timeLoadColor,
 } from "../utils/timeLoadColor";
+import { formatJerseyNumber, isUnknownNumber, playerLabel } from "../utils/jerseyNumber";
+import { useLongPress } from "../hooks/useLongPress";
 import { nombreCorto } from "./DualRosterPanel";
 
 /** Lado en el que se dibuja cada portería, para rotularlas. */
@@ -47,6 +49,7 @@ export function SharedPitchPlayers({
   players,
   selectedId,
   onSelect,
+  onEditNumber,
   metrics = DEFAULT_PITCH_METRICS,
   disabled = false,
 }: {
@@ -55,6 +58,8 @@ export function SharedPitchPlayers({
   players: Record<string, Player>;
   selectedId?: string | null;
   onSelect: (id: string) => void;
+  /** Pulsación mantenida sobre una ficha: abrir el editor de dorsal. */
+  onEditNumber?: (id: string) => void;
   /** Las mismas medidas con las que se ha calculado la colocación. */
   metrics?: PitchMetrics;
   disabled?: boolean;
@@ -62,34 +67,86 @@ export function SharedPitchPlayers({
   // Las dos escalas de los dos equipos, de una vez por render y a partir de
   // los MISMOS datos que pintan los cronómetros: ni un temporizador más.
   const escalas = bothTeamsTimeScales(Object.values(players));
+  const todos = Object.values(players);
 
   return (
     <>
       {placements.map((pos) => {
         const p = players[pos.id];
         if (!p) return null;
-        const rival = pos.side === "opponent";
-        const activo = selectedId === p.id;
-        const portero = p.role === Role.GOALKEEPER;
-        // Los MISMOS segundos que lleva el tick del partido y el MISMO
-        // formato que la ficha de la vista focal. Aquí no se cuenta nada.
-        const { tot, rot } = playerClocks(p);
-        // Dos escalas INDEPENDIENTES: el que más ha jugado puede acabar de
-        // entrar, y es justo ese cruce el que decide una rotación.
-        const suEquipo = rival ? escalas.opponent : escalas.team;
-        const colorTot = timeLoadColor(p.individualTimeSeconds, suEquipo.tot);
-        const colorRot = timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot);
-
         return (
-          <button
+          <FichaEnPista
             key={p.id}
+            player={p}
+            todos={todos}
+            pos={pos}
+            escalas={escalas}
+            metrics={metrics}
+            activo={selectedId === p.id}
+            onSelect={onSelect}
+            onEditNumber={onEditNumber}
+            disabled={disabled}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * UNA ficha. Es un componente propio porque cada una necesita su propia
+ * máquina de pulsación: toque corto para registrar, pulsación mantenida para
+ * corregir el dorsal.
+ */
+function FichaEnPista({
+  player: p,
+  todos,
+  pos,
+  escalas,
+  metrics,
+  activo,
+  onSelect,
+  onEditNumber,
+  disabled,
+}: {
+  player: Player;
+  todos: Player[];
+  pos: SharedPitchPlacement;
+  escalas: ReturnType<typeof bothTeamsTimeScales>;
+  metrics: PitchMetrics;
+  activo: boolean;
+  onSelect: (id: string) => void;
+  onEditNumber?: (id: string) => void;
+  disabled: boolean;
+}) {
+  const { pending, handlers } = useLongPress({
+    onTap: () => onSelect(p.id),
+    onLongPress: onEditNumber ? () => onEditNumber(p.id) : undefined,
+    disabled,
+  });
+
+  const rival = pos.side === "opponent";
+  const portero = p.role === Role.GOALKEEPER;
+  // Los MISMOS segundos que lleva el tick del partido y el MISMO formato que
+  // la ficha de la vista focal. Aquí no se cuenta nada.
+  const { tot, rot } = playerClocks(p);
+  // Dos escalas INDEPENDIENTES: el que más ha jugado puede acabar de entrar,
+  // y es justo ese cruce el que decide una rotación.
+  const suEquipo = rival ? escalas.opponent : escalas.team;
+  const colorTot = timeLoadColor(p.individualTimeSeconds, suEquipo.tot);
+  const colorRot = timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot);
+  const sinDorsal = isUnknownNumber(p.number);
+
+  return (
+          <button
             data-shared-pitch-player={p.id}
             data-shared-pitch-side={rival ? "opponent" : "team"}
             data-shared-pitch-nudged={pos.nudged ? "1" : "0"}
+            data-long-press={pending ? "1" : "0"}
             aria-pressed={activo}
-            aria-label={`${rival ? "Rival" : "Local"} ${p.number} ${p.name}, total ${tot}, rotación ${rot}`}
+            aria-label={`${rival ? "Rival" : "Local"} ${formatJerseyNumber(p.number)} ${playerLabel(p, todos)}, total ${tot}, rotación ${rot}. Mantén pulsado para cambiar el dorsal`}
             disabled={disabled}
-            onClick={() => onSelect(p.id)}
+            {...handlers}
             style={{
               left: `${pos.left}%`,
               top: `${pos.top}%`,
@@ -106,12 +163,23 @@ export function SharedPitchPlayers({
           >
             <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
 
+            {/* Progreso de la pulsación mantenida: un borde que se cierra en
+                los 1.200 ms. No mueve la ficha ni tapa los cronómetros, y
+                desaparece en cuanto se suelta o se arrastra. */}
+            {pending && (
+              <span
+                data-long-press-ring
+                aria-hidden
+                className="absolute inset-0 rounded-lg ring-2 ring-white/80 animate-pulse pointer-events-none"
+              />
+            )}
+
             {/* 1 · DORSAL, que es lo que se busca primero. Con la marca del
                 equipo al lado: a pleno sol el color es lo primero que se
                 pierde, y confundirse aquí es apuntarle el gol al otro. */}
             <span className="flex items-baseline gap-1 leading-none">
               <span className="text-[15px] font-black text-white leading-none tabular-nums">
-                {p.number}
+                {formatJerseyNumber(p.number)}
               </span>
               <span
                 className={`text-[7px] font-black uppercase leading-none ${
@@ -172,10 +240,18 @@ export function SharedPitchPlayers({
             <span className="absolute top-0 right-0">
               <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
             </span>
+
+            {/* Quien todavía no tiene dorsal se distingue por su etiqueta
+                provisional, estable y distinta para cada uno. */}
+            {sinDorsal && (
+              <span
+                data-provisional-label
+                className="absolute bottom-0 left-0 right-0 text-[6px] font-black uppercase tracking-widest text-white/70 leading-none"
+              >
+                {playerLabel(p, todos).replace(/^(LOCAL|RIVAL) /, "")}
+              </span>
+            )}
           </button>
-        );
-      })}
-    </>
   );
 }
 
@@ -193,6 +269,7 @@ export function SharedPitchBenches({
   open,
   onToggle,
   onSelect,
+  onEditNumber,
   saliente,
   disabled = false,
 }: {
@@ -203,6 +280,8 @@ export function SharedPitchBenches({
   open: "team" | "opponent" | null;
   onToggle: (lado: "team" | "opponent") => void;
   onSelect: (id: string) => void;
+  /** Pulsación mantenida sobre un suplente: editar su dorsal. */
+  onEditNumber?: (id: string) => void;
   /** Quién está seleccionado en la pista, que es a quien se sustituye. */
   saliente: { id: string; lado: "team" | "opponent"; nombre: string; dorsal: number } | null;
   disabled?: boolean;
@@ -249,25 +328,17 @@ export function SharedPitchBenches({
             className="w-full text-[7px] font-black uppercase tracking-widest text-slate-500 pb-0.5"
           >
             {!puedeCambiar
-              ? "Toca primero en la pista al jugador que SALE"
+              ? "Toca primero en la pista al jugador que SALE · mantén pulsado para cambiar dorsal"
               : `Entra por #${saliente!.dorsal} ${nombreCorto(saliente!.nombre)}`}
           </div>
           {abierto.banquillo.map((p) => (
-            <button
+            <FichaDeBanquillo
               key={p.id}
-              data-shared-bench-player={p.id}
+              player={p}
+              onSelect={onSelect}
+              onEditNumber={onEditNumber}
               disabled={disabled || !puedeCambiar}
-              onClick={() => onSelect(p.id)}
-              className="relative overflow-hidden min-h-[44px] rounded-lg border border-white/10 bg-black/30 px-2 py-1 flex items-center gap-1.5 hover:bg-white/10 disabled:opacity-40"
-            >
-              <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
-              <span className="shrink-0 w-6 h-6 rounded bg-black/50 flex items-center justify-center text-[10px] font-black">
-                {p.number}
-              </span>
-              <span className="text-[8px] font-black uppercase truncate max-w-[70px]">
-                {nombreCorto(p.name)}
-              </span>
-            </button>
+            />
           ))}
           {abierto.banquillo.length === 0 && (
             <div className="text-[8px] text-slate-500 italic px-1 py-2">Sin suplentes</div>
@@ -275,6 +346,56 @@ export function SharedPitchBenches({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Un suplente del banquillo. Mismo gesto que en la pista: toque corto para
+ * que entre, pulsación mantenida para corregirle el dorsal —que es
+ * precisamente donde más falta hace, porque al rival se le reconocen los
+ * números según van saliendo—.
+ */
+function FichaDeBanquillo({
+  player: p,
+  onSelect,
+  onEditNumber,
+  disabled,
+}: {
+  player: Player;
+  onSelect: (id: string) => void;
+  onEditNumber?: (id: string) => void;
+  disabled: boolean;
+}) {
+  const { pending, handlers } = useLongPress({
+    onTap: () => onSelect(p.id),
+    onLongPress: onEditNumber ? () => onEditNumber(p.id) : undefined,
+    // El editor funciona aunque el cambio no esté permitido todavía: no hace
+    // falta elegir a quién sustituye para poder corregirle el número.
+    disabled: false,
+  });
+  return (
+    <button
+      data-shared-bench-player={p.id}
+      data-long-press={pending ? "1" : "0"}
+      disabled={disabled && !onEditNumber}
+      aria-label={`${formatJerseyNumber(p.number)} ${p.name}. Mantén pulsado para cambiar el dorsal`}
+      {...handlers}
+      onClick={(e) => {
+        handlers.onClick(e);
+        if (disabled) e.preventDefault();
+      }}
+      className={`relative overflow-hidden min-h-[44px] rounded-lg border px-2 py-1 flex items-center gap-1.5 hover:bg-white/10 ${
+        disabled ? "opacity-40 border-white/10 bg-black/30" : "border-white/10 bg-black/30"
+      } ${pending ? "ring-2 ring-white/80" : ""}`}
+    >
+      <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
+      <span className="shrink-0 w-6 h-6 rounded bg-black/50 flex items-center justify-center text-[10px] font-black">
+        {formatJerseyNumber(p.number)}
+      </span>
+      <span className="text-[8px] font-black uppercase truncate max-w-[70px]">
+        {nombreCorto(p.name)}
+      </span>
+    </button>
   );
 }
 

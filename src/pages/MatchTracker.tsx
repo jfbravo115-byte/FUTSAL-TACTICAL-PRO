@@ -98,6 +98,8 @@ import {
 } from "../utils/captureMode";
 import { DualRosterPanel } from "../components/DualRosterPanel";
 import { SharedPitchBenches, SharedPitchPlayers } from "../components/SharedPitchView";
+import { JerseyDecision, JerseyNumberEditor } from "../components/JerseyNumberEditor";
+import { setPlayerNumber, swapPlayerNumbers } from "../utils/jerseyNumber";
 import {
   DEFAULT_PITCH_METRICS,
   TeamSide,
@@ -1633,6 +1635,30 @@ export default function MatchTracker() {
   }, [activeTab]);
 
 
+
+  /**
+   * EDITOR RÁPIDO DE DORSAL.
+   *
+   * Se abre manteniendo pulsada una ficha —de pista o de banquillo— o desde
+   * el menú radial. Solo guarda el `number`: ni crea eventos, ni toca el
+   * reloj, ni la fase, ni el marcador, ni la formación, ni los tiempos. La
+   * identidad del jugador es su `id`, que no se toca jamás, así que todo lo
+   * registrado antes del cambio sigue apuntando al mismo jugador.
+   */
+  const [editingJerseyId, setEditingJerseyId] = useState<string | null>(null);
+
+  const aplicarDorsal = (decision: JerseyDecision) => {
+    const id = editingJerseyId;
+    if (!id || isDataLocked) return;
+    setMatchData((prev) => ({
+      ...prev,
+      players:
+        decision.tipo === "guardar"
+          ? setPlayerNumber(prev.players, id, decision.number)
+          : swapPlayerNumbers(prev.players, id, decision.conId),
+    }));
+    setEditingJerseyId(null);
+  };
 
   /** Solo UNO de los dos banquillos abierto a la vez: no caben los dos. */
   const [openBench, setOpenBench] = useState<"team" | "opponent" | null>(null);
@@ -6934,6 +6960,7 @@ export default function MatchTracker() {
                       players={sharedPlayers}
                       selectedId={selectedActor?.id ?? null}
                       onSelect={tocarFichaEnPista}
+                      onEditNumber={(id) => setEditingJerseyId(id)}
                       // Las MISMAS medidas con las que se ha colocado: si la
                       // ficha dibujada fuera mayor que la calculada, la
                       // separación estaría hecha para una ficha que no existe.
@@ -7050,6 +7077,7 @@ export default function MatchTracker() {
                     open={openBench}
                     onToggle={(lado) => setOpenBench((b) => (b === lado ? null : lado))}
                     onSelect={sustituirDesdeBanquillo}
+                    onEditNumber={(id) => setEditingJerseyId(id)}
                     saliente={
                       selectedActor
                         ? {
@@ -8534,9 +8562,29 @@ export default function MatchTracker() {
             onSwap={(id) => executeSwap(id, true)}
             onClose={() => setActiveActionPlayerId(null)}
             shotCount={tallyOf(shotTallies, activeActionPlayerId).shots}
+            onEditNumber={() => {
+              const id = activeActionPlayerId;
+              setActiveActionPlayerId(null);
+              setEditingJerseyId(id);
+            }}
           />
         )}
       </AnimatePresence>
+
+      {editingJerseyId && (() => {
+        const jugador = matchData.players.find((p) => p.id === editingJerseyId);
+        if (!jugador) return null;
+        return (
+          <JerseyNumberEditor
+            player={jugador}
+            players={matchData.players}
+            teamName={matchData.teamName}
+            opponentName={matchData.opponentName}
+            onConfirm={aplicarDorsal}
+            onClose={() => setEditingJerseyId(null)}
+          />
+        );
+      })()}
 
       <AnimatePresence>
         {deleteConfirmEvent && (

@@ -11,6 +11,7 @@ import { newSetPieceRestartMetadata } from '../utils/setPieceModel';
 const SAVE_TYPE_PICKER = 'SAVE_TYPE_PICKER' as const;
 import { FutsalPitch } from './field/FutsalPitch';
 import { formatGoalZoneLabel } from '../utils/goalZones';
+import { formatJerseyNumber } from '../utils/jerseyNumber';
 
 /**
  * Geometría del anillo. Pura y exportada para poder comprobarla por test: con
@@ -68,9 +69,15 @@ interface PlayerActionRadialMenuProps {
    * caso el botón va sin contador, que es preferible a enseñar uno falso.
    */
   shotCount?: number;
+  /**
+   * Camino accesible al editor de dorsal, para quien no descubra la
+   * pulsación mantenida sobre la ficha. Va FUERA del anillo: añadir un botón
+   * más al anillo volvería a solapar los que Fase 4 dejó medidos.
+   */
+  onEditNumber?: () => void;
 }
 
-export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shotCount }: PlayerActionRadialMenuProps) => {
+export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shotCount, onEditNumber }: PlayerActionRadialMenuProps) => {
   const isGoalkeeper = player.role === Role.GOALKEEPER;
   const [selectingZone, setSelectingZone] = React.useState<boolean>(false);
   const [selectionStep, setSelectionStep] = React.useState<'shot' | 'goal'>('shot');
@@ -397,9 +404,24 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shot
           transition={{ duration: 0.1 }}
           className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[250]"
         >
+          {/* Editar dorsal: fuera del anillo, para no tocar su geometría. */}
+          {onEditNumber && (
+            <button
+              data-radial-edit-number
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditNumber();
+              }}
+              className="absolute left-1/2 -translate-x-1/2 translate-y-[150px] whitespace-nowrap px-3 py-1.5 rounded-full
+                         border border-white/20 bg-white/10 text-[9px] font-black uppercase tracking-widest text-slate-200 z-20"
+            >
+              Editar dorsal
+            </button>
+          )}
+
           {/* Center info */}
           <div className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-[#0E1015] border-2 border-white/20 flex flex-col items-center justify-center z-10 shadow-xl">
-            <span className="text-xl font-black text-white">#{player.number}</span>
+            <span className="text-xl font-black text-white">#{formatJerseyNumber(player.number)}</span>
             {isGoalkeeper ? (
               <span className="text-[7px] text-amber-400 font-black uppercase">{savePercentage}% par.</span>
             ) : (

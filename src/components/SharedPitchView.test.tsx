@@ -7,13 +7,34 @@
  * los diez los enseñen SIEMPRE —sin tocar nada, sin desplegar nada— y que los
  * segundos sean los del partido, no una cuenta nueva.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { Player, Role } from "../types/futsal";
 import { SharedPitchPlayers } from "./SharedPitchView";
 import { DEFAULT_PITCH_METRICS, SharedPitchPlacement } from "../utils/sharedPitch";
 import { formatPlayerTime } from "../utils/playerClock";
+import { LONG_PRESS_MS } from "../utils/longPress";
+
+/**
+ * Un gesto de verdad: `pointerdown` y `pointerup`, como haría un dedo, un
+ * ratón o un lápiz. jsdom no trae `PointerEvent`, así que se usa un
+ * `MouseEvent` con el tipo de puntero —React escucha el nombre del evento—.
+ */
+class PunteroFalso extends MouseEvent {
+  pointerId = 1;
+  pointerType = "touch";
+  isPrimary = true;
+}
+function puntero(el: Element, tipo: string, x = 10, y = 10) {
+  act(() => {
+    el.dispatchEvent(new PunteroFalso(tipo, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  });
+}
+const toque = (el: Element) => {
+  puntero(el, "pointerdown");
+  puntero(el, "pointerup");
+};
 
 const jugador = (o: Partial<Player> = {}): Player => ({
   id: "p1",
@@ -116,7 +137,7 @@ describe("1 · los diez enseñan dorsal, TOT y ROT sin tocar nada", () => {
     const ficha = host.querySelector('[data-shared-pitch-player="p1"]') as HTMLButtonElement;
     expect(ficha.tagName).toBe("BUTTON");
     expect(ficha.querySelectorAll("button, a, input")).toHaveLength(0);
-    act(() => { ficha.click(); });
+    toque(ficha);
     expect(tocados).toEqual(["p1"]);   // primer toque, una sola vez
     desmontar();
   });
@@ -336,5 +357,133 @@ describe("3 · TOT y ROT se colorean por separado y por equipo", () => {
   it("y la ficha sigue sin tener temporizador propio", () => {
     const fuente = SharedPitchPlayers.toString();
     expect(fuente).not.toMatch(/setInterval|setTimeout|Date\.now/);
+  });
+});
+
+// ── 4 · PULSACIÓN MANTENIDA SOBRE LA FICHA ──────────────────────────────
+
+describe("4 · toque corto registra, pulsación mantenida edita el dorsal", () => {
+  const conGesto = (opts: { onSelect?: (id: string) => void; onEdit?: (id: string) => void } = {}) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const p = jugador({ id: "p1", number: 0 });
+    act(() => {
+      root.render(
+        <SharedPitchPlayers
+          placements={[sitio("p1", "team", 20)]}
+          players={{ p1: p }}
+          onSelect={opts.onSelect ?? (() => {})}
+          onEditNumber={opts.onEdit}
+        />,
+      );
+    });
+    return {
+      ficha: host.querySelector('[data-shared-pitch-player="p1"]') as HTMLElement,
+      host,
+      desmontar: () => act(() => root.unmount()),
+    };
+  };
+
+  it("toque corto: selecciona y NO abre el editor", () => {
+    vi.useFakeTimers();
+    const tocados: string[] = [];
+    const editados: string[] = [];
+    const { ficha, desmontar } = conGesto({ onSelect: (id) => { tocados.push(id); }, onEdit: (id) => { editados.push(id); } });
+    puntero(ficha, "pointerdown");
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS - 1); });   // 1.199 ms
+    puntero(ficha, "pointerup");
+    expect(tocados).toEqual(["p1"]);
+    expect(editados).toEqual([]);
+    desmontar();
+    vi.useRealTimers();
+  });
+
+  it("1.200 ms: abre el editor y NO selecciona", () => {
+    vi.useFakeTimers();
+    const tocados: string[] = [];
+    const editados: string[] = [];
+    const { ficha, desmontar } = conGesto({ onSelect: (id) => { tocados.push(id); }, onEdit: (id) => { editados.push(id); } });
+    puntero(ficha, "pointerdown");
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS); });
+    expect(editados).toEqual(["p1"]);
+    puntero(ficha, "pointerup");
+    expect(tocados).toEqual([]);
+    expect(editados).toEqual(["p1"]);        // una sola apertura
+    desmontar();
+    vi.useRealTimers();
+  });
+
+  it("mientras se mantiene pulsado, la ficha lo enseña sin moverse", () => {
+    vi.useFakeTimers();
+    const { ficha, desmontar } = conGesto({ onEdit: () => {} });
+    expect(ficha.dataset.longPress).toBe("0");
+    puntero(ficha, "pointerdown");
+    expect(ficha.dataset.longPress).toBe("1");
+    expect(ficha.querySelector("[data-long-press-ring]")).not.toBeNull();
+    // Y los cronómetros siguen visibles durante el gesto.
+    expect(ficha.querySelector("[data-shared-pitch-tot]")).not.toBeNull();
+    expect(ficha.querySelector("[data-shared-pitch-rot]")).not.toBeNull();
+    puntero(ficha, "pointerup");
+    expect(ficha.dataset.longPress).toBe("0");
+    desmontar();
+    vi.useRealTimers();
+  });
+
+  it("arrastrar cancela: ni selección ni editor", () => {
+    vi.useFakeTimers();
+    const tocados: string[] = [];
+    const editados: string[] = [];
+    const { ficha, desmontar } = conGesto({ onSelect: (id) => { tocados.push(id); }, onEdit: (id) => { editados.push(id); } });
+    puntero(ficha, "pointerdown", 10, 10);
+    puntero(ficha, "pointermove", 60, 10);
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+    puntero(ficha, "pointerup", 60, 10);
+    expect(tocados).toEqual([]);
+    expect(editados).toEqual([]);
+    desmontar();
+    vi.useRealTimers();
+  });
+
+  it("`pointercancel` no ejecuta nada", () => {
+    vi.useFakeTimers();
+    const tocados: string[] = [];
+    const editados: string[] = [];
+    const { ficha, desmontar } = conGesto({ onSelect: (id) => { tocados.push(id); }, onEdit: (id) => { editados.push(id); } });
+    puntero(ficha, "pointerdown");
+    puntero(ficha, "pointercancel");
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+    expect(tocados).toEqual([]);
+    expect(editados).toEqual([]);
+    desmontar();
+    vi.useRealTimers();
+  });
+
+  it("desmontar con el gesto a medias no abre nada después", () => {
+    vi.useFakeTimers();
+    const editados: string[] = [];
+    const { ficha, desmontar } = conGesto({ onEdit: (id) => { editados.push(id); } });
+    puntero(ficha, "pointerdown");
+    desmontar();
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 3); });
+    expect(editados).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it("el navegador no abre su menú contextual durante la pulsación", () => {
+    const { ficha, desmontar } = conGesto({ onEdit: () => {} });
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    act(() => { ficha.dispatchEvent(ev); });
+    expect(ev.defaultPrevented).toBe(true);
+    desmontar();
+  });
+
+  it("sin dorsal, la ficha enseña `?` y su etiqueta provisional", () => {
+    const { ficha, desmontar } = conGesto();
+    expect(ficha.textContent).toContain("?");
+    expect(ficha.querySelector("[data-provisional-label]")?.textContent).toBe("A");
+    expect(ficha.getAttribute("aria-label")).toContain("LOCAL A");
+    expect(ficha.getAttribute("aria-label")).toContain("Mantén pulsado para cambiar el dorsal");
+    desmontar();
   });
 });

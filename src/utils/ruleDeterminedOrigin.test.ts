@@ -233,7 +233,11 @@ describe("la captura no guarda un sector inventado", () => {
 
   it("declarar un penalti salta el paso de origen desde cualquier punto", () => {
     expect(plantilla).toContain('const reglamentario = isRuleDeterminedOrigin(opt.id);');
-    expect(plantilla).toMatch(/step: isRuleDeterminedOrigin\(prev\?\.setPiece \?\? null\)\s*\n?\s*\? "target"/);
+    // El paso de jugador enruta por tipo antes de mirar la procedencia —una
+    // recuperación o una pérdida van a su subtipo—, así que la condición ya
+    // no abre la expresión. Lo que se sigue exigiendo, y es lo que importa,
+    // es que un lanzamiento con origen reglamentario salte a «target».
+    expect(plantilla).toMatch(/isRuleDeterminedOrigin\(prev\?\.setPiece \?\? null\)\s*\n?\s*\? "target"\s*\n?\s*: "origin"/);
   });
 
   it("corregirse a un lanzamiento normal devuelve el paso de origen", () => {

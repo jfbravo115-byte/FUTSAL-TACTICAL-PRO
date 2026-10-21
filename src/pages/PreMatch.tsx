@@ -236,12 +236,18 @@ export default function PreMatch() {
     }
 
     // Default rival players
+    //
+    // Sus dorsales son INVENTADOS: se crea el equipo sin tener la alineación
+    // delante. Por eso nacen con `jerseyNumberKnown: false` y se pintan como
+    // `?` hasta que el analista los reconozca y los asigne manteniendo
+    // pulsada la ficha. El cuerpo técnico NO lleva la marca: su 0 no es un
+    // dorsal por conocer, es que no tiene dorsal.
     const rivalPlayers = [
-      { id: 'r1', number: 1, name: 'POR RIVAL 1', role: Role.GOALKEEPER, isOnPitch: true, pitchPosition: 0, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
-      { id: 'r2', number: 7, name: 'PJ RIVAL 1', role: Role.PLAYER, isOnPitch: true, pitchPosition: 1, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
-      { id: 'r3', number: 10, name: 'PJ RIVAL 2', role: Role.PLAYER, isOnPitch: true, pitchPosition: 2, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
-      { id: 'r4', number: 8, name: 'PJ RIVAL 3', role: Role.PLAYER, isOnPitch: true, pitchPosition: 3, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
-      { id: 'r5', number: 11, name: 'PJ RIVAL 4', role: Role.PLAYER, isOnPitch: true, pitchPosition: 4, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'r1', jerseyNumberKnown: false, number: 1, name: 'POR RIVAL 1', role: Role.GOALKEEPER, isOnPitch: true, pitchPosition: 0, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'r2', jerseyNumberKnown: false, number: 7, name: 'PJ RIVAL 1', role: Role.PLAYER, isOnPitch: true, pitchPosition: 1, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'r3', jerseyNumberKnown: false, number: 10, name: 'PJ RIVAL 2', role: Role.PLAYER, isOnPitch: true, pitchPosition: 2, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'r4', jerseyNumberKnown: false, number: 8, name: 'PJ RIVAL 3', role: Role.PLAYER, isOnPitch: true, pitchPosition: 3, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
+      { id: 'r5', jerseyNumberKnown: false, number: 11, name: 'PJ RIVAL 4', role: Role.PLAYER, isOnPitch: true, pitchPosition: 4, plusMinus: 0, individualTimeSeconds: 0, isStarter: true, isOpponent: true, stats: { ...INITIAL_STATS } },
       // Cuerpo técnico rival predeterminado — garantiza que siempre se puedan
       // registrar tarjetas al staff visitante aunque no se configure manualmente
       { id: 'auto_coach_rival', number: 0, name: 'ENTRENADOR VISITANTE', role: Role.COACH, isOnPitch: false, pitchPosition: undefined, plusMinus: 0, individualTimeSeconds: 0, isStarter: false, isOpponent: true, stats: { ...INITIAL_STATS } },

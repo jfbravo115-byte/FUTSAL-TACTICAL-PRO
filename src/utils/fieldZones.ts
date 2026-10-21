@@ -131,6 +131,15 @@ export const ORIGIN_ONLY_ACTIONS: readonly (ActionType | GoalieAction)[] = [
   // La jugada de falta se ubica desde la perspectiva de quien EJECUTA, igual
   // que el resto: el sector dice desde dónde se puso el balón en juego.
   ActionType.SET_PIECE,
+  /**
+   * El gol en propia admite ORIGEN pero NO destino.
+   *
+   * De dónde salió el balón es observable y vale para el contexto táctico.
+   * La portería a la que entró no se pregunta: es la propia, siempre, y
+   * ofrecer la rejilla G1-G9 invitaría a describirlo como un tiro a puerta,
+   * que es justo lo que no es.
+   */
+  ActionType.OWN_GOAL,
 ];
 
 /** Acciones que registran origen en pista Y destino en portería. */
@@ -180,7 +189,13 @@ export function originIsOptional(type: ActionType | GoalieAction): boolean {
   // La falta, porque su contador reglamentario no puede esperar a ningún paso
   // adicional. La jugada de falta, porque el botón ya dice todo lo que la
   // define: la zona es información extra y omitirla no la invalida.
-  return type === ActionType.FOUL || type === ActionType.SET_PIECE;
+  // Y el gol en propia: lo que no puede esperar es el marcador. El sector es
+  // información extra y omitirlo no invalida el tanto.
+  return (
+    type === ActionType.FOUL ||
+    type === ActionType.SET_PIECE ||
+    type === ActionType.OWN_GOAL
+  );
 }
 
 // ── LECTURA TEXTUAL AGREGADA ────────────────────────────────────────────
@@ -218,6 +233,7 @@ export type ActionNoun = { one: string; many: string };
 export const ACTION_NOUN: Partial<Record<ActionType | GoalieAction, ActionNoun>> = {
   [ActionType.SHOT]: { one: "tiro", many: "tiros" },
   [ActionType.GOAL]: { one: "gol", many: "goles" },
+  [ActionType.OWN_GOAL]: { one: "gol en propia", many: "goles en propia" },
   [ActionType.LOSS]: { one: "pérdida", many: "pérdidas" },
   [ActionType.UNFORCED_ERROR]: { one: "error no forzado", many: "errores no forzados" },
   [ActionType.STEAL]: { one: "recuperación", many: "recuperaciones" },

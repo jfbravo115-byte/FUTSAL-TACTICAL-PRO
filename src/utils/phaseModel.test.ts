@@ -271,3 +271,112 @@ describe("etiquetas y lectura", () => {
     expect(phaseCsvLabel(AP)).toBe("Ataque posicional");
   });
 });
+
+// ── D · LA TRANSICIÓN MIRA QUIÉN EJECUTA ────────────────────────────────
+//
+// Una pérdida del rival es un balón que GANAMOS. Antes esto no miraba el
+// bando y nos dejaba «defendiendo» justo cuando acabábamos de recuperar.
+
+describe("D · pérdidas y recuperaciones según el bando", () => {
+  it("nuestra pérdida nos deja en transición DEFENSIVA", () => {
+    for (const t of [ActionType.LOSS, ActionType.UNFORCED_ERROR]) {
+      expect(nextPhaseAfterEvent(t, false, AP)).toBe("defense_transition");
+      expect(nextPhaseAfterEvent(t, false, DO)).toBe("defense_transition");
+    }
+  });
+
+  it("la pérdida DEL RIVAL nos deja en transición OFENSIVA", () => {
+    for (const t of [ActionType.LOSS, ActionType.UNFORCED_ERROR]) {
+      expect(nextPhaseAfterEvent(t, true, DO)).toBe("attack_transition");
+      expect(nextPhaseAfterEvent(t, true, AP)).toBe("attack_transition");
+    }
+  });
+
+  it("nuestra recuperación nos deja en transición OFENSIVA", () => {
+    for (const t of [ActionType.STEAL, ActionType.INTERCEPTION]) {
+      expect(nextPhaseAfterEvent(t, false, DO)).toBe("attack_transition");
+    }
+  });
+
+  it("la recuperación DEL RIVAL nos deja en transición DEFENSIVA", () => {
+    for (const t of [ActionType.STEAL, ActionType.INTERCEPTION]) {
+      expect(nextPhaseAfterEvent(t, true, AP)).toBe("defense_transition");
+    }
+  });
+
+  it("nuestra pérdida y la recuperación del rival son el MISMO instante", () => {
+    // Si una dijera «transición defensiva» y la otra «ofensiva», el modelo se
+    // contradiría a sí mismo según por dónde se registrara la misma jugada.
+    expect(nextPhaseAfterEvent(ActionType.LOSS, false, AP)).toBe(
+      nextPhaseAfterEvent(ActionType.STEAL, true, AP),
+    );
+    expect(nextPhaseAfterEvent(ActionType.STEAL, false, DO)).toBe(
+      nextPhaseAfterEvent(ActionType.LOSS, true, DO),
+    );
+  });
+
+  it("sin fase declarada ningún bando la inventa", () => {
+    expect(nextPhaseAfterEvent(ActionType.LOSS, true, undefined)).toBeUndefined();
+    expect(nextPhaseAfterEvent(ActionType.STEAL, true, undefined)).toBeUndefined();
+  });
+});
+
+// ── E · EL GOL EN PROPIA REANUDA COMO CUALQUIER GOL ─────────────────────
+//
+// Tras un gol se saca del centro, y saca el que lo ENCAJA. Lo decide el
+// beneficiario, no quién tocó el balón: en un gol en propia son contrarios.
+
+describe("E · reanudación tras un gol en propia", () => {
+  it("1 · gol normal nuestro y gol en propia del rival reanudan igual", () => {
+    // Los dos los marca NUESTRO equipo en el marcador: saca el rival.
+    const golNuestro = nextPhaseAfterEvent(ActionType.GOAL, false, AP);
+    const propiaRival = nextPhaseAfterEvent(ActionType.OWN_GOAL, true, AP);
+    expect(golNuestro).toBe("defense_organized");
+    expect(propiaRival).toBe(golNuestro);
+  });
+
+  it("2 · gol normal del rival y gol en propia nuestro reanudan igual", () => {
+    // Los dos los marca el RIVAL en el marcador: sacamos nosotros.
+    const golRival = nextPhaseAfterEvent(ActionType.GOAL, true, DO);
+    const propiaNuestra = nextPhaseAfterEvent(ActionType.OWN_GOAL, false, DO);
+    expect(golRival).toBe("attack_positional");
+    expect(propiaNuestra).toBe(golRival);
+  });
+
+  it("lo decide el BENEFICIARIO, no el autor", () => {
+    // Mismo autor (nosotros), resultado contrario según el tipo de gol.
+    expect(nextPhaseAfterEvent(ActionType.GOAL, false, AP)).toBe("defense_organized");
+    expect(nextPhaseAfterEvent(ActionType.OWN_GOAL, false, AP)).toBe("attack_positional");
+  });
+
+  it("el GOAL_CONCEDED histórico sigue reanudando como siempre", () => {
+    expect(nextPhaseAfterEvent(GoalieAction.GOAL_CONCEDED, true, DO)).toBe("attack_positional");
+  });
+
+  it("la reanudación es estable: nunca deja una transición", () => {
+    for (const opp of [false, true]) {
+      for (const desde of [AP, TA, DO, TD]) {
+        const r = nextPhaseAfterEvent(ActionType.OWN_GOAL, opp, desde);
+        expect(["attack_positional", "defense_organized"]).toContain(r);
+      }
+    }
+  });
+
+  it("y sin fase declarada tampoco la inventa", () => {
+    expect(nextPhaseAfterEvent(ActionType.OWN_GOAL, false, undefined)).toBeUndefined();
+  });
+
+  it("no hay una segunda tabla de decisiones: usa el mismo beneficiario", () => {
+    // Para cada combinación, la reanudación coincide con la del gol normal
+    // que tuviera ESE beneficiario. Si alguien escribiera aquí su propia
+    // tabla, esta equivalencia se rompería.
+    for (const desde of [AP, TA, DO, TD]) {
+      expect(nextPhaseAfterEvent(ActionType.OWN_GOAL, false, desde)).toBe(
+        nextPhaseAfterEvent(ActionType.GOAL, true, desde),
+      );
+      expect(nextPhaseAfterEvent(ActionType.OWN_GOAL, true, desde)).toBe(
+        nextPhaseAfterEvent(ActionType.GOAL, false, desde),
+      );
+    }
+  });
+});

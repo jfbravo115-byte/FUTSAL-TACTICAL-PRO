@@ -1,4 +1,5 @@
 import { SavedMatch } from "../types/futsal";
+import { goalsFor } from "../utils/goalModel";
 import { LocalFinalCopy } from "./matchSnapshotService";
 
 export type MatchHistoryEntry = SavedMatch & {
@@ -8,11 +9,15 @@ export type MatchHistoryEntry = SavedMatch & {
   remoteId?: string;
 };
 
+/**
+ * Goles de un lado del MARCADOR. Fuente única: `utils/goalModel`.
+ *
+ * Antes contaba eventos del bando, que dejó de ser lo mismo en cuanto existe
+ * el gol en propia: la firma de un partido con uno habría cambiado según
+ * quién mirara, y dos copias del mismo final habrían dejado de deduplicarse.
+ */
 function goals(match: SavedMatch, opponent: boolean): number {
-  return (match.events || []).filter((e) => {
-    const isGoal = e.type === "GOAL" || e.type === "GOAL_CONCEDED";
-    return isGoal && !!e.metadata?.isOpponent === opponent;
-  }).length;
+  return goalsFor(match.events, opponent ? "opponent" : "team");
 }
 
 /** Firma estable suficiente para deduplicar copia local + remoto del mismo final. */

@@ -4,6 +4,7 @@ import { useAuth } from "../lib/AuthContext";
 import { MatchData, SavedMatch, ActionType, GoalieAction } from "../types/futsal";
 import { listPartidos, savePartido, deletePartidos } from "../services/partidosService";
 import { listFinalLocalCopies, markFinalLocalCopySynced, deleteFinalLocalCopy } from "../services/matchSnapshotService";
+import { goalsFor } from "../utils/goalModel";
 import { combineMatchHistory, MatchHistoryEntry } from "../services/matchHistoryService";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 import {
@@ -23,12 +24,9 @@ import {
   Trophy,
 } from "lucide-react";
 
+/** Marcador del historial. Fuente única: `utils/goalModel`. */
 function getGoals(match: SavedMatch, opponent = false) {
-  return match.events?.filter(
-    (e) =>
-      (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) &&
-      !!e.metadata?.isOpponent === opponent,
-  ).length ?? 0;
+  return goalsFor(match.events, opponent ? "opponent" : "team");
 }
 
 function getMatchDate(match: SavedMatch) {

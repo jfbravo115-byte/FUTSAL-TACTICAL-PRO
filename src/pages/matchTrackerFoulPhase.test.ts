@@ -279,8 +279,17 @@ const falta = (n: number, opp: boolean, extra: Partial<GameEvent> = {}): GameEve
   ...extra,
 });
 
-/** La columna "fase" es la última; se lee por posición desde el final. */
-const columnaFase = (fila: string) => fila.split(",").pop()!.replace(/^"|"$/g, "");
+/**
+ * La columna "fase" se lee desde el final.
+ *
+ * Dejó de ser la última cuando el gol en propia añadió «gol_para» detrás: lo
+ * que no cambia es que las columnas nuevas se añaden al final y las viejas no
+ * se mueven, así que la fase es la penúltima.
+ */
+const columnaFase = (fila: string) => {
+  const celdas = fila.split(",");
+  return celdas[celdas.length - 2].replace(/^"|"$/g, "");
+};
 
 describe("13-14 · la fase de la falta llega hasta el CSV", () => {
   it("una falta NUESTRA en defensa organizada la exporta con ese nombre", () => {
@@ -288,7 +297,8 @@ describe("13-14 · la fase de la falta llega hasta el CSV", () => {
       partidoCon([falta(1, false, { phaseOfPlay: "defense_organized" })]),
     );
     const [cabecera, fila] = csv.replace(/^﻿/, "").split("\n");
-    expect(cabecera.split(",").pop()!.replace(/^"|"$/g, "")).toBe("fase");
+    const columnas = cabecera.split(",").map((c) => c.replace(/^"|"$/g, ""));
+    expect(columnas[columnas.length - 2]).toBe("fase");
     expect(columnaFase(fila)).toBe("Defensa organizada");
   });
 

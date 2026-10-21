@@ -33,6 +33,12 @@ import {
   groupMatchContexts,
 } from "../utils/matchContexts";
 import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/goalSequence";
+import {
+  describeOwnGoalActor,
+  isGoalEvent as isGoalEventModel,
+  isOffensiveGoal,
+  scoreOf,
+} from "../utils/goalModel";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import {
   SetPieceOutcomeSummary,
@@ -46,6 +52,8 @@ import {
 export type MatchReportPlayerLine = {
   id: string;
   number: number;
+  /** Ausente = conocido, igual que en `Player`. Ver `utils/jerseyNumber`. */
+  jerseyNumberKnown?: boolean;
   name: string;
   role: Role;
   isOnPitch: boolean;
@@ -237,6 +245,7 @@ const PERIOD_LABEL: Record<Period, string> = {
 
 const ACTION_LABEL: Record<string, string> = {
   [ActionType.GOAL]: "Gol",
+  [ActionType.OWN_GOAL]: "Gol en propia",
   [ActionType.RED_CARD]: "Tarjeta roja",
   [ActionType.YELLOW_CARD]: "Tarjeta amarilla",
   [ActionType.CORNER]: "Córner",
@@ -250,8 +259,14 @@ const ACTION_LABEL: Record<string, string> = {
   [GoalieAction.SAVE_PARRY]: "Parada (subtipo no registrado)",
 };
 
-const isGoalEvent = (e: GameEvent) =>
-  e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED;
+/**
+ * Goles que suben al marcador. Fuente única: `utils/goalModel`.
+ *
+ * NO sirve para preguntar «cuántos goles hizo nuestro equipo atacando»: un
+ * gol en propia sube al marcador sin ser producción de nadie. Para eso está
+ * `isOffensiveGoal`, y los recuentos de tiro y conversión lo usan.
+ */
+const isGoalEvent = isGoalEventModel;
 
 
 function countRotations(events: GameEvent[], playerId: string): number {
@@ -275,10 +290,9 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   // utils/foulModel — ninguna de las tres las vuelve a contar por su cuenta.
   const foulSummary: FoulSummary = summarizeFouls(matchData.events);
 
-  const score = {
-    team: matchData.events.filter((e) => isGoalEvent(e) && !e.metadata?.isOpponent).length,
-    opponent: matchData.events.filter((e) => isGoalEvent(e) && !!e.metadata?.isOpponent).length,
-  };
+  // El marcador NO se cuenta aquí: lo da `goalModel`, que es el único sitio
+  // que sabe que un gol en propia suma al equipo contrario del que lo mete.
+  const score = scoreOf(matchData.events);
 
   const usados = propios.filter(
     (p) =>
@@ -297,6 +311,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       return {
       id: p.id,
       number: p.number,
+      jerseyNumberKnown: p.jerseyNumberKnown,
       name: p.name,
       role: p.role,
       isOnPitch: p.isOnPitch,
@@ -346,15 +361,21 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   const recoveries = sumStat("steals") + sumStat("interceptions");
   const lossesAndErrors = sumStat("losses") + sumStat("errors");
 
+  // Goles que NUESTRO equipo fabricó atacando. NO es el marcador: un gol en
+  // propia del rival sube el marcador sin que nadie nuestro lo produjera, y
+  // meterlo aquí inflaba la conversión —se vio un 200 % con un tiro y dos
+  // goles—. El marcador vive en `score`, que es otra pregunta.
+  const offensiveGoals = eventosPropios.filter(isOffensiveGoal).length;
+
   const teamTotals = {
-    goals: score.team,
+    goals: offensiveGoals,
     shots: shotEvents.length,
     shotsOnTarget,
     shotsOffTarget,
     shotsBlocked,
     shotsUnknownTarget,
     shotAccuracyPct: pct(shotsOnTarget, shotsOnTarget + shotsOffTarget),
-    goalConversionPct: pct(score.team, shotEvents.length),
+    goalConversionPct: pct(offensiveGoals, shotEvents.length),
     steals: sumStat("steals"),
     interceptions: sumStat("interceptions"),
     recoveries,
@@ -416,7 +437,11 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       return {
         period,
         label: PERIOD_LABEL[period] ?? `Periodo ${period}`,
-        goals: evs.filter(isGoalEvent).length,
+        // Goles que NUESTRO equipo fabricó en esa parte. Va al lado de
+        // `shots`, `steals` y `losses`, que son todos producción propia: si
+        // aquí se contara el marcador, la línea diría «2 goles · 1 tiros» con
+        // un gol en propia del rival por medio.
+        goals: evs.filter(isOffensiveGoal).length,
         shots: evs.filter(isShotAttempt).length,
         steals: evs.filter((e) => e.type === ActionType.STEAL || e.type === ActionType.INTERCEPTION).length,
         losses: evs.filter((e) => e.type === ActionType.LOSS || e.type === ActionType.UNFORCED_ERROR).length,
@@ -432,6 +457,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
 
   const relevantTypes = new Set<string>([
     ActionType.GOAL,
+    ActionType.OWN_GOAL,
     ActionType.RED_CARD,
     GoalieAction.GOAL_CONCEDED,
   ]);
@@ -645,13 +671,25 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   if (r.goalSequence.length) {
     lines.push("## Secuencia de goles");
     r.goalSequence.forEach((g) => {
-      const quien =
-        g.playerName ?? (g.scoringTeam === "team" ? r.teamName : r.opponentName);
+      const equipoDe = (lado: "team" | "opponent") =>
+        lado === "team" ? r.teamName : r.opponentName;
       const parte = PERIOD_LABEL[g.period] ?? String(g.period);
-      lines.push(
-        `- ${parte} ${g.matchTimeLabel} · ${g.scoreAfter.team}-${g.scoreAfter.opponent} · ` +
-          `${quien} · ${g.sourceLabel}`,
-      );
+      if (g.isOwnGoal) {
+        // Se escribe quién lo metió Y a quién le sumó. Poner solo el equipo
+        // que puntúa lo haría indistinguible de un gol suyo, y poner solo al
+        // autor lo convertiría en un gol a su favor.
+        lines.push(
+          `- ${parte} ${g.matchTimeLabel} · ${g.scoreAfter.team}-${g.scoreAfter.opponent} · ` +
+            `${describeOwnGoalActor(g.playerNumber, g.playerName)} (${equipoDe(g.playerSide)}) · ` +
+            `gol para ${equipoDe(g.scoringTeam)}`,
+        );
+      } else {
+        const quien = g.playerName ?? equipoDe(g.scoringTeam);
+        lines.push(
+          `- ${parte} ${g.matchTimeLabel} · ${g.scoreAfter.team}-${g.scoreAfter.opponent} · ` +
+            `${quien} · ${g.sourceLabel}`,
+        );
+      }
       // El tiempo de respuesta es null cuando el gol anterior del otro equipo
       // fue en otra parte: el reloj se reinicia y el dato no existe.
       if (g.secondsSinceOpponentPreviousGoal !== null) {

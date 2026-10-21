@@ -3,12 +3,19 @@ import { formatShotOriginLabel } from '../utils/setPieceModel';
 import { formatDestinationLabel } from '../utils/goalZones';
 import { playerShotTallies, summarizePlayerShots, tallyOf } from '../utils/shotModel';
 import { chronological } from '../utils/eventOrder';
+import {
+  actorSide,
+  beneficiarySide,
+  describeOwnGoalBenefit,
+  isGoalEvent,
+  isOwnGoal,
+  scoreOf,
+  sideName,
+} from "../utils/goalModel";
 
-const formatPlayerTime = (totalSeconds: number) => {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = Math.floor(totalSeconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-};
+// El mismo formato mm:ss que ven las fichas en pista: si la exportación
+// redondeara distinto, el CSV y la pantalla contarían historias distintas.
+import { formatPlayerTime } from "../utils/playerClock";
 
 /** Nombre de la parte para las exportaciones. Nunca el número interno. */
 const PERIOD_CSV_LABEL: Record<number, string> = {
@@ -27,12 +34,10 @@ const formatTime = (ms: number) => {
 };
 
 export function exportToCSV(matchData: MatchData) {
-  const goals = matchData.events.filter(
-    (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-  ).length;
-  const opponentGoals = matchData.events.filter(
-    (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-  ).length;
+  // Marcador desde `utils/goalModel`: un gol en propia suma al equipo
+  // contrario del que lo mete, y contarlo aquí a mano volvería a dar dos
+  // resultados distintos del mismo partido según quién exportara.
+  const { team: goals, opponent: opponentGoals } = scoreOf(matchData.events);
 
   const rows: string[][] = [];
 
@@ -125,12 +130,10 @@ export function exportToCSV(matchData: MatchData) {
 }
 
 export function exportForNotebookLM(matchData: MatchData) {
-  const goals = matchData.events.filter(
-    (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && !e.metadata?.isOpponent
-  ).length;
-  const opponentGoals = matchData.events.filter(
-    (e) => (e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED) && e.metadata?.isOpponent
-  ).length;
+  // Marcador desde `utils/goalModel`: un gol en propia suma al equipo
+  // contrario del que lo mete, y contarlo aquí a mano volvería a dar dos
+  // resultados distintos del mismo partido según quién exportara.
+  const { team: goals, opponent: opponentGoals } = scoreOf(matchData.events);
 
   const text = `# Análisis de Partido de Fútbol Sala
 
@@ -151,12 +154,23 @@ ${matchData.players
 
 ## Línea Temporal
 ${chronological(matchData.events)
-  .filter(e => e.type === ActionType.GOAL || e.type === GoalieAction.GOAL_CONCEDED)
+  .filter(isGoalEvent)
   .map(e => {
     const p = matchData.players.find(pl => pl.id === e.playerIds[0]);
-    const team = e.metadata?.isOpponent ? matchData.opponentName : matchData.teamName;
+    const nombres = { teamName: matchData.teamName, opponentName: matchData.opponentName };
     const parte = PERIOD_CSV_LABEL[e.period] ?? String(e.period);
-    return `- ${parte} ${formatTime(e.timestamp)}: GOL de ${p?.name || 'Desconocido'} (${team})`;
+    // Un gol en propia se escribe diciendo las dos cosas: quién lo metió y a
+    // quién le sumó. Sin eso, el lector lo leería como un gol del equipo que
+    // puntúa y se lo atribuiría a un jugador que no existe.
+    if (isOwnGoal(e)) {
+      const autor = p ? `${p.name}` : null;
+      return `- ${parte} ${formatTime(e.timestamp)}: ${describeOwnGoalBenefit(
+        sideName(actorSide(e), nombres),
+        sideName(beneficiarySide(e), nombres),
+        autor ? { number: p!.number, name: autor } : undefined,
+      )}`;
+    }
+    return `- ${parte} ${formatTime(e.timestamp)}: GOL de ${p?.name || 'Desconocido'} (${sideName(beneficiarySide(e), nombres)})`;
   })
   .join('\n')}
 `;

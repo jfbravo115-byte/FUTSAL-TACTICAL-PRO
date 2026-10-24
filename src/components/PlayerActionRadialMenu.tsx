@@ -11,7 +11,7 @@ import { newSetPieceRestartMetadata } from '../utils/setPieceModel';
 const SAVE_TYPE_PICKER = 'SAVE_TYPE_PICKER' as const;
 import { FutsalPitch } from './field/FutsalPitch';
 import { formatGoalZoneLabel } from '../utils/goalZones';
-import { formatJerseyNumber } from '../utils/jerseyNumber';
+import { playerDisplayIdentity } from '../utils/playerIdentity';
 
 /**
  * Geometría del anillo. Pura y exportada para poder comprobarla por test: con
@@ -54,6 +54,13 @@ export const GK_BAR_BOTTOM = `calc(0.75rem + ${BOTTOM_NAV_PX}px + 7rem + env(saf
 
 interface PlayerActionRadialMenuProps {
   player: Player;
+  /**
+   * La plantilla del partido, solo para decidir CÓMO se llama al jugador en
+   * el centro del anillo: si tiene nombre real manda el nombre, y si no, la
+   * letra provisional se cuenta sobre su equipo. Opcional para no romper a
+   * quien monte el menú con un jugador suelto; sin ella se usa él solo.
+   */
+  players?: Player[];
   onAction: (type: ActionType | GoalieAction, playerId: string, metadata?: any) => void;
   onSwap: (id: string) => void;
   onClose: () => void;
@@ -77,8 +84,12 @@ interface PlayerActionRadialMenuProps {
   onEditNumber?: () => void;
 }
 
-export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shotCount, onEditNumber }: PlayerActionRadialMenuProps) => {
+export const PlayerActionRadialMenu = ({ player, players, onAction, onSwap, onClose, shotCount, onEditNumber }: PlayerActionRadialMenuProps) => {
   const isGoalkeeper = player.role === Role.GOALKEEPER;
+  // El círculo central mide 80 px y el texto útil 72, con `truncate` de red.
+  // A 12 px, 8 caracteres entran: «JUAN P.», «ALEJ. G.», «MARCO V.». Con 10
+  // se cortaban con puntos suspensivos —medido en el preview—.
+  const ident = playerDisplayIdentity(player, { players: players ?? [player], maxCaracteres: 8 });
   const [selectingZone, setSelectingZone] = React.useState<boolean>(false);
   const [selectionStep, setSelectionStep] = React.useState<'shot' | 'goal'>('shot');
   const [pendingShotZone, setPendingShotZone] = React.useState<string | null>(null);
@@ -305,7 +316,12 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shot
               <h3 className={`text-[12px] font-black uppercase tracking-widest ${selectingSubtype === 'steal' ? 'text-cyan-400' : 'text-red-400'}`}>
                 {selectingSubtype === 'steal' ? '✅ Tipo de recuperación' : '❌ Tipo de pérdida'}
               </h3>
-              <p className="text-[9px] text-slate-500 mt-0.5">{player.name} · #{player.number}</p>
+              {/* `player.number` crudo pintaba «#0» a quien todavía no tiene
+                  dorsal; ahora pasa por el mismo formateador que las fichas
+                  y, si hay nombre, es el nombre lo que va delante. */}
+              <p className="text-[9px] text-slate-500 mt-0.5">
+                {ident.kind === 'nombre' ? ident.nombreCompleto : ident.etiquetaProvisional} · #{ident.dorsal}
+              </p>
             </div>
             <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/10 text-slate-500">
               <X size={16} />
@@ -419,14 +435,30 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shot
             </button>
           )}
 
-          {/* Center info */}
+          {/* Centro: a quién se le está apuntando la acción.
+
+              Es el último sitio donde se puede notar que te has equivocado de
+              ficha, así que enseña lo mismo que la ficha de la que vienes y
+              en el mismo orden: el nombre si lo hay, y si no el dorsal. Con
+              nombre, el dorsal baja a la segunda línea en vez de desaparecer;
+              sin nombre, la segunda línea es la letra estable. */}
           <div className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-[#0E1015] border-2 border-white/20 flex flex-col items-center justify-center z-10 shadow-xl">
-            <span className="text-xl font-black text-white">#{formatJerseyNumber(player)}</span>
+            <span
+              data-radial-identity={ident.kind}
+              title={ident.nombreCompleto ?? undefined}
+              className={`font-black text-white truncate max-w-[72px] text-center px-1 ${
+                ident.kind === 'nombre' ? 'text-[12px] uppercase' : 'text-xl'
+              }`}
+            >
+              {/* El `#` solo delante de un DORSAL. Con la letra provisional
+                  diría «#C», que se lee como un dorsal que no existe. */}
+              {ident.kind === 'dorsal' ? `#${ident.principal}` : ident.principal}
+            </span>
             {isGoalkeeper ? (
               <span className="text-[7px] text-amber-400 font-black uppercase">{savePercentage}% par.</span>
             ) : (
               <span className="text-[7px] text-slate-400 font-black uppercase truncate max-w-[72px] text-center px-1">
-                {player.name.split(' ')[0]}
+                {ident.kind === 'dorsal' ? ident.letra : `#${ident.dorsal}`}
               </span>
             )}
           </div>
@@ -495,7 +527,9 @@ export const PlayerActionRadialMenu = ({ player, onAction, onSwap, onClose, shot
               Tarjetas
             </span>
             <span className="text-[9px] font-black uppercase tracking-widest text-white truncate max-w-[55vw]">
-              #{player.number} {player.name.split(' ')[0]}
+              {ident.kind === 'nombre'
+                ? `${ident.principal} · #${ident.dorsal}`
+                : `#${ident.dorsal} ${ident.letra}`}
             </span>
           </div>
           <div className="flex gap-3">

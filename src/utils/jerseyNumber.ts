@@ -129,10 +129,14 @@ export function provisionalLabel(player: Player, players: Player[]): string {
   return `${player.isOpponent ? "RIVAL" : "LOCAL"} ${letra}`;
 }
 
-/** Cómo llamar a un jugador en pantalla: su nombre, o su etiqueta provisional. */
-export function playerLabel(player: Player, players: Player[]): string {
-  return isJerseyUnknown(player) ? provisionalLabel(player, players) : player.name;
-}
+/*
+ * Aquí vivía `playerLabel`: el nombre, o la etiqueta provisional si el dorsal
+ * estaba por conocer. Mezclaba dos preguntas distintas —«¿sé su dorsal?» y
+ * «¿sé su nombre?»—, así que a un rival con dorsal puesto y sin nombre lo
+ * llamaba «PJ RIVAL 1», que no distingue a nadie. Lo sustituye
+ * `playerDisplayIdentity`, en `utils/playerIdentity.ts`, que decide con los
+ * dos datos por separado.
+ */
 
 /** Rótulo corto para la ficha: «POR ?», «?», «7». */
 export function shortJerseyLabel(player: Player): string {

@@ -106,6 +106,7 @@ import {
   setPlayerNumber,
   swapPlayerNumbers,
 } from "../utils/jerseyNumber";
+import { playerDisplayIdentity } from "../utils/playerIdentity";
 import {
   DEFAULT_PITCH_METRICS,
   TeamSide,
@@ -7057,6 +7058,7 @@ export default function MatchTracker() {
                             >
                               <PlayerCard
                                 player={player}
+                                players={matchData.players}
                                 onClick={() => {
                                   if (swapSelection) {
                                     const swapper = matchData.players.find(p => p.id === swapSelection);
@@ -7082,6 +7084,7 @@ export default function MatchTracker() {
                   <SharedPitchBenches
                     teamName={matchData.teamName || "LOCAL"}
                     opponentName={matchData.opponentName || "RIVAL"}
+                    players={matchData.players}
                     teamBench={rosterBanquillo(false)}
                     opponentBench={rosterBanquillo(true)}
                     open={openBench}
@@ -7093,8 +7096,6 @@ export default function MatchTracker() {
                         ? {
                             id: selectedActor.id,
                             lado: selectedActor.isOpponent ? "opponent" : "team",
-                            nombre: sharedPlayers[selectedActor.id]?.name ?? "",
-                            dorsal: sharedPlayers[selectedActor.id]?.number ?? 0,
                           }
                         : null
                     }
@@ -7139,7 +7140,15 @@ export default function MatchTracker() {
                         const equipo = selectedActor.isOpponent
                           ? matchData.opponentName || "RIVAL"
                           : matchData.teamName || "LOCAL";
-                        return p ? `#${formatJerseyNumber(p)} ${p.name} · ${equipo}` : equipo;
+                        if (!p) return equipo;
+                        // Se le llama como en su ficha —nombre si lo tiene,
+                        // dorsal si no— pero SIN abreviar: aquí hay una línea
+                        // entera y es la última confirmación antes de
+                        // registrar, así que conviene el nombre completo.
+                        const id = playerDisplayIdentity(p, { players: matchData.players, maxCaracteres: 64 });
+                        return id.kind === "nombre"
+                          ? `${id.principal} · #${id.dorsal} · ${equipo}`
+                          : `#${id.dorsal} ${id.letra} · ${equipo}`;
                       })()
                     : "Toca un jugador y después la acción"}
                 </div>
@@ -7349,7 +7358,7 @@ export default function MatchTracker() {
                             {formatJerseyNumber(p)}
                           </span>
                           <span className="text-[8px] font-black uppercase text-slate-300 truncate">
-                            {p.name.split(" ")[0]}
+                            {etiquetaDePicker(p, matchData.players)}
                           </span>
                           <div className="absolute top-0.5 right-0.5">
                             <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
@@ -7402,7 +7411,7 @@ export default function MatchTracker() {
                     </div>
                     <div className="flex flex-col items-center min-w-0">
                       <span className="text-[8px] font-black text-white uppercase truncate w-full px-0.5 text-center">
-                        {p.name.split(" ")[0]}
+                        {etiquetaDePicker(p, matchData.players)}
                       </span>
                       {p.isStarter && (
                         <div className="absolute top-0.5 right-5 text-amber-500">
@@ -8475,6 +8484,7 @@ export default function MatchTracker() {
       <AnimatePresence>
         {activeSlotToAdd && (
           <BenchRadialMenu
+            players={matchData.players}
             isOpponent={activeSlotToAdd.isOpponent}
             // Elegibilidad del banquillo: SIEMPRE desde utils/squadModel. Con
             // la convocatoria aplicada, `matchData.players` ya son solo los
@@ -8531,6 +8541,7 @@ export default function MatchTracker() {
       <AnimatePresence>
         {swapSelection && (
           <BenchRadialMenu
+            players={matchData.players}
             isOpponent={matchData.players.find(pl => pl.id === swapSelection)?.isOpponent}
             // Mismo helper que el radial de arriba, a propósito: son las dos
             // puertas al banquillo y arreglar solo una dejaba el bug vivo.
@@ -8568,6 +8579,7 @@ export default function MatchTracker() {
             player={
               matchData.players.find((p) => p.id === activeActionPlayerId)!
             }
+            players={matchData.players}
             onAction={handleAction}
             onSwap={(id) => executeSwap(id, true)}
             onClose={() => setActiveActionPlayerId(null)}
@@ -9471,6 +9483,19 @@ const PitchZones = ({
   />
 );
 
+/**
+ * Cómo se llama un jugador en un selector de captura.
+ *
+ * Misma jerarquía que en las fichas: el nombre cuando lo hay y la letra
+ * estable cuando no. Antes se pintaba `p.name` tal cual, de modo que un
+ * selector de rivales recién creados ofrecía cinco botones diciendo «PJ
+ * RIVAL 1»…«PJ RIVAL 5» y había que leer el dorsal de todas formas.
+ */
+const etiquetaDePicker = (p: Player, players: Player[]): string => {
+  const id = playerDisplayIdentity(p, { players, maxCaracteres: 10 });
+  return id.kind === "nombre" ? id.principal : id.letra;
+};
+
 const PlayerSelector = ({
   players,
   onSelect,
@@ -9517,7 +9542,9 @@ const PlayerSelector = ({
                     <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[9px] ${p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : "bg-black/40 text-white"}`}>
                       {formatJerseyNumber(p)}
                     </div>
-                    <span className="text-[8px] font-black uppercase truncate w-full text-center">{p.name}</span>
+                    <span data-pick-name className="text-[8px] font-black uppercase truncate w-full text-center">
+                      {etiquetaDePicker(p, players)}
+                    </span>
                   </button>
                 ))}
             </div>
@@ -9547,8 +9574,8 @@ const PlayerSelector = ({
           >
             {formatJerseyNumber(p)}
           </div>
-          <span className="text-[8px] font-black uppercase truncate w-full text-center">
-            {p.name}
+          <span data-pick-name className="text-[8px] font-black uppercase truncate w-full text-center">
+            {etiquetaDePicker(p, players)}
           </span>
         </button>
       ))}
@@ -9559,12 +9586,16 @@ const PlayerSelector = ({
 const BenchRadialMenu = ({
   onSelect,
   benchPlayers,
+  players,
   playerPosition,
   onClose,
   isOpponent = false,
 }: {
   onSelect: (id: string) => void;
   benchPlayers: Player[];
+  /** La plantilla entera: la letra se cuenta sobre ella, no sobre el
+   *  banquillo, o un suplente cambiaría de letra al salir a pista. */
+  players: Player[];
   playerPosition?: { top: number; left: number };
   onClose?: () => void;
   isOpponent?: boolean;
@@ -9653,7 +9684,10 @@ const BenchRadialMenu = ({
                   </span>
                   <div className="flex items-center gap-1">
                     <span className={`text-[7px] font-bold uppercase truncate max-w-[40px] leading-tight ${themeText}`}>
-                      {p.name.split(" ")[0]}
+                      {(() => {
+                        const id = playerDisplayIdentity(p, { players, maxCaracteres: 7 });
+                        return id.kind === "nombre" ? id.principal : id.letra;
+                      })()}
                     </span>
                     <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
                   </div>
@@ -9672,12 +9706,15 @@ const BenchRadialMenu = ({
 
 const PlayerCard = ({
   player,
+  players,
   onClick,
   isSelected,
   isSwapTarget,
   isMenuActive,
 }: {
   player: Player;
+  /** La plantilla, para contar la letra provisional sobre su equipo. */
+  players: Player[];
   onClick: () => void;
   isSelected?: boolean;
   isSwapTarget?: boolean;
@@ -9687,9 +9724,13 @@ const PlayerCard = ({
   // el jugador, así que sobrevive a pista → banquillo → pista sin que esta
   // casilla tenga que recordar nada.
   const discipline = disciplinaryState(player);
+  // La ficha focal mide 75×85 como mucho y el texto lleva `truncate`: 10
+  // caracteres es lo que entra sin cortar casi nunca.
+  const ident = playerDisplayIdentity(player, { players, maxCaracteres: 10 });
   return (
     <button
       onClick={onClick}
+      aria-label={`${ident.kind === "nombre" ? `${player.isOpponent ? "Rival" : "Local"} ` : ""}${ident.aria}`}
       className={`relative w-full h-full rounded-xl flex flex-col items-center justify-center transition-all border-2 overflow-visible
             ${
               isSelected
@@ -9713,8 +9754,16 @@ const PlayerCard = ({
       </div>
 
       <div className="flex flex-col items-center gap-0.5 w-full px-1 py-1">
-        <span className="text-[clamp(8px,2vw,12px)] font-black text-white uppercase truncate w-full text-center leading-none">
-          {player.name.split(" ")[0]}
+        {/* El cuerpo de la ficha dice QUIÉN es: el nombre cuando lo hay, y
+            cuando no, la letra estable —antes salía «PJ», la primera palabra
+            de «PJ RIVAL 1», que es la misma en los cinco rivales—. El dorsal
+            sigue en su chapa de arriba, que no se toca. */}
+        <span
+          data-focal-identity={ident.kind}
+          title={ident.nombreCompleto ?? undefined}
+          className="text-[clamp(8px,2vw,12px)] font-black text-white uppercase truncate w-full text-center leading-none"
+        >
+          {ident.kind === "nombre" ? ident.principal : ident.letra}
         </span>
         <div className="flex items-center gap-1">
           <span className="text-[7px] font-black text-slate-400 uppercase leading-none opacity-80">

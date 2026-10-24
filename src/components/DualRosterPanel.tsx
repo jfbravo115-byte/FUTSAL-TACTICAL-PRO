@@ -15,7 +15,8 @@
  * tablet a pleno sol el color es lo primero que se pierde, y confundir las dos
  * plantillas aquí significa apuntarle la acción al equipo equivocado.
  */
-import { formatJerseyNumber } from "../utils/jerseyNumber";
+
+import { playerDisplayIdentity } from "../utils/playerIdentity";
 import React from "react";
 import { Player, Role } from "../types/futsal";
 import { DisciplinaryAura, DisciplinaryCards } from "./DisciplinaryAura";
@@ -23,23 +24,15 @@ import { disciplinaryState } from "../utils/squadModel";
 
 export type DualRosterOrientation = "column" | "row";
 
-/**
- * Nombre corto de la ficha.
- *
- * El apellido es lo útil cuando existe, pero una plantilla de prueba —o un
- * equipo rival apuntado a vuelapluma— se llama «Jugador 1» o «PJ RIVAL 2», y
- * quedarse con la última palabra deja la ficha diciendo «1». Si la última
- * palabra no identifica a nadie, se enseña el nombre entero y que lo recorte
- * el CSS.
+/*
+ * `nombreCorto` vivía aquí: se quedaba con la última palabra del nombre.
+ * Funcionaba con «Juan Pérez» y fallaba con todo lo demás —«PJ RIVAL 2»
+ * dejaba la ficha diciendo «2»—, así que había que detectar el caso y
+ * enseñar el nombre entero para que lo recortara el CSS. Lo sustituyen
+ * `shortPlayerName`, que conserva siempre el nombre de pila y abrevia de
+ * forma determinista, y `playerDisplayIdentity`, que además decide si el
+ * nombre debe mandar sobre el dorsal. Ningún sitio lo usaba ya.
  */
-export function nombreCorto(name: string): string {
-  const limpio = (name || "").trim();
-  if (!limpio) return "";
-  const partes = limpio.split(/\s+/);
-  const ultima = partes[partes.length - 1];
-  const inservible = partes.length < 2 || /^[\d.#-]+$/.test(ultima) || ultima.length < 3;
-  return inservible ? limpio : ultima;
-}
 
 export function DualRosterPanel({
   teamName,
@@ -72,13 +65,25 @@ export function DualRosterPanel({
     ? { texto: "text-red-300", borde: "border-red-500/40", fondo: "bg-red-950/25", sel: "bg-red-500 text-slate-950 border-red-200" }
     : { texto: "text-blue-300", borde: "border-blue-500/40", fondo: "bg-blue-950/25", sel: "bg-blue-500 text-slate-950 border-blue-200" };
 
+  /**
+   * La plantilla de ESTE equipo —pista y banquillo—, que es sobre la que se
+   * cuenta la letra provisional. Es el mismo conjunto que mira la pista 5v5
+   * (allí se filtra por bando), así que un jugador lleva la misma letra en
+   * las dos vistas.
+   */
+  const plantilla = React.useMemo(() => [...onPitch, ...bench], [onPitch, bench]);
+
   const ficha = (p: Player) => {
     const activo = selectedId === p.id;
+    const ident = playerDisplayIdentity(p, { players: plantilla, maxCaracteres: 12 });
+    const conNombre = ident.kind === "nombre";
     return (
       <button
         key={p.id}
         data-roster-player={p.id}
         data-roster-side={isOpponent ? "opponent" : "team"}
+        data-display-kind={ident.kind}
+        aria-label={`${conNombre ? `${isOpponent ? "Rival" : "Local"} ` : ""}${ident.aria}`}
         aria-pressed={activo}
         disabled={disabled}
         onClick={() => onSelect(p.id)}
@@ -87,15 +92,26 @@ export function DualRosterPanel({
         } ${orientation === "row" ? "flex-1 min-w-0 justify-center" : "w-full"}`}
       >
         <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-xl" inset="inset-0" />
+        {/* Con nombre real manda el NOMBRE y el dorsal queda de ancla al
+            acta; sin nombre manda el dorsal y lo que acompaña es la letra
+            estable, no el «PJ RIVAL 2» que no distinguía a nadie. */}
         <span
-          className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black ${
+          className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center font-black ${
+            conNombre ? "text-[9px]" : "text-[11px]"
+          } ${
             p.role === Role.GOALKEEPER ? "bg-amber-500 text-black" : activo ? "bg-black/30" : "bg-black/50 text-white"
           }`}
         >
-          {formatJerseyNumber(p)}
+          {ident.dorsal}
         </span>
-        <span className="text-[9px] font-black uppercase truncate min-w-0">
-          {nombreCorto(p.name)}
+        <span
+          data-roster-name
+          title={ident.nombreCompleto ?? undefined}
+          className={`font-black uppercase truncate min-w-0 ${
+            conNombre ? "text-[10px]" : "text-[9px] opacity-70"
+          }`}
+        >
+          {conNombre ? ident.principal : ident.letra}
         </span>
         {p.role === Role.GOALKEEPER && (
           <span className="text-[7px] font-black uppercase opacity-70 shrink-0">POR</span>
@@ -157,21 +173,33 @@ export function DualRosterPanel({
           {/* Se reutiliza el flujo de sustitución existente: este panel no
               reimplementa rotaciones, solo ofrece otra puerta al mismo botón. */}
           <div className={orientation === "row" ? "flex gap-1 flex-wrap" : "grid grid-cols-2 gap-1"}>
-            {bench.map((p) => (
+            {bench.map((p) => {
+              const ident = playerDisplayIdentity(p, { players: plantilla, maxCaracteres: 10 });
+              const conNombre = ident.kind === "nombre";
+              return (
               <button
                 key={p.id}
                 data-roster-bench-player={p.id}
+                data-display-kind={ident.kind}
+                aria-label={ident.aria}
                 disabled={disabled}
                 onClick={() => onBenchSelect(p.id)}
                 className="relative overflow-hidden min-h-[40px] rounded-lg border border-white/10 bg-black/30 px-1.5 py-1 flex items-center gap-1.5 hover:bg-white/10 disabled:opacity-40"
               >
                 <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
                 <span className="shrink-0 w-5 h-5 rounded bg-black/50 flex items-center justify-center text-[9px] font-black">
-                  {formatJerseyNumber(p)}
+                  {ident.dorsal}
                 </span>
-                <span className="text-[8px] font-black uppercase truncate">{nombreCorto(p.name)}</span>
+                <span
+                  data-roster-name
+                  title={ident.nombreCompleto ?? undefined}
+                  className={`font-black uppercase truncate ${conNombre ? "text-[9px]" : "text-[8px] opacity-70"}`}
+                >
+                  {conNombre ? ident.principal : ident.letra}
+                </span>
               </button>
-            ))}
+              );
+            })}
             {bench.length === 0 && (
               <div className="text-[8px] text-slate-500 italic px-1">Sin suplentes</div>
             )}

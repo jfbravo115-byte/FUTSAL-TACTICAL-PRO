@@ -15,7 +15,6 @@ import {
   isJerseyUnknown,
   markJerseyUnknown,
   parseJerseyInput,
-  playerLabel,
   provisionalLabel,
   reassignJerseyNumber,
   takeoverKind,
@@ -134,8 +133,9 @@ describe("2 · dorsal desconocido", () => {
 
   it("quien ya tiene dorsal se llama por su nombre", () => {
     const equipo = [jug({ id: "r1", number: 7, name: "Pérez", isOpponent: true })];
-    expect(playerLabel(equipo[0], equipo)).toBe("Pérez");
-    expect(playerLabel(jug({ id: "r9", number: 0, jerseyNumberKnown: false, isOpponent: true }), equipo)).toMatch(/^RIVAL /);
+    // `playerLabel` ya no existe: quien decide cómo se llama a un jugador en
+    // pantalla es `playerDisplayIdentity`, y tiene sus propias pruebas.
+    expect(provisionalLabel(jug({ id: "r9", number: 0, jerseyNumberKnown: false, isOpponent: true }), equipo)).toMatch(/^RIVAL /);
   });
 
   it("el cuerpo técnico no consume letras de la plantilla", () => {

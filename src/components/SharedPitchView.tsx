@@ -37,9 +37,9 @@ import {
   timeLoadAriaLabel,
   timeLoadColor,
 } from "../utils/timeLoadColor";
-import { formatJerseyNumber, isJerseyUnknown, playerLabel } from "../utils/jerseyNumber";
+
+import { SHORT_NAME_CHARS, playerDisplayIdentity } from "../utils/playerIdentity";
 import { useLongPress } from "../hooks/useLongPress";
-import { nombreCorto } from "./DualRosterPanel";
 
 /** Lado en el que se dibuja cada portería, para rotularlas. */
 export type GoalLabels = { left: string; right: string };
@@ -135,7 +135,22 @@ function FichaEnPista({
   const suEquipo = rival ? escalas.opponent : escalas.team;
   const colorTot = timeLoadColor(p.individualTimeSeconds, suEquipo.tot);
   const colorRot = timeLoadColor(p.rotationTimeSeconds ?? 0, suEquipo.rot);
-  const sinDorsal = isJerseyUnknown(p);
+  // Qué dato manda en ESTA ficha. No lo decide el bando: lo deciden los datos
+  // que haya —nombre real, dorsal conocido o ninguno de los dos—.
+  //
+  // El ancho es MEDIDO en el preview, no estimado. La línea útil de la ficha
+  // son 64 px; el dorsal «#10» a 8 px ocupa 15,6 y los huecos 2, así que al
+  // nombre le quedan 46,4. A 10 px entran ahí «JUAN P.» (42,3) y «ALEJ. G.»
+  // (44,6), que son los dos casos del encargo.
+  //
+  // Al portero se le da un carácter menos porque conserva marca de puesto:
+  // «POR» entero son 16,2 px y dejaría el nombre en «M. V.», así que con
+  // nombre delante se reduce a «P» —4,5 px— y el nombre cabe igual.
+  const ident = playerDisplayIdentity(p, {
+    players: todos,
+    maxCaracteres: portero ? 7 : SHORT_NAME_CHARS,
+  });
+  const conNombre = ident.kind === "nombre";
 
   return (
           <button
@@ -143,8 +158,13 @@ function FichaEnPista({
             data-shared-pitch-side={rival ? "opponent" : "team"}
             data-shared-pitch-nudged={pos.nudged ? "1" : "0"}
             data-long-press={pending ? "1" : "0"}
+            data-display-kind={ident.kind}
             aria-pressed={activo}
-            aria-label={`${rival ? "Rival" : "Local"} ${formatJerseyNumber(p)} ${playerLabel(p, todos)}, total ${tot}, rotación ${rot}. Mantén pulsado para cambiar el dorsal`}
+            /* El bando se dice SOLO cuando no lo dice ya la identidad: quien
+               no tiene nombre se llama «RIVAL A» o «LOCAL C» y repetirlo
+               sonaría «Rival RIVAL A». Quien sí lo tiene necesita el bando,
+               porque «Juan Pérez» a secas no dice de qué equipo es. */
+            aria-label={`${conNombre ? `${rival ? "Rival" : "Local"} ` : ""}${ident.aria}${portero ? ", portero" : ""}, tiempo total ${tot}, rotación ${rot}. Mantén pulsado para cambiar el dorsal`}
             disabled={disabled}
             {...handlers}
             style={{
@@ -174,20 +194,73 @@ function FichaEnPista({
               />
             )}
 
-            {/* 1 · DORSAL, que es lo que se busca primero. Con la marca del
-                equipo al lado: a pleno sol el color es lo primero que se
-                pierde, y confundirse aquí es apuntarle el gol al otro. */}
-            <span className="flex items-baseline gap-1 leading-none">
-              <span className="text-[15px] font-black text-white leading-none tabular-nums">
-                {formatJerseyNumber(p)}
-              </span>
-              <span
-                className={`text-[7px] font-black uppercase leading-none ${
-                  portero ? "text-amber-300" : rival ? "text-red-200" : "text-blue-100"
-                }`}
-              >
-                {portero ? "POR" : rival ? "R" : "J"}
-              </span>
+            {/* 1 · QUIÉN ES, en una sola línea y por orden de utilidad.
+
+                Con nombre real manda el NOMBRE: a los nuestros los conocemos
+                así, y traducir «7 → Juan» de cabeza cuesta el medio segundo
+                que separa apuntar la acción de perderla. Sin nombre manda el
+                dorsal, y sin dorsal la letra provisional.
+
+                El nombre lleva `min-w-0 truncate`: al estrecharse se encoge
+                ÉL, nunca empuja al dorsal ni a la marca de equipo fuera de
+                los 72 px. Por eso la ficha no puede desbordar por largo que
+                sea el nombre.
+
+                La marca de equipo/rol se queda siempre: a pleno sol el color
+                es lo primero que se pierde, y confundirse aquí es apuntarle
+                el gol al otro. */}
+            <span className="flex w-full items-baseline justify-center gap-0.5 leading-none min-w-0">
+              {conNombre ? (
+                <>
+                  <span
+                    data-shared-pitch-name
+                    title={ident.nombreCompleto ?? undefined}
+                    className="min-w-0 truncate text-[10px] font-black uppercase text-white leading-none"
+                  >
+                    {ident.principal}
+                  </span>
+                  <span
+                    data-shared-pitch-jersey
+                    className="shrink-0 text-[8px] font-black text-white/85 leading-none tabular-nums"
+                  >
+                    #{ident.secundario}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span
+                    {...(ident.kind === "provisional" ? { "data-provisional-label": "" } : {})}
+                    data-shared-pitch-jersey
+                    className="text-[15px] font-black text-white leading-none tabular-nums"
+                  >
+                    {ident.principal}
+                  </span>
+                  {ident.kind === "provisional" && (
+                    <span className="shrink-0 text-[9px] font-black text-white/85 leading-none">
+                      ?
+                    </span>
+                  )}
+                </>
+              )}
+              {/* Con el nombre delante no caben las tres cosas en 64 px, y el
+                  indicador de posición es lo que el encargo manda quitar
+                  primero. Se quita el del jugador de campo —«J»/«R»—, cuyo
+                  bando sigue leyéndose en el relleno, en el borde doble, en
+                  la mitad de pista que ocupa la ficha y en el rótulo hablado.
+                  El del portero NO se quita: ser portero cambia qué acciones
+                  tienen sentido y no se deduce de nada más en la ficha. Lo
+                  que se hace es encogerlo a «P» —4,5 px en vez de 16,2—, que
+                  sigue sin depender del color. */}
+              {(!conNombre || portero) && (
+                <span
+                  data-role-mark
+                  className={`shrink-0 text-[7px] font-black uppercase leading-none ${
+                    portero ? "text-amber-300" : rival ? "text-red-200" : "text-blue-100"
+                  }`}
+                >
+                  {portero ? (conNombre ? "P" : "POR") : rival ? "R" : "J"}
+                </span>
+              )}
             </span>
 
             {/* 2-3 · TOT y ROT, SIEMPRE visibles: sin tocar la ficha, sin
@@ -230,20 +303,16 @@ function FichaEnPista({
               ROT {rot}<span data-load-marker className="pl-px">{colorRot.marker}</span>
             </span>
 
-            {/* El nombre corto YA NO se dibuja. Con las dos cápsulas dentro,
-                el contenido desbordaba la ficha 6 px —medido en el preview— y
-                recortaba el dorsal por arriba. Entre encoger los cronómetros,
-                agrandar la ficha o quitar el nombre, se quita el nombre: el
-                dorsal identifica, y el nombre completo sigue en el
-                `aria-label` para quien use lector de pantalla. */}
-
             <span className="absolute top-0 right-0">
               <DisciplinaryCards yellow={p.stats.yellowCards} red={p.stats.redCards} />
             </span>
 
-            {/* Quien todavía no tiene dorsal se distingue por su etiqueta
-                provisional, estable y distinta para cada uno. */}
-            {sinDorsal && (
+            {/* Quien no tiene nombre pero SÍ dorsal lleva además su letra:
+                es lo único que lo distinguirá del resto si más tarde se le
+                quita el número. Cuando no hay ni nombre ni dorsal la letra ya
+                va arriba como información principal, y repetirla aquí sería
+                gastar la única línea libre en decir dos veces lo mismo. */}
+            {ident.kind === "dorsal" && (
               <span
                 data-provisional-label
                 /* `h-[7px]` con su propio `leading`: sin altura fija, la caja
@@ -252,7 +321,7 @@ function FichaEnPista({
                    la etiqueta es de 6 px y sigue entera. */
                 className="absolute bottom-0 left-0 right-0 h-[7px] overflow-hidden text-[6px] font-black uppercase tracking-widest text-white/70 leading-[7px]"
               >
-                {playerLabel(p, todos).replace(/^(LOCAL|RIVAL) /, "")}
+                {ident.secundario}
               </span>
             )}
           </button>
@@ -268,6 +337,7 @@ function FichaEnPista({
 export function SharedPitchBenches({
   teamName,
   opponentName,
+  players,
   teamBench,
   opponentBench,
   open,
@@ -279,6 +349,9 @@ export function SharedPitchBenches({
 }: {
   teamName: string;
   opponentName: string;
+  /** La plantilla ENTERA: la letra provisional se cuenta sobre ella, no sobre
+   *  el banquillo, o un suplente cambiaría de letra al salir a pista. */
+  players: Player[];
   teamBench: Player[];
   opponentBench: Player[];
   open: "team" | "opponent" | null;
@@ -287,7 +360,7 @@ export function SharedPitchBenches({
   /** Pulsación mantenida sobre un suplente: editar su dorsal. */
   onEditNumber?: (id: string) => void;
   /** Quién está seleccionado en la pista, que es a quien se sustituye. */
-  saliente: { id: string; lado: "team" | "opponent"; nombre: string; dorsal: number } | null;
+  saliente: { id: string; lado: "team" | "opponent" } | null;
   disabled?: boolean;
 }) {
   const lados = [
@@ -297,6 +370,19 @@ export function SharedPitchBenches({
   const abierto = lados.find((l) => l.lado === open);
   /** Solo se puede cambiar dentro del equipo de quien está seleccionado. */
   const puedeCambiar = !!saliente && !!abierto && saliente.lado === abierto.lado;
+
+  /**
+   * A quién se sustituye, dicho como se le llama en su ficha: por el nombre
+   * si lo tiene, por el dorsal si no. Decir «Entra por #7» a quien está
+   * mirando una pista llena de nombres obliga a buscar quién era el 7.
+   */
+  const enPista = saliente ? players.find((p) => p.id === saliente.id) : undefined;
+  const identSaliente = enPista ? playerDisplayIdentity(enPista, { players, maxCaracteres: 14 }) : null;
+  const textoSaliente = identSaliente
+    ? identSaliente.kind === "nombre"
+      ? `${identSaliente.principal} · #${identSaliente.dorsal}`
+      : `#${identSaliente.dorsal} ${identSaliente.kind === "dorsal" ? identSaliente.letra : ""}`.trim()
+    : "";
 
   return (
     <div data-shared-pitch-benches className="shrink-0 border-t border-white/10 pt-1 mt-1">
@@ -333,12 +419,13 @@ export function SharedPitchBenches({
           >
             {!puedeCambiar
               ? "Toca primero en la pista al jugador que SALE · mantén pulsado para cambiar dorsal"
-              : `Entra por #${saliente!.dorsal} ${nombreCorto(saliente!.nombre)}`}
+              : `Entra por ${textoSaliente}`}
           </div>
           {abierto.banquillo.map((p) => (
             <FichaDeBanquillo
               key={p.id}
               player={p}
+              todos={players}
               onSelect={onSelect}
               onEditNumber={onEditNumber}
               disabled={disabled || !puedeCambiar}
@@ -361,15 +448,19 @@ export function SharedPitchBenches({
  */
 function FichaDeBanquillo({
   player: p,
+  todos,
   onSelect,
   onEditNumber,
   disabled,
 }: {
   player: Player;
+  todos: Player[];
   onSelect: (id: string) => void;
   onEditNumber?: (id: string) => void;
   disabled: boolean;
 }) {
+  // Aquí cabe más texto que en la pista, así que el nombre se abrevia menos.
+  const ident = playerDisplayIdentity(p, { players: todos, maxCaracteres: 10 });
   const { pending, handlers } = useLongPress({
     onTap: () => onSelect(p.id),
     onLongPress: onEditNumber ? () => onEditNumber(p.id) : undefined,
@@ -382,7 +473,8 @@ function FichaDeBanquillo({
       data-shared-bench-player={p.id}
       data-long-press={pending ? "1" : "0"}
       disabled={disabled && !onEditNumber}
-      aria-label={`${formatJerseyNumber(p)} ${p.name}. Mantén pulsado para cambiar el dorsal`}
+      data-display-kind={ident.kind}
+      aria-label={`${ident.aria}. Mantén pulsado para cambiar el dorsal`}
       {...handlers}
       onClick={(e) => {
         handlers.onClick(e);
@@ -393,11 +485,21 @@ function FichaDeBanquillo({
       } ${pending ? "ring-2 ring-white/80" : ""}`}
     >
       <DisciplinaryAura state={disciplinaryState(p)} rounded="rounded-lg" inset="inset-0" />
+      {/* El dorsal sigue en su chapa, porque es el ancla al acta. Lo que
+          cambia es el texto de al lado: el nombre cuando lo hay —que es lo
+          que el analista está leyendo— y la letra estable cuando no, en vez
+          del «PJ RIVAL 1» que no distinguía a nadie. */}
       <span className="shrink-0 w-6 h-6 rounded bg-black/50 flex items-center justify-center text-[10px] font-black">
-        {formatJerseyNumber(p)}
+        {ident.dorsal}
       </span>
-      <span className="text-[8px] font-black uppercase truncate max-w-[70px]">
-        {nombreCorto(p.name)}
+      <span
+        data-shared-bench-name
+        title={ident.nombreCompleto ?? undefined}
+        className={`font-black uppercase truncate max-w-[70px] ${
+          ident.kind === "nombre" ? "text-[9px]" : "text-[8px] text-white/70"
+        }`}
+      >
+        {ident.kind === "nombre" ? ident.principal : ident.letra}
       </span>
     </button>
   );

@@ -446,7 +446,10 @@ describe("11 · las tarjetas se pulsan, y se pulsan sobre un jugador concreto", 
   });
 
   it("dice a quién se le saca la tarjeta", () => {
-    expect(radial).toMatch(/Tarjetas[\s\S]{0,400}#\{player\.number\}/);
+    // Con el dorsal formateado —`player.number` crudo pintaba «#0» a quien
+    // todavía no tiene dorsal— y con el nombre delante cuando lo hay.
+    expect(radial).toMatch(/Tarjetas[\s\S]{0,400}ident\.dorsal/);
+    expect(radial).toMatch(/Tarjetas[\s\S]{0,400}ident\.principal/);
   });
 
   it("los botones superan el mínimo táctil", () => {

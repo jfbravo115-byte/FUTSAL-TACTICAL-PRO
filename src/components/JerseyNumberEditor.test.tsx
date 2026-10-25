@@ -137,7 +137,9 @@ describe("2 · duplicados", () => {
   it("avisa de quién lleva ya ese dorsal y NO deja guardarlo", () => {
     const { q, escribir, desmontar } = abrir(rival[0], rival);
     escribir("7");
-    expect(q("[data-jersey-duplicate]")!.textContent).toContain("pertenece a PJ RIVAL 2");
+    // Se le llama como en su ficha: «PJ RIVAL 2» es un relleno que no
+    // distingue a nadie, y el analista no vería ese texto en ninguna ficha.
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("pertenece a RIVAL B");
     expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
     desmontar();
   });
@@ -148,7 +150,7 @@ describe("2 · duplicados", () => {
     const { q, escribir, decisiones, desmontar } = abrir(rival[0], rival);
     escribir("7");
     const aviso = q("[data-jersey-duplicate]")!;
-    expect(aviso.textContent).toContain("El dorsal 7 pertenece a PJ RIVAL 2");
+    expect(aviso.textContent).toContain("El dorsal 7 pertenece a RIVAL B");
     expect(aviso.textContent).toContain("quedará con dorsal desconocido");
     const boton = q("[data-jersey-swap]")!;
     expect(boton.dataset.jerseyTakeover).toBe("reasignar");
@@ -166,7 +168,7 @@ describe("2 · duplicados", () => {
     const { q, escribir, decisiones, desmontar } = abrir(conDorsal[0], conDorsal);
     escribir("7");
     const aviso = q("[data-jersey-duplicate]")!;
-    expect(aviso.textContent).toContain("ya está asignado a PJ RIVAL 2");
+    expect(aviso.textContent).toContain("ya está asignado a RIVAL B");
     expect(aviso.textContent).not.toContain("desconocido");
     const boton = q("[data-jersey-swap]")!;
     expect(boton.dataset.jerseyTakeover).toBe("intercambiar");
@@ -183,7 +185,8 @@ describe("2 · duplicados", () => {
     ];
     const { q, escribir, decisiones, desmontar } = abrir(equipo[1], equipo);
     escribir("10");
-    expect(q("[data-jersey-duplicate]")!.textContent).toContain("El dorsal 10 ya está asignado a PJ RIVAL 1");
+    // En esta plantilla solo hay dos, así que r2 es la A y r3 la B.
+    expect(q("[data-jersey-duplicate]")!.textContent).toContain("El dorsal 10 ya está asignado a RIVAL A");
     expect(q("[data-jersey-swap]")).not.toBeNull();
     expect((q("[data-jersey-save]") as HTMLButtonElement).disabled).toBe(true);
     act(() => { q("[data-jersey-swap]")!.click(); });

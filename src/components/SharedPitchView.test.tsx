@@ -111,9 +111,11 @@ describe("1 · los diez enseñan dorsal, TOT y ROT sin tocar nada", () => {
     expect(host.querySelectorAll("[data-shared-pitch-player]")).toHaveLength(10);
     expect(host.querySelectorAll("[data-shared-pitch-tot]")).toHaveLength(10);
     expect(host.querySelectorAll("[data-shared-pitch-rot]")).toHaveLength(10);
-    // Y el portero se distingue sin depender del color.
-    expect(host.querySelector('[data-shared-pitch-player="L0"]')!.textContent).toContain("POR");
-    expect(host.querySelector('[data-shared-pitch-player="R0"]')!.textContent).toContain("POR");
+    // Y el portero se distingue sin depender del color. Con el nombre
+    // delante la marca se encoge a «P», porque «POR» entero dejaría el
+    // nombre en «M. V.»; lo que no hace nunca es desaparecer.
+    expect(host.querySelector('[data-shared-pitch-player="L0"] [data-role-mark]')!.textContent).toBe("P");
+    expect(host.querySelector('[data-shared-pitch-player="R0"] [data-role-mark]')!.textContent).toBe("P");
     desmontar();
   });
 
@@ -154,19 +156,22 @@ describe("1 · los diez enseñan dorsal, TOT y ROT sin tocar nada", () => {
   });
 
   it("un nombre larguísimo no ensancha la ficha ni empuja a los cronómetros", () => {
-    // El nombre no se dibuja: con las dos cápsulas dentro, el contenido
-    // desbordaba la ficha 6 px y recortaba el dorsal por arriba —medido en el
-    // preview—. El dorsal identifica y el nombre entero sigue en el rótulo
-    // hablado, que es donde hace falta.
+    // El nombre SÍ se dibuja, pero abreviado y con `truncate`: al estrecharse
+    // se encoge él, nunca la ficha. El nombre entero sigue entero en el
+    // rótulo hablado y en el `title`, que es donde hace falta.
     const p = jugador({ name: "Rodríguez-Fernández de la Torre y Villalobos" });
     const { host, desmontar } = pintar([p], [sitio("p1", "team", 20)]);
     const ficha = host.querySelector('[data-shared-pitch-player="p1"]') as HTMLElement;
     expect(ficha.style.width).toBe(`${DEFAULT_PITCH_METRICS.cardWidth}px`);
     expect(ficha.style.height).toBe(`${DEFAULT_PITCH_METRICS.cardHeight}px`);
     expect(ficha.className).toContain("overflow-hidden");
-    expect(ficha.textContent).not.toContain("Rodríguez");
+    const nombre = ficha.querySelector("[data-shared-pitch-name]") as HTMLElement;
+    expect(nombre.textContent!.length).toBeLessThanOrEqual(8);
+    expect(nombre.className).toContain("truncate");
+    expect(nombre.className).toContain("min-w-0");
+    expect(nombre.getAttribute("title")).toBe("Rodríguez-Fernández de la Torre y Villalobos");
     expect(ficha.getAttribute("aria-label")).toContain("Rodríguez-Fernández de la Torre y Villalobos");
-    // Lo que sí se ve: dorsal, rol y los dos cronómetros. Nada más.
+    // Y lo demás sigue en su sitio: dorsal, rol y los dos cronómetros.
     expect(ficha.textContent).toContain("7");
     expect(ficha.textContent).toContain("TOT");
     expect(ficha.textContent).toContain("ROT");
@@ -478,12 +483,130 @@ describe("4 · toque corto registra, pulsación mantenida edita el dorsal", () =
     desmontar();
   });
 
-  it("sin dorsal, la ficha enseña `?` y su etiqueta provisional", () => {
+  it("sin dorsal pero CON nombre, manda el nombre y el dorsal es `?`", () => {
+    // El jugador de este bloque se llama «Jugador Uno», que es un nombre
+    // real: nadie lo generó. Que no tenga dorsal no lo convierte en anónimo.
     const { ficha, desmontar } = conGesto();
+    expect(ficha.dataset.displayKind).toBe("nombre");
     expect(ficha.textContent).toContain("?");
-    expect(ficha.querySelector("[data-provisional-label]")?.textContent).toBe("A");
-    expect(ficha.getAttribute("aria-label")).toContain("LOCAL A");
+    expect(ficha.querySelector("[data-shared-pitch-name]")?.textContent).toBe("JUGA. U.");
+    expect(ficha.getAttribute("aria-label")).toContain("Jugador Uno, dorsal desconocido");
     expect(ficha.getAttribute("aria-label")).toContain("Mantén pulsado para cambiar el dorsal");
     desmontar();
+  });
+});
+
+// ── 5 · QUIÉN MANDA EN LA FICHA: EL DATO QUE HAYA, NO EL BANDO ──────────
+
+describe("5 · la jerarquía nombre/dorsal", () => {
+  const fichaDe = (p: Player, side: "team" | "opponent" = "team") => {
+    const { host, desmontar } = pintar([p], [sitio(p.id, side, 20)]);
+    return { ficha: host.querySelector(`[data-shared-pitch-player="${p.id}"]`) as HTMLElement, desmontar };
+  };
+
+  it("LOCAL con nombre real: nombre grande, dorsal pequeño", () => {
+    const { ficha, desmontar } = fichaDe(jugador({ id: "p1", name: "Juan Pérez", number: 7 }));
+    expect(ficha.dataset.displayKind).toBe("nombre");
+    expect(ficha.querySelector("[data-shared-pitch-name]")!.textContent).toBe("JUAN P.");
+    expect(ficha.querySelector("[data-shared-pitch-jersey]")!.textContent).toBe("#7");
+    const nombre = ficha.querySelector("[data-shared-pitch-name]") as HTMLElement;
+    const dorsal = ficha.querySelector("[data-shared-pitch-jersey]") as HTMLElement;
+    expect(nombre.className).toContain("text-[10px]");
+    expect(dorsal.className).toContain("text-[8px]");
+    desmontar();
+  });
+
+  it("RIVAL con nombre real: el nombre manda igual que en el local", () => {
+    const p = jugador({ id: "r1", name: "Juan Pérez", number: 7, isOpponent: true });
+    const { ficha, desmontar } = fichaDe(p, "opponent");
+    expect(ficha.dataset.displayKind).toBe("nombre");
+    expect(ficha.querySelector("[data-shared-pitch-name]")!.textContent).toBe("JUAN P.");
+    expect(ficha.getAttribute("aria-label")).toContain("Rival Juan Pérez, dorsal 7");
+    desmontar();
+  });
+
+  it("LOCAL sin nombre: manda el dorsal, como antes", () => {
+    const { ficha, desmontar } = fichaDe(jugador({ id: "p1", name: "Jugador 1", number: 7 }));
+    expect(ficha.dataset.displayKind).toBe("dorsal");
+    expect(ficha.querySelector("[data-shared-pitch-name]")).toBeNull();
+    expect(ficha.querySelector("[data-shared-pitch-jersey]")!.textContent).toBe("7");
+    expect((ficha.querySelector("[data-shared-pitch-jersey]") as HTMLElement).className)
+      .toContain("text-[15px]");
+    desmontar();
+  });
+
+  it("RIVAL provisional con dorsal conocido: dorsal grande y letra debajo", () => {
+    const p = jugador({ id: "r1", name: "PJ RIVAL 1", number: 9, isOpponent: true });
+    const { ficha, desmontar } = fichaDe(p, "opponent");
+    expect(ficha.dataset.displayKind).toBe("dorsal");
+    expect(ficha.querySelector("[data-shared-pitch-jersey]")!.textContent).toBe("9");
+    expect(ficha.querySelector("[data-provisional-label]")!.textContent).toBe("A");
+    expect(ficha.getAttribute("aria-label")).toContain("RIVAL A, dorsal 9");
+    desmontar();
+  });
+
+  it("RIVAL sin nombre ni dorsal: manda la letra y el `?` queda al lado", () => {
+    const p = jugador({ id: "r1", name: "PJ RIVAL 1", jerseyNumberKnown: false, isOpponent: true });
+    const { ficha, desmontar } = fichaDe(p, "opponent");
+    expect(ficha.dataset.displayKind).toBe("provisional");
+    expect(ficha.querySelector("[data-provisional-label]")!.textContent).toBe("A");
+    expect(ficha.textContent).toContain("?");
+    expect(ficha.getAttribute("aria-label")).toContain("RIVAL A, dorsal desconocido");
+    desmontar();
+  });
+
+  it("el puesto de portero nunca se pierde; el de jugador de campo cede sitio al nombre", () => {
+    const casos: [Player, string | null][] = [
+      // Con nombre, «J»/«R» se quitan: es lo primero que el encargo manda
+      // sacrificar, y el bando sigue en el relleno, el borde y la mitad.
+      [jugador({ id: "p1", name: "Juan Pérez" }), null],
+      [jugador({ id: "p1", name: "Jugador 1" }), "J"],
+      // El portero conserva marca SIEMPRE, encogida si hace falta.
+      [jugador({ id: "p1", name: "Juan Pérez", role: Role.GOALKEEPER }), "P"],
+      [jugador({ id: "p1", name: "Portero 1", role: Role.GOALKEEPER }), "POR"],
+    ];
+    for (const [p, marca] of casos) {
+      const { ficha, desmontar } = fichaDe(p);
+      const mark = ficha.querySelector("[data-role-mark]");
+      if (marca === null) expect(mark, p.name).toBeNull();
+      else expect(mark?.textContent, p.name).toBe(marca);
+      desmontar();
+    }
+  });
+
+  it("y el rótulo hablado dice el bando y el puesto, que es donde no cuestan píxeles", () => {
+    const p = jugador({ id: "r1", name: "Marco Villa", number: 1, role: Role.GOALKEEPER, isOpponent: true });
+    const { ficha, desmontar } = fichaDe(p, "opponent");
+    const aria = ficha.getAttribute("aria-label")!;
+    expect(aria).toContain("Rival Marco Villa, dorsal 1, portero");
+    desmontar();
+  });
+
+  it("cambiar el dorsal cambia el dorsal, no el nombre", () => {
+    const p = jugador({ id: "p1", name: "Juan Pérez", number: 7 });
+    const a = fichaDe(p);
+    expect(a.ficha.querySelector("[data-shared-pitch-jersey]")!.textContent).toBe("#7");
+    a.desmontar();
+    const b = fichaDe({ ...p, number: 10 });
+    expect(b.ficha.querySelector("[data-shared-pitch-name]")!.textContent).toBe("JUAN P.");
+    expect(b.ficha.querySelector("[data-shared-pitch-jersey]")!.textContent).toBe("#10");
+    expect(b.ficha.dataset.displayKind).toBe("nombre");
+    b.desmontar();
+  });
+
+  it("los dos cronómetros siguen ahí en los tres casos", () => {
+    const casos = [
+      jugador({ id: "p1", name: "Juan Pérez", number: 7 }),
+      jugador({ id: "p1", name: "Jugador 1", number: 7 }),
+      jugador({ id: "p1", name: "Jugador 1", jerseyNumberKnown: false }),
+    ];
+    for (const p of casos) {
+      const { ficha, desmontar } = fichaDe(p);
+      expect(ficha.querySelector("[data-shared-pitch-tot]"), p.name).not.toBeNull();
+      expect(ficha.querySelector("[data-shared-pitch-rot]"), p.name).not.toBeNull();
+      expect(ficha.style.width).toBe(`${DEFAULT_PITCH_METRICS.cardWidth}px`);
+      expect(ficha.style.height).toBe(`${DEFAULT_PITCH_METRICS.cardHeight}px`);
+      desmontar();
+    }
   });
 });

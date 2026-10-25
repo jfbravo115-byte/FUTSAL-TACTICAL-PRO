@@ -349,7 +349,9 @@ describe("las tarjetas se ven y pertenecen a un jugador concreto", () => {
     const { host } = mount({ number: 7, name: "Carlos Ruiz" });
     const texto = barra(host).textContent || "";
     expect(texto).toContain("#7");
-    expect(texto).toContain("Carlos");
+    // Abreviado y en mayúsculas, como en la ficha de la que viene: lo que
+    // importa es que sea el MISMO jugador, no que esté escrito igual.
+    expect(texto).toContain("CARL. R.");
   });
 
   it("respeta el área segura inferior y se apoya sobre la navegación", () => {

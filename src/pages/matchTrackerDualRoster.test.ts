@@ -455,11 +455,16 @@ describe("16 · los diez dentro de una sola pista", () => {
     // color es lo primero que se pierde, y aquí equivocarse es apuntarle el
     // gol al otro equipo.
     expect(pistaCodigo).toContain("border-double");
-    expect(pistaCodigo).toContain('portero ? "POR" : rival ? "R" : "J"');
+    // Con nombre delante, «J»/«R» ceden sitio al nombre y «POR» se encoge a
+    // «P»: la marca de puesto no desaparece nunca.
+    expect(pistaCodigo).toContain('portero ? (conNombre ? "P" : "POR") : rival ? "R" : "J"');
+    expect(pistaCodigo).toContain("{(!conNombre || portero) && (");
     expect(pistaCodigo).toContain('data-shared-pitch-side={rival ? "opponent" : "team"}');
-    expect(pistaCodigo).toContain('${rival ? "Rival" : "Local"} ${formatJerseyNumber(p)} ${playerLabel(p, todos)}');
+    // El bando se dice solo cuando la identidad no lo dice ya: quien no tiene
+    // nombre se llama «RIVAL A» y repetirlo sonaría «Rival RIVAL A».
+    expect(pistaCodigo).toContain('${conNombre ? `${rival ? "Rival" : "Local"} ` : ""}${ident.aria}');
     // Y el lector de pantalla oye también los dos cronómetros.
-    expect(pistaCodigo).toContain("total ${tot}, rotación ${rot}");
+    expect(pistaCodigo).toContain("tiempo total ${tot}, rotación ${rot}");
   });
 
   it("la ficha cumple el objetivo táctil mínimo y se marca al seleccionar", () => {
@@ -534,17 +539,28 @@ describe("16 · los diez dentro de una sola pista", () => {
   });
 
   it("y TODAS las superficies pintan el dorsal con el mismo formateador", () => {
-    for (const [ruta, veces] of [
-      ["./MatchTracker.tsx", 1],
-      ["../components/DualRosterPanel.tsx", 1],
-      ["../components/SharedPitchView.tsx", 1],
-      ["../components/PlayerActionRadialMenu.tsx", 1],
-      ["../services/matchExportService.ts", 1],
+    // Directamente o a través de `playerDisplayIdentity`, que no formatea
+    // nada por su cuenta: llama a `formatJerseyNumber` y expone el resultado
+    // en `ident.dorsal`. Un segundo formateador es como se acaba teniendo
+    // una pantalla con «0» donde las demás ponen «?».
+    for (const ruta of [
+      "./MatchTracker.tsx",
+      "../components/DualRosterPanel.tsx",
+      "../components/SharedPitchView.tsx",
+      "../components/PlayerActionRadialMenu.tsx",
+      "../services/matchExportService.ts",
     ] as const) {
       const fuente = readFileSync(resolve(__dirname, ruta), "utf-8");
-      expect(fuente, ruta).toContain("formatJerseyNumber");
-      expect((fuente.match(/formatJerseyNumber/g) ?? []).length, ruta).toBeGreaterThanOrEqual(veces);
+      expect(
+        /formatJerseyNumber|playerDisplayIdentity/.test(fuente),
+        ruta,
+      ).toBe(true);
     }
+    // Y el único sitio donde la identidad resuelve el dorsal es ese mismo
+    // formateador, no una copia.
+    const identidad = readFileSync(resolve(__dirname, "../utils/playerIdentity.ts"), "utf-8");
+    expect(identidad).toContain('from "./jerseyNumber"');
+    expect(identidad).toContain("const dorsal = formatJerseyNumber(player);");
     // Y el informe lleva la marca consigo, para que el PDF y el CSV la vean.
     const informe = readFileSync(resolve(__dirname, "../services/matchReportService.ts"), "utf-8");
     expect(informe).toContain("jerseyNumberKnown: p.jerseyNumberKnown");
@@ -860,5 +876,110 @@ describe("19 · los banquillos, fuera del campo", () => {
     expect(pista).toContain("data-shared-bench-player={p.id}");
     expect(pista).toContain("data-shared-pitch-player={p.id}");
     expect(pista).toContain("Sin suplentes");
+  });
+});
+
+// ── 20 · LA JERARQUÍA NOMBRE/DORSAL, EN TODA LA CAPTURA ─────────────────
+
+describe("20 · el nombre manda cuando lo hay, en todas las superficies", () => {
+  const radial = readFileSync(resolve(__dirname, "../components/PlayerActionRadialMenu.tsx"), "utf-8");
+  const identidad = readFileSync(resolve(__dirname, "../utils/playerIdentity.ts"), "utf-8");
+
+  it("la decisión está en UN sitio y es pura", () => {
+    // Si cada vista decidiera por su cuenta, el mismo jugador se llamaría
+    // distinto en la pista y en el radial, y el analista perdería el tiempo
+    // comprobando que son el mismo.
+    expect(identidad).toContain("export function playerDisplayIdentity(");
+    expect(identidad).toContain("export function shortPlayerName(");
+    expect(identidad).toContain("export function isProvisionalName(");
+    // Pura: no importa React, ni estado, ni nada que escriba.
+    expect(identidad).not.toContain('from "react"');
+    expect(identidad).not.toContain("useState");
+    expect(identidad).not.toContain("localStorage");
+  });
+
+  it("la regla NO está atada al bando", () => {
+    // El fallo que se corrige: «local → nombre, rival → dorsal» mentía en los
+    // dos sentidos. La rama se decide por `hasRealName`, no por `isOpponent`.
+    const decision = identidad.slice(identidad.indexOf("export function playerDisplayIdentity("));
+    expect(decision).toContain("hasRealName(player)");
+    expect(decision).not.toContain("player.isOpponent ?");
+    expect(decision).not.toContain("isOpponent &&");
+  });
+
+  it("todas las superficies de captura preguntan a la misma función", () => {
+    const editor = readFileSync(resolve(__dirname, "../components/JerseyNumberEditor.tsx"), "utf-8");
+    for (const [ruta, fuenteSurf] of [
+      ["SharedPitchView.tsx", pista],
+      ["DualRosterPanel.tsx", panel],
+      ["PlayerActionRadialMenu.tsx", radial],
+      ["MatchTracker.tsx", fuente],
+      // El editor también: su aviso decía «pertenece a PJ RIVAL 1» mientras
+      // la ficha de ese jugador ponía «B». Dos nombres para el mismo jugador
+      // en la misma pantalla es exactamente lo que este cambio viene a
+      // quitar, así que no podía quedarse fuera.
+      ["JerseyNumberEditor.tsx", editor],
+    ] as const) {
+      expect(fuenteSurf, ruta).toContain("playerDisplayIdentity");
+    }
+    expect(editor).not.toContain("playerLabel(");
+  });
+
+  it("y ninguna se queda con la primera o la última palabra por su cuenta", () => {
+    // `p.name.split(" ")[0]` dejaba los cinco rivales diciendo «PJ».
+    for (const [ruta, fuenteSurf] of [
+      ["SharedPitchView.tsx", pistaCodigo],
+      ["DualRosterPanel.tsx", panel],
+      ["PlayerActionRadialMenu.tsx", radial],
+    ] as const) {
+      expect(fuenteSurf, ruta).not.toContain('name.split(" ")[0]');
+      expect(fuenteSurf, ruta).not.toContain("name.split(' ')[0]");
+      expect(fuenteSurf, ruta).not.toContain("nombreCorto(");
+    }
+    // En MatchTracker quedan los usos del INFORME, que no cambian de
+    // contrato. Lo que no puede quedar es ninguno en la pista focal.
+    const i = codigo.indexOf("const PlayerCard = ({");
+    expect(i).toBeGreaterThan(-1);
+    const ficha = codigo.slice(i, codigo.indexOf("\n};", i));
+    expect(ficha).not.toContain('name.split(" ")[0]');
+    expect(ficha).toContain("playerDisplayIdentity(player, { players, maxCaracteres: 10 })");
+  });
+
+  it("la ficha 5v5 no crece ni pierde los cronómetros por enseñar el nombre", () => {
+    // El nombre se encoge ÉL: `min-w-0 truncate` dentro de un flex. Sin eso,
+    // un nombre largo empujaría al dorsal fuera de los 72 px.
+    expect(pistaCodigo).toContain("min-w-0 truncate text-[10px]");
+    expect(pistaCodigo).toContain("data-shared-pitch-name");
+    expect(pistaCodigo).toContain("data-shared-pitch-jersey");
+    // Y las dos cápsulas siguen intactas, con su `whitespace-nowrap`.
+    expect((pistaCodigo.match(/whitespace-nowrap/g) ?? []).length).toBe(2);
+    expect(pistaCodigo).toContain("data-shared-pitch-tot");
+    expect(pistaCodigo).toContain("data-shared-pitch-rot");
+    // La geometría no se toca: misma ficha, mismas medidas.
+    expect(DEFAULT_PITCH_METRICS.cardWidth).toBe(72);
+    expect(DEFAULT_PITCH_METRICS.cardHeight).toBe(58);
+  });
+
+  it("el nombre entero no se pierde: va al rótulo hablado y al `title`", () => {
+    expect(pistaCodigo).toContain("title={ident.nombreCompleto ?? undefined}");
+    expect(pistaCodigo).toContain("${ident.aria}");
+    expect(identidad).toContain("aria: `${completo},");
+  });
+
+  it("es presentación: no escribe nada del jugador", () => {
+    for (const campo of ["player.name =", "player.number =", "jerseyNumberKnown ="]) {
+      expect(identidad, campo).not.toContain(campo);
+    }
+    expect(identidad).not.toContain("setMatchData");
+  });
+
+  it("el informe y las exportaciones siguen con su contrato", () => {
+    // Nombre Y dorsal, como siempre: la jerarquía es cosa de la captura.
+    const exportaciones = readFileSync(resolve(__dirname, "../services/matchExportService.ts"), "utf-8");
+    expect(exportaciones).toContain("formatJerseyNumber");
+    expect(exportaciones).toContain("esc(p.name)");
+    expect(exportaciones).not.toContain("playerDisplayIdentity");
+    const informe = readFileSync(resolve(__dirname, "../services/matchReportService.ts"), "utf-8");
+    expect(informe).not.toContain("playerDisplayIdentity");
   });
 });

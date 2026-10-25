@@ -19,9 +19,9 @@ import {
   formatJerseyNumber,
   isJerseyUnknown,
   parseJerseyInput,
-  playerLabel,
   takeoverKind,
 } from "../utils/jerseyNumber";
+import { playerDisplayIdentity } from "../utils/playerIdentity";
 
 export type JerseyDecision =
   /** Asignar un dorsal concreto. El 0 es uno válido como cualquier otro. */
@@ -67,6 +67,20 @@ export function JerseyNumberEditor({
     onConfirm(texto.trim() === "" ? { tipo: "desconocido" } : { tipo: "guardar", number: propuesto });
   };
 
+  /**
+   * Cómo se llama a un jugador DENTRO del editor.
+   *
+   * Lo mismo que dice su ficha. `playerLabel` enseñaba el nombre en cuanto
+   * había dorsal, así que el aviso de duplicado decía «pertenece a PJ RIVAL
+   * 1» mientras la ficha de ese jugador ponía «B»: dos nombres para el mismo
+   * jugador en la misma pantalla, y el analista buscando a un tercero que no
+   * existe. Aquí hay sitio de sobra, así que el nombre va entero.
+   */
+  const comoSeLlama = (quien: Player) => {
+    const id = playerDisplayIdentity(quien, { players, maxCaracteres: 64 });
+    return id.kind === "nombre" ? id.nombreCompleto! : id.etiquetaProvisional;
+  };
+
   return (
     <>
       <div
@@ -77,7 +91,7 @@ export function JerseyNumberEditor({
       <div
         data-jersey-editor
         role="dialog"
-        aria-label={`Editar dorsal de ${playerLabel(player, players)}`}
+        aria-label={`Editar dorsal de ${comoSeLlama(player)}`}
         className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[330] w-[88vw] max-w-xs
                    bg-[#0E1015] border border-white/15 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl"
       >
@@ -90,7 +104,7 @@ export function JerseyNumberEditor({
             {equipo}
           </span>
           <span className="text-[13px] font-black uppercase text-white truncate">
-            {playerLabel(player, players)}
+            {comoSeLlama(player)}
           </span>
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
             Dorsal actual · {formatJerseyNumber(player)}
@@ -134,8 +148,8 @@ export function JerseyNumberEditor({
           <div data-jersey-duplicate className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-2 flex flex-col gap-2">
             <p className="text-[9px] font-black uppercase text-amber-300 leading-tight">
               {reasigna
-                ? `El dorsal ${propuesto} pertenece a ${playerLabel(choca, players)}. Al reasignarlo, ese jugador quedará con dorsal desconocido.`
-                : `El dorsal ${propuesto} ya está asignado a ${playerLabel(choca, players)}`}
+                ? `El dorsal ${propuesto} pertenece a ${comoSeLlama(choca)}. Al reasignarlo, ese jugador quedará con dorsal desconocido.`
+                : `El dorsal ${propuesto} ya está asignado a ${comoSeLlama(choca)}`}
             </p>
             <button
               data-jersey-swap

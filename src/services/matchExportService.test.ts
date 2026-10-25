@@ -204,6 +204,33 @@ describe("respaldo JSON — conserva el análisis de TACTICAL PRO", () => {
 // fase deja la celda vacía, como el resto de columnas opcionales: escribir
 // «No registrada» convertiría la ausencia en un valor.
 
+/**
+ * Separa una línea de CSV respetando las comillas.
+ *
+ * El jugador de la plantilla de prueba se llama «Juan, Pérez» —a propósito,
+ * para vigilar el escapado—, así que `split(",")` a secas parte esa celda en
+ * dos y desplaza todas las posteriores. Leer por posición exige leer bien.
+ */
+const celdasDe = (fila: string): string[] => {
+  const celdas: string[] = [];
+  let actual = "";
+  let dentro = false;
+  for (let i = 0; i < fila.length; i += 1) {
+    const c = fila[i];
+    if (c === '"') {
+      if (dentro && fila[i + 1] === '"') { actual += '"'; i += 1; }
+      else dentro = !dentro;
+    } else if (c === "," && !dentro) {
+      celdas.push(actual);
+      actual = "";
+    } else {
+      actual += c;
+    }
+  }
+  celdas.push(actual);
+  return celdas;
+};
+
 describe("CSV de acciones · fase de juego", () => {
   const conFase = (phaseOfPlay?: any): MatchData => ({
     ...match,
@@ -226,8 +253,11 @@ describe("CSV de acciones · fase de juego", () => {
   it("y «gol_para» se añade DESPUÉS, sin desplazar nada", () => {
     const cabecera = buildActionsCsv(match).split("\n")[0].replace(/^﻿/, "");
     const columnas = cabecera.split(",").map((c) => c.replace(/"/g, ""));
-    expect(columnas[columnas.length - 1]).toBe("gol_para");
     expect(columnas.indexOf("gol_para")).toBe(21);
+    // Cada columna nueva entra al final y ninguna anterior se mueve: ahora la
+    // última es «secuencia», y «gol_para» sigue exactamente en su sitio.
+    expect(columnas[columnas.length - 1]).toBe("secuencia");
+    expect(columnas.indexOf("secuencia")).toBe(22);
   });
 
   it("las columnas anteriores no se mueven ni cambian de nombre", () => {
@@ -236,16 +266,15 @@ describe("CSV de acciones · fase de juego", () => {
       "fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto",
       "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto",
       "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner",
-      "desenlace_balon_parado", "accion_desde", "fase", "gol_para",
+      "desenlace_balon_parado", "accion_desde", "fase", "gol_para", "secuencia",
     ]);
   });
 
   it("una acción con fase la exporta con su nombre completo", () => {
     const fila = buildActionsCsv(conFase("attack_positional")).split("\n")[1];
     // Se lee por POSICIÓN, no por ser la última celda: detrás de «fase» hay
-    // ahora otra columna y lo que importa es que la fase siga en su sitio.
-    const celdas = fila.split(",").map((c) => c.replace(/"/g, ""));
-    expect(celdas[celdas.length - 2]).toBe("Ataque posicional");
+    // ahora dos columnas más y lo que importa es que la fase siga en su sitio.
+    expect(celdasDe(fila)[20]).toBe("Ataque posicional");
   });
 
   it("las cuatro fases se exportan legibles", () => {
@@ -257,7 +286,7 @@ describe("CSV de acciones · fase de juego", () => {
 
   it("31 · un evento histórico sin fase deja la celda VACÍA, no inventa valor", () => {
     const fila = buildActionsCsv(conFase(undefined)).split("\n")[1];
-    expect(fila.trim().endsWith('""')).toBe(true);
+    expect(celdasDe(fila)[20]).toBe("");
     expect(fila).not.toContain("No registrada");
     expect(fila).not.toContain("Ataque posicional");
   });
@@ -360,14 +389,14 @@ describe("C · la columna «jugador» es el autor, nunca el portero objetivo", (
     const c = fila(md, "OWN_GOAL");
     expect(c[4]).toBe("Local Siete");
     expect(c[3]).toBe("MI EQUIPO");
-    expect(c[c.length - 1]).toBe("RIVAL");
+    expect(c[21]).toBe("RIVAL"); // gol_para, leído por posición fija
   });
 
   it("5 · un gol en propia sin autor deja la columna VACÍA, no inventa a nadie", () => {
     const md = partidoCon([E(ActionType.OWN_GOAL, true, [])]);
     const c = fila(md, "OWN_GOAL");
     expect(c[4]).toBe("");
-    expect(c[c.length - 1]).toBe("MI EQUIPO");
+    expect(c[21]).toBe("MI EQUIPO");
   });
 
   it("6 · un partido histórico SIN targetGoalkeeperId también se exporta bien", () => {
@@ -381,13 +410,14 @@ describe("C · la columna «jugador» es el autor, nunca el portero objetivo", (
     expect(c[4]).not.toBe("Portero Local");
   });
 
-  it("las columnas no se mueven y «gol_para» sigue siendo la última", () => {
+  it("las columnas no se mueven y «gol_para» sigue en su posición", () => {
     const md = partidoCon([E(ActionType.OWN_GOAL, false, ["l7"], { originGrid: "Z1C" })]);
     const cab = buildActionsCsv(md).replace(/^﻿/, "").split("\n")[0].split(",").map((c) => c.replace(/"/g, ""));
     expect(cab[4]).toBe("jugador");
     expect(cab[20]).toBe("fase");
-    expect(cab[cab.length - 1]).toBe("gol_para");
-    expect(cab).toHaveLength(22);
+    expect(cab[21]).toBe("gol_para");
+    expect(cab[22]).toBe("secuencia");
+    expect(cab).toHaveLength(23);
   });
 
   it("y el evento conserva su targetGoalkeeperId: solo deja de usarse como autor", () => {

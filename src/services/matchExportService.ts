@@ -8,6 +8,7 @@ import { formatSetPieceOrigin, formatSetPieceOutcome, formatShotOriginLabel } fr
 import { formatMatchTime } from "../utils/goalSequence";
 import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
+import { cornerSequenceCsvValue } from "../utils/cornerSequence";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { phaseCsvLabel } from "../utils/phaseModel";
 import { beneficiarySide, isGoalEvent } from "../utils/goalModel";
@@ -44,8 +45,9 @@ export function buildActionsCsv(matchData: MatchData): string {
   // "zona" y "destino" conservan el identificador interno para poder cruzar
   // datos; "zona_texto" y "destino_texto" son los legibles.
   // "fase" se añade AL FINAL para no mover ninguna columna existente: una
-  // hoja o un script que leyera por posición sigue funcionando igual.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase", "gol_para"];
+  // hoja o un script que leyera por posición sigue funcionando igual. Por lo
+  // mismo, "secuencia" va detrás de todo: es la última en llegar.
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase", "gol_para", "secuencia"];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -102,6 +104,13 @@ export function buildActionsCsv(matchData: MatchData): string {
             ? matchData.teamName
             : matchData.opponentName
           : "",
+        // Identificador de la jugada encadenada: el córner lanzado directo y
+        // su remate comparten valor, y así las dos filas vuelven a juntarse
+        // en una hoja de cálculo. Vacío = acción suelta, que es la mayoría.
+        // Las filas siguen siendo dos: una cuenta como córner y la otra como
+        // tiro, y sumarlas como si fueran la misma acción sería el error que
+        // este campo permite evitar.
+        cornerSequenceCsvValue(e),
       ].map(csvCell).join(",");
     });
   return "\uFEFF" + [header.map(csvCell).join(","), ...rows].join("\n");

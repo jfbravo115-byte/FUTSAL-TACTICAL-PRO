@@ -68,8 +68,35 @@ const SIDE_LABEL: Record<CornerSide, string> = {
   right: "derecha",
 };
 
+/**
+ * Forma adjetiva, para cuando el lado acompaña al sustantivo: «córner
+ * derecho». La forma con «·» se queda para los listados tabulados, donde el
+ * lado es una columna más y no parte de una frase.
+ */
+const SIDE_ADJECTIVE: Record<CornerSide, string> = {
+  left: "izquierdo",
+  right: "derecho",
+};
+
 export function formatCornerSideLabel(side: CornerSide): string {
   return SIDE_LABEL[side];
+}
+
+export function formatCornerSideAdjective(side: CornerSide): string {
+  return SIDE_ADJECTIVE[side];
+}
+
+/**
+ * La esquina de un córner ya registrado.
+ *
+ * `metadata.cornerSide` manda; `originGrid` es el respaldo para los córners
+ * anteriores a que existiera el campo. Este orden estaba escrito tres veces
+ * —etiqueta, resumen y ahora la secuencia—, y tres copias de la misma regla
+ * es como acaban discrepando.
+ */
+export function cornerSideOf(event: GameEvent): CornerSide | null {
+  if (isCornerSide(event.metadata?.cornerSide)) return event.metadata!.cornerSide as CornerSide;
+  return cornerSideFromGrid(event.originGrid);
 }
 
 /** `"Córner · izquierda"`. */
@@ -88,9 +115,7 @@ export function formatCornerLabel(side: CornerSide): string {
  * en crudo porque no había ninguna etiqueta para este tipo.
  */
 export function formatCornerEventLabel(event: GameEvent): string {
-  const side = isCornerSide(event.metadata?.cornerSide)
-    ? (event.metadata!.cornerSide as CornerSide)
-    : cornerSideFromGrid(event.originGrid);
+  const side = cornerSideOf(event);
   const outcome = formatSetPieceOutcome(event);
   return ["Córner", side ? SIDE_LABEL[side] : null, outcome].filter(Boolean).join(" · ");
 }
@@ -123,9 +148,7 @@ export function summarizeCorners(events: GameEvent[], opponent = false): CornerS
   let unspecified = 0;
 
   for (const corner of corners) {
-    const side = isCornerSide(corner.metadata?.cornerSide)
-      ? (corner.metadata!.cornerSide as CornerSide)
-      : cornerSideFromGrid(corner.originGrid);
+    const side = cornerSideOf(corner);
 
     if (side === "left") left += 1;
     else if (side === "right") right += 1;

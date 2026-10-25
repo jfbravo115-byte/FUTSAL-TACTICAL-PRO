@@ -27,6 +27,13 @@ function jsonResp(status: number, body: unknown): Response {
  * Verifica el Firebase ID Token contra el endpoint público de Google.
  * No requiere Firebase Admin SDK, solo FIREBASE_WEB_API_KEY.
  */
+const FIREBASE_WEB_API_KEY =
+  process.env.FIREBASE_WEB_API_KEY?.trim() ||
+  // Clave publica del mismo cliente Firebase que usa src/firebase.ts.
+  // No es un secreto: identifica el proyecto; la autorizacion real la aporta
+  // el ID token firmado que se valida en accounts:lookup.
+  "AIzaSyD4fMTrQspCboPHyGZC96ORnYqCBa9XSgo";
+
 async function verifyFirebaseToken(
   authHeader: string | null
 ): Promise<string | null> {
@@ -34,7 +41,7 @@ async function verifyFirebaseToken(
   const token = authHeader.slice(7);
   try {
     const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_WEB_API_KEY}`,
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

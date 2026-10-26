@@ -558,7 +558,10 @@ describe("el informe incorpora las situaciones especiales", () => {
     // quién eran, y en un partido con declaraciones de los dos lados eso
     // acababa atribuyendo al equipo los goles que le metieron.
     expect(texto).toContain("Producción de Mi Equipo — tiros **5**");
-    expect(texto).toContain("Concedido a Rival CF — tiros **0**");
+    expect(texto).toContain(
+      "Producción de Rival CF durante la superioridad de Mi Equipo — tiros **0**",
+    );
+    expect(texto).toContain("Mi Equipo encajó 0 goles durante estos tramos.");
   });
 
   it("nunca imprime el código interno del estado", () => {

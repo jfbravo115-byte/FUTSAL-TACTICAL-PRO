@@ -6,7 +6,12 @@ import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../ut
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { formatSetPieceOrigin, formatSetPieceOutcome, formatShotOriginLabel } from "../utils/setPieceModel";
 import { formatMatchTime } from "../utils/goalSequence";
-import { UNKNOWN_DURATION_LABEL, concededLabel, productionLabel } from "../utils/matchContexts";
+import {
+  UNKNOWN_DURATION_LABEL,
+  concededGoalsNote,
+  concededLabel,
+  productionLabel,
+} from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { phaseCsvLabel } from "../utils/phaseModel";
@@ -234,12 +239,13 @@ export function buildPrintableReportHtml(matchData: MatchData): string {
           // Un bloque por bando. Sumarlos diría que marcó quien encajó.
           const lado = (rotulo: string, t: typeof g.production) =>
             `<div><b style="font-size:11px">${esc(rotulo)}</b>` +
-            `<div>Tiros ${t.shots} · a portería ${t.onTarget} · fuera ${t.offTarget} · bloqueados ${t.blocked} · goles a favor ${t.goalsBenefiting}</div>` +
+            `<div>Tiros ${t.shots} · a portería ${t.onTarget} · fuera ${t.offTarget} · bloqueados ${t.blocked} · goles ${t.goalsBenefiting}</div>` +
             `<div class="muted">Recuperaciones ${t.recoveries} · pérdidas ${t.turnovers} · faltas ${t.fouls} · córners ${t.corners}</div></div>`;
           return `<div class="card"><b style="font-size:13px">${esc(g.label)}</b>` +
             `<div class="muted">Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}</div>` +
             lado(productionLabel(g, nombres), g.production) +
-            lado(concededLabel(g, nombres), g.conceded) + `</div>`;
+            lado(concededLabel(g, nombres), g.conceded) +
+            `<div><b>${esc(concededGoalsNote(g, nombres))}</b></div></div>`;
         })
         .join("")
     : "";

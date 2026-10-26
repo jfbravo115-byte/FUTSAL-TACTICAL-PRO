@@ -158,8 +158,12 @@ describe("el PDF dice exactamente lo que dice el informe determinista", () => {
     // que tiene la ventaja y la de lo que le concedió al otro.
     const lineas = (texto(host).match(/Recuperaciones \d+ · pérdidas/g) || []).length;
     expect(lineas).toBe(report.matchContexts.length * 2);
+    // Dos rótulos «Producción de …» por tarjeta: el del bando que tiene la
+    // ventaja y el del otro, cada uno con sus cifras.
     const rotulos = (texto(host).match(/Producción de /g) || []).length;
-    expect(rotulos).toBe(report.matchContexts.length);
+    expect(rotulos).toBe(report.matchContexts.length * 2);
+    const notas = (texto(host).match(/encajó \d+ gol/g) || []).length;
+    expect(notas).toBe(report.matchContexts.length);
   });
 
   it("los tipos salen con etiqueta humana y en el orden del informe", () => {

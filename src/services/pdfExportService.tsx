@@ -40,7 +40,12 @@ import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
-import { UNKNOWN_DURATION_LABEL, concededLabel, productionLabel } from "../utils/matchContexts";
+import {
+  UNKNOWN_DURATION_LABEL,
+  concededGoalsNote,
+  concededLabel,
+  productionLabel,
+} from "../utils/matchContexts";
 import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
 import {
   buildZoneDashboard,
@@ -678,7 +683,7 @@ export function SpecialContextsSection({ report }: { report: MatchReport }) {
                       <div style={{ fontSize: 10, fontWeight: 700, color }}>{rotulo}</div>
                       <div style={{ fontSize: 11 }}>
                         Tiros {t.shots} · a portería {t.onTarget} · fuera {t.offTarget} ·
-                        bloqueados {t.blocked} · goles a favor {t.goalsBenefiting}
+                        bloqueados {t.blocked} · goles {t.goalsBenefiting}
                       </div>
                       <div style={{ fontSize: 11, color: "#6b7280" }}>
                         Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas{" "}
@@ -686,6 +691,10 @@ export function SpecialContextsSection({ report }: { report: MatchReport }) {
                       </div>
                     </div>
                   ))}
+                  {/* La dirección de los goles, dicha con todas las letras. */}
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", marginTop: 3 }}>
+                    {concededGoalsNote(g, nombres)}
+                  </div>
                 </div>
               );
             })}

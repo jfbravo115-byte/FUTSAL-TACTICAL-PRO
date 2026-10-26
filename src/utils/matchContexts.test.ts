@@ -27,6 +27,7 @@ import {
   MATCH_CONTEXT_LABEL,
   UNKNOWN_SIDE_LABEL,
   buildMatchContexts,
+  concededGoalsNote,
   concededLabel,
   contextSideOf,
   contextTypeOf,
@@ -793,7 +794,12 @@ describe("U · las cifras dicen de quién son, y los dos bandos nunca se suman",
     const g = groupMatchContexts(buildMatchContexts(perspectivasMezcladas()), nombres)[0];
     expect(g.label).toBe("5x4 · Portero-jugador propio");
     expect(productionLabel(g, nombres)).toBe("Producción de CD MURCIA");
-    expect(concededLabel(g, nombres)).toBe("Concedido a JIMBEE");
+    expect(concededLabel(g, nombres)).toBe(
+      "Producción de JIMBEE durante el 5x4 de CD MURCIA",
+    );
+    expect(concededGoalsNote(g, nombres)).toBe(
+      "CD MURCIA encajó 2 goles durante estos tramos.",
+    );
   });
 
   it("un estado que no identifica bando NO se atribuye: se dice", () => {
@@ -813,7 +819,11 @@ describe("U · las cifras dicen de quién son, y los dos bandos nunca se suman",
     };
     expect(grupo.label).toBe(UNKNOWN_SIDE_LABEL);
     expect(productionLabel(grupo, { teamName: "A", opponentName: "B" })).toBe("Producción de A");
-    expect(concededLabel(grupo, { teamName: "A", opponentName: "B" })).toBe("Concedido a B");
+    // Sin bando no se puede decir «durante el 5x4 de X»: se dice lo que hay.
+    expect(concededLabel(grupo, { teamName: "A", opponentName: "B" })).toBe("Producción de B");
+    expect(concededGoalsNote(grupo, { teamName: "A", opponentName: "B" })).toBe(
+      "A encajó 0 goles durante estos tramos.",
+    );
   });
 
   it("el bando sale del ESTADO, no de quién declara", () => {

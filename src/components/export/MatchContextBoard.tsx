@@ -27,6 +27,7 @@
 import React from "react";
 import { Period } from "../../types/futsal";
 import {
+  CONTEXT_DURING_LABEL,
   MATCH_CONTEXT_LABEL,
   MatchContext,
   UNKNOWN_DURATION_LABEL,
@@ -112,9 +113,24 @@ export function MatchContextCard({
   const nombres = { teamName, opponentName };
   // Los dos bandos de la ventana, cada uno con su rótulo. Nunca sumados:
   // el que tiene el portero-jugador y el que se aprovechó de tenerlo.
+  const bando = context.side === "unknown" ? "team" : context.side;
+  const otro = context.side === "unknown" ? "opponent" : otherSide(context.side);
+  const encajados = context.conceded.goalsBenefiting;
   const bloques = [
-    { rotulo: `Producción de ${sideName(context.side === "unknown" ? "team" : context.side, nombres)}`, t: context.production, accent: "#16a34a" },
-    { rotulo: `Concedido a ${sideName(context.side === "unknown" ? "opponent" : otherSide(context.side), nombres)}`, t: context.conceded, accent: "#b91c1c" },
+    {
+      rotulo: `Producción de ${sideName(bando, nombres)}`,
+      t: context.production,
+      accent: "#16a34a",
+    },
+    {
+      // Dicho entero: de quién son las cifras y durante qué.
+      rotulo:
+        context.side === "unknown"
+          ? `Producción de ${sideName(otro, nombres)}`
+          : `Producción de ${sideName(otro, nombres)} durante ${CONTEXT_DURING_LABEL[context.type]} de ${sideName(bando, nombres)}`,
+      t: context.conceded,
+      accent: "#b91c1c",
+    },
   ];
   return (
     <div style={cardStyle}>
@@ -136,7 +152,7 @@ export function MatchContextCard({
             <Metric label="A portería" value={t.onTarget} />
             <Metric label="Fuera" value={t.offTarget} />
             <Metric label="Bloqueados" value={t.blocked} />
-            <Metric label="Goles a favor" value={t.goalsBenefiting} accent={accent} />
+            <Metric label="Goles" value={t.goalsBenefiting} accent={accent} />
           </div>
           <div style={{ fontSize: 9, color: "#64748b" }}>
             Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas {t.fouls} · córners{" "}
@@ -144,6 +160,11 @@ export function MatchContextCard({
           </div>
         </div>
       ))}
+
+      <div style={{ fontSize: 9, fontWeight: 700, color: "#b91c1c" }}>
+        {sideName(bando, nombres)} encajó {encajados} {encajados === 1 ? "gol" : "goles"} durante
+        estos tramos.
+      </div>
     </div>
   );
 }

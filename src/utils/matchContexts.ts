@@ -131,6 +131,21 @@ export const MATCH_CONTEXT_LABEL: Record<MatchContextType, string> = {
  */
 export const UNKNOWN_SIDE_LABEL = "Bando del portero-jugador no determinado";
 
+/**
+ * El contexto nombrado DENTRO de una frase, con su artículo.
+ *
+ * «Producción de JIMBEE durante el 5x4 de CD MURCIA» se entiende de una
+ * lectura. «Concedido a JIMBEE», no. El artículo va aquí porque no todos son
+ * masculinos: «durante la superioridad de…».
+ */
+export const CONTEXT_DURING_LABEL: Record<MatchContextType, string> = {
+  even: "el juego igualado",
+  superiority_expulsion: "la superioridad",
+  inferiority_expulsion: "la inferioridad",
+  gk_player_own: "el 5x4",
+  gk_player_rival: "el 4x5",
+};
+
 /** Los contextos que merecen una sección propia. El juego igualado no. */
 export const SPECIAL_CONTEXT_TYPES: readonly MatchContextType[] = [
   "superiority_expulsion",
@@ -491,8 +506,33 @@ export function productionLabel(group: MatchContextGroup, names: ContextTeamName
   return `Producción de ${sideName(group.side, names)}`;
 }
 
-/** Rótulo de la línea de lo concedido: «Concedido a JIMBEE». */
+/**
+ * Rótulo del segundo bloque: de quién son esas cifras y cuándo las hizo.
+ *
+ * «Concedido a JIMBEE · goles a favor 5» era ambiguo hasta decir lo
+ * contrario: se leía como que a JIMBEE le habían concedido cinco goles, no
+ * como que los había metido JIMBEE. Se dice entero.
+ */
 export function concededLabel(group: MatchContextGroup, names: ContextTeamNames = {}): string {
-  const otro = group.side === "unknown" ? "opponent" : otherSide(group.side);
-  return `Concedido a ${sideName(otro as ContextSide, names)}`;
+  const otro = (group.side === "unknown" ? "opponent" : otherSide(group.side)) as ContextSide;
+  if (group.side === "unknown") return `Producción de ${sideName(otro, names)}`;
+  return (
+    `Producción de ${sideName(otro, names)} durante ` +
+    `${CONTEXT_DURING_LABEL[group.type]} de ${sideName(group.side, names)}`
+  );
+}
+
+/**
+ * La frase que cierra el bloque: cuántos goles encajó el bando del contexto.
+ *
+ * Va debajo de las cifras del otro equipo para que no quede ninguna duda de
+ * en qué dirección fueron esos goles.
+ */
+export function concededGoalsNote(
+  group: MatchContextGroup,
+  names: ContextTeamNames = {},
+): string {
+  const bando = (group.side === "unknown" ? "team" : group.side) as ContextSide;
+  const n = group.conceded.goalsBenefiting;
+  return `${sideName(bando, names)} encajó ${n} ${n === 1 ? "gol" : "goles"} durante estos tramos.`;
 }

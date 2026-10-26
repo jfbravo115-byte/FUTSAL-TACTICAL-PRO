@@ -30,6 +30,7 @@ import {
   MatchContext,
   MatchContextGroup,
   buildMatchContexts,
+  concededGoalsNote,
   concededLabel,
   groupMatchContexts,
   productionLabel,
@@ -678,13 +679,14 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
       ] as const).forEach(([rotulo, t]) => {
         lines.push(
           `${rotulo} — tiros **${t.shots}** · a portería **${t.onTarget}** · fuera **${t.offTarget}** · ` +
-            `bloqueados **${t.blocked}** · goles a favor **${t.goalsBenefiting}**`,
+            `bloqueados **${t.blocked}** · goles **${t.goalsBenefiting}**`,
         );
         lines.push(
           `${rotulo} — recuperaciones **${t.recoveries}** · pérdidas **${t.turnovers}** · ` +
             `faltas **${t.fouls}** · córners **${t.corners}**`,
         );
       });
+      lines.push(concededGoalsNote(g, nombres));
       lines.push("");
     });
   }

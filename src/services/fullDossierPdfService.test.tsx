@@ -68,6 +68,9 @@ vi.mock("./tacticalAnalysisService", () => ({
 
 import {
   DOSSIER_MAP_METRICS,
+  DOSSIER_TACTICAL_CHARS_PER_PAGE,
+  INDEX_ROWS_PER_COLUMN,
+  hasZoneData,
   DossierSourceError,
   failedChecks,
   verifyDossierAgainstReport,
@@ -81,7 +84,7 @@ import {
   exportFullMatchDossierPdf,
   hasTacticalAnalysis,
 } from "./fullDossierPdfService";
-import { exportMatchReportPdf } from "./pdfExportService";
+import { exportMatchReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
 import { buildZoneDashboard, primaryBucket, zoneMetricValue } from "./matchZonesService";
 import { generateMatchReport } from "./matchReportService";
 import { buildGoalkeeperReports } from "./goalkeeperReportService";
@@ -577,6 +580,74 @@ describe("5 · 28 · partidos antiguos y casos límite", () => {
     const antes = document.body.children.length;
     await exportFullMatchDossierPdf(partidoDenso({ events: [], players: [] }));
     expect(document.body.children.length).toBe(antes);
+  }, TIEMPO);
+});
+
+// ── 5 bis bis · NINGUNA PÁGINA PUEDE RECORTAR ───────────────────────────
+//
+// El marco de la página es A4 fijo con `overflow: hidden`: lo que no cabe
+// desaparece y el PDF sale igual de bonito, sin señal de que falta algo. Lo
+// medido en el Deploy Preview con 30 fichas, 121 acciones y 8 324 caracteres
+// de análisis: la portada recortaba 133 px, «datos clave» 146 px y las dos
+// primeras páginas del análisis 127 y 85 px. Estos tests fijan las tres
+// decisiones que lo arreglan, porque jsdom no tiene maquetación y no puede
+// volver a medirlo por su cuenta.
+
+describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
+  it("el índice se reparte en dos columnas cuando hay muchas secciones", async () => {
+    const md = partidoDenso({ tacticalAnalysis: IA_LARGO });
+    const ns = await dossier(DENSO_IA, md);
+    const indice = buildDossierIndex(buildDossierPages(md));
+    expect(indice.length).toBeGreaterThan(INDEX_ROWS_PER_COLUMN);
+    const caja = ns[0].querySelector("[data-dossier-index-columns]");
+    expect(caja?.getAttribute("data-dossier-index-columns")).toBe("2");
+    // Y no se pierde ni se duplica ninguna entrada al repartirlas.
+    const filas = Array.from(ns[0].querySelectorAll("[data-dossier-index] tr"));
+    expect(filas).toHaveLength(indice.length);
+    indice.forEach((row) => {
+      expect(filas.some((f) => (f.textContent || "").includes(row.section))).toBe(true);
+    });
+  }, TIEMPO);
+
+  it("y en una sola columna cuando caben", async () => {
+    const ns = await dossier("vacio-indice", partidoDenso({ events: [], players: [] }));
+    const indice = buildDossierIndex(buildDossierPages(partidoDenso({ events: [], players: [] })));
+    expect(indice.length).toBeLessThanOrEqual(INDEX_ROWS_PER_COLUMN);
+    expect(
+      ns[0].querySelector("[data-dossier-index-columns]")?.getAttribute("data-dossier-index-columns"),
+    ).toBe("1");
+  }, TIEMPO);
+
+  it("«datos clave» y el bloque de zonas van en páginas distintas", async () => {
+    const ns = await dossier(DENSO, partidoDenso());
+    const clave = ns.find((n) => n.getAttribute("data-dossier-section") === "report-key");
+    const zonas = ns.find((n) => n.getAttribute("data-dossier-section") === "report-zones");
+    expect(clave).toBeDefined();
+    expect(zonas).toBeDefined();
+    expect(clave!.textContent).toContain("Datos clave");
+    expect(clave!.textContent).not.toContain("Mapas / Zonas");
+    expect(zonas!.textContent).toContain("Mapas / Zonas");
+  }, TIEMPO);
+
+  it("y sin zonas que contar no se crea la página de zonas", async () => {
+    const md = partidoDenso({ events: [], players: [] });
+    expect(hasZoneData(buildZoneDashboard(md, false))).toBe(false);
+    const ns = await dossier("vacio-indice", md);
+    expect(seccionesDe(ns)).not.toContain("report-zones");
+  }, TIEMPO);
+
+  it("el análisis se parte en páginas más cortas que en el informe resumido", async () => {
+    expect(DOSSIER_TACTICAL_CHARS_PER_PAGE).toBeLessThan(3200);
+    const trozos = splitTacticalProIntoPages(IA_LARGO, DOSSIER_TACTICAL_CHARS_PER_PAGE);
+    trozos.forEach((t, i) => {
+      expect(t.length, `trozo ${i + 1}`).toBeLessThanOrEqual(DOSSIER_TACTICAL_CHARS_PER_PAGE);
+    });
+    // Y el dossier usa ESE presupuesto, no el del informe resumido.
+    const ns = await dossier(DENSO_IA, partidoDenso({ tacticalAnalysis: IA_LARGO }));
+    const paginasIa = ns.filter((n) =>
+      (n.getAttribute("data-dossier-section") || "").startsWith("tactical-"),
+    );
+    expect(paginasIa).toHaveLength(trozos.length);
   }, TIEMPO);
 });
 

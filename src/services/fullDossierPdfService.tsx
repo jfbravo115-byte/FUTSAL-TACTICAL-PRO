@@ -415,30 +415,69 @@ export function DossierCover({
       <SummaryKpis report={report} />
 
       <div style={sectionTitleStyle}>Índice</div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }} data-dossier-index>
-        <tbody>
-          {indice.map((row) => (
-            <tr key={`${row.section}-${row.page}`}>
-              <td style={{ fontSize: 10, padding: "2px 0", borderBottom: "1px dotted #d1d5db" }}>
-                {row.section}
-              </td>
-              <td
-                style={{
-                  fontSize: 10,
-                  padding: "2px 0",
-                  textAlign: "right",
-                  borderBottom: "1px dotted #d1d5db",
-                  width: 40,
-                  fontWeight: 700,
-                }}
-              >
-                {row.page}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DossierIndexTable indice={indice} />
     </>
+  );
+}
+
+/** Cuántas entradas de índice caben en UNA columna de la portada. */
+export const INDEX_ROWS_PER_COLUMN = 14;
+
+/**
+ * El índice de la portada.
+ *
+ * En una sola columna, un dossier largo empujaba el índice fuera del marco y
+ * la portada perdía sus últimas entradas SIN AVISAR, porque la página recorta
+ * (`overflow: hidden`). Medido en el Deploy Preview con un partido de 30
+ * fichas y 121 acciones: 25 secciones desbordaban 133 px. A partir de
+ * `INDEX_ROWS_PER_COLUMN` filas el índice se reparte en dos columnas, que es
+ * la mitad de alto y sigue cabiendo de sobra en el ancho A4.
+ */
+export function DossierIndexTable({
+  indice,
+}: {
+  indice: { section: string; page: number }[];
+}) {
+  const mitad = Math.ceil(indice.length / 2);
+  const columnas =
+    indice.length > INDEX_ROWS_PER_COLUMN
+      ? [indice.slice(0, mitad), indice.slice(mitad)]
+      : [indice];
+  return (
+    <div
+      data-dossier-index-columns={columnas.length}
+      style={{
+        display: "grid",
+        gridTemplateColumns: columnas.map(() => "1fr").join(" "),
+        gap: 16,
+      }}
+    >
+      {columnas.map((columna, c) => (
+        <table key={c} style={{ width: "100%", borderCollapse: "collapse" }} data-dossier-index>
+          <tbody>
+            {columna.map((row) => (
+              <tr key={`${row.section}-${row.page}`}>
+                <td style={{ fontSize: 10, padding: "2px 0", borderBottom: "1px dotted #d1d5db" }}>
+                  {row.section}
+                </td>
+                <td
+                  style={{
+                    fontSize: 10,
+                    padding: "2px 0",
+                    textAlign: "right",
+                    borderBottom: "1px dotted #d1d5db",
+                    width: 40,
+                    fontWeight: 700,
+                  }}
+                >
+                  {row.page}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
+    </div>
   );
 }
 
@@ -452,6 +491,32 @@ export function DossierCover({
  * datos NO entran — una hoja vacía no informa de nada y hace pensar que el
  * dato existe y es cero.
  */
+/**
+ * Si el bloque de zonas tiene algo que contar.
+ *
+ * Mismo criterio que usa `ZonesSection` para decidir si pinta la pista o el
+ * «Sin datos registrados»: origen en pista, córners, destino de tiro o fuera.
+ */
+export function hasZoneData(zones: ZoneDashboard): boolean {
+  const bucket = primaryBucket(zones);
+  return (
+    (bucket?.total ?? 0) > 0 ||
+    zones.corners.total > 0 ||
+    zones.goal.some((z) => z.attempts > 0) ||
+    zones.out > 0
+  );
+}
+
+/**
+ * Presupuesto de caracteres por página de Tactical Pro EN EL DOSSIER.
+ *
+ * Menor que el del informe resumido (3200) porque aquí la página gasta alto
+ * en el pie, y la primera del bloque gasta además el aviso. Con 3200 se midió
+ * en el Deploy Preview un recorte de 127 px en la primera página del análisis
+ * y de 85 px en la segunda: texto perdido sin ninguna señal.
+ */
+export const DOSSIER_TACTICAL_CHARS_PER_PAGE = 2400;
+
 export function buildDossierPages(matchData: MatchData): DossierPage[] {
   const report = generateMatchReport(matchData);
   const propio = buildZoneDashboard(matchData, false);
@@ -465,6 +530,13 @@ export function buildDossierPages(matchData: MatchData): DossierPage[] {
     pages.push({ key, section, content });
 
   // ── 1 · INFORME AUTOMÁTICO ────────────────────────────────────────────
+  //
+  // «Datos clave» y el bloque de zonas NO caben juntos en una A4 cuando el
+  // partido trae datos de verdad: medido en el Deploy Preview con 30 fichas y
+  // 121 acciones, la página desbordaba 146 px y el marco los recortaba sin
+  // avisar. Son dos páginas. La de zonas solo existe si hay zonas que contar:
+  // una hoja con «Sin datos registrados» hace pensar que el dato existe y es
+  // cero.
   push(
     "report-key",
     "Informe automático · datos clave",
@@ -472,9 +544,16 @@ export function buildDossierPages(matchData: MatchData): DossierPage[] {
       <div style={sectionTitleStyle}>Datos clave</div>
       <SummaryKpis report={report} />
       <FoulsByPeriod report={report} />
-      <ZonesSection zones={propio} matchData={matchData} />
     </>,
   );
+
+  if (hasZoneData(propio)) {
+    push(
+      "report-zones",
+      "Informe automático · mapas y zonas",
+      <ZonesSection zones={propio} matchData={matchData} />,
+    );
+  }
 
   push(
     "report-players",
@@ -656,7 +735,10 @@ export function buildDossierPages(matchData: MatchData): DossierPage[] {
   // análisis ni consume saldo. Si no hay, no se crea ninguna página vacía —
   // la portada ya lo declara.
   if (hasTacticalAnalysis(matchData)) {
-    const chunks = splitTacticalProIntoPages(matchData.tacticalAnalysis!);
+    const chunks = splitTacticalProIntoPages(
+      matchData.tacticalAnalysis!,
+      DOSSIER_TACTICAL_CHARS_PER_PAGE,
+    );
     chunks.forEach((chunk, i) => {
       push(
         `tactical-${i}`,

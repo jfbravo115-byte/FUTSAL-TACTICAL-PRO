@@ -156,6 +156,64 @@ export function buildMatchJson(matchData: MatchData): string {
   return JSON.stringify(matchData, null, 2);
 }
 
+/**
+ * Leer un respaldo JSON y devolver el partido.
+ *
+ * `buildMatchJson` escribe el `MatchData` tal cual, así que `tacticalAnalysis`
+ * viaja SIEMPRE que el objeto lo traiga —el respaldo nunca lo ha filtrado—. Lo
+ * que se perdía estaba antes: el análisis no llegaba a estar en el partido.
+ * Ver `MatchAnalysis`, donde ahora se guarda en memoria aunque no exista copia
+ * local ni se pueda escribir en remoto.
+ *
+ * COMPATIBILIDAD. Esta función acepta las tres formas que puede tener un
+ * archivo guardado por alguna versión de la aplicación:
+ *
+ *   1. `MatchData` en la raíz — lo que escribe `buildMatchJson`, con o sin
+ *      `id` y con o sin `tacticalAnalysis`.
+ *   2. `{ version, matchData, … }` — la envoltura de la copia local.
+ *   3. `{ data: { … } }` — la fila remota tal como la devuelve el backend.
+ *
+ * Lo que NO hace es rellenar huecos. Un respaldo antiguo sin
+ * `tacticalAnalysis`, sin `timestamp` o sin `teamDefendsAtKickoff` se devuelve
+ * sin esos campos: inventarlos convertiría una ausencia en un dato y el
+ * dossier acabaría afirmando algo que nadie registró.
+ */
+export function parseMatchJson(text: string): MatchData {
+  let crudo: unknown;
+  try {
+    crudo = JSON.parse(text);
+  } catch {
+    throw new Error("El archivo no es un JSON válido");
+  }
+  const envoltura = crudo as Record<string, unknown> | null;
+  const cuerpo =
+    envoltura && typeof envoltura === "object"
+      ? ((envoltura.matchData as Record<string, unknown> | undefined) ??
+        (envoltura.data as Record<string, unknown> | undefined) ??
+        envoltura)
+      : null;
+  if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) {
+    throw new Error("El archivo no contiene un partido");
+  }
+  const faltan = (
+    [
+      ["teamName", "string"],
+      ["opponentName", "string"],
+      ["players", "array"],
+      ["events", "array"],
+    ] as const
+  ).filter(([clave, tipo]) =>
+    tipo === "array" ? !Array.isArray(cuerpo[clave]) : typeof cuerpo[clave] !== tipo,
+  );
+  if (faltan.length) {
+    throw new Error(`El respaldo no trae ${faltan.map(([c]) => c).join(", ")}`);
+  }
+  // El `id` es de la fila guardada, no del partido: no se arrastra a un
+  // objeto que puede acabar exportándose o guardándose en otro sitio.
+  const { id: _id, ...partido } = cuerpo as Record<string, unknown>;
+  return partido as unknown as MatchData;
+}
+
 function esc(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildActionsCsv, buildMatchJson, buildPlayersCsv, buildPrintableReportHtml } from "./matchExportService";
+import { readFileSync } from "node:fs";
+import { buildActionsCsv, buildMatchJson, buildPlayersCsv, buildPrintableReportHtml, parseMatchJson } from "./matchExportService";
 import { ActionType, GameEvent, GameState, MatchData, Period, Role } from "../types/futsal";
 
 const match: MatchData = {
@@ -194,6 +195,92 @@ describe("respaldo JSON — conserva el análisis de TACTICAL PRO", () => {
     const texto = "Línea uno.\n\nLínea dos con **negrita** y acentuación: ñ á é.";
     const restaurado = JSON.parse(buildMatchJson({ ...match, tacticalAnalysis: texto }));
     expect(restaurado.tacticalAnalysis).toBe(texto);
+  });
+});
+
+// ── RESPALDO ⇄ RESTAURACIÓN, CON UN ANÁLISIS DE TAMAÑO REAL ─────────────
+//
+// El informe de TACTICAL PRO de un partido de verdad son varios miles de
+// caracteres con títulos numerados, viñetas, acentos y saltos dobles. Si el
+// respaldo o la lectura tocaran UNA coma, el dossier dejaría de decir lo que
+// dijo el análisis. Estas pruebas comparan el texto ENTERO, carácter a
+// carácter, no un fragmento.
+
+const IA_REAL_FORMA = [
+  "## 1. Lectura del partido",
+  "",
+  "El equipo sostuvo la primera parte con una presión alta y ordenada; la segunda cambió por completo.",
+  "",
+  "- Fortaleza: recuperación en zona media.",
+  "- Debilidad: pérdidas en salida (42 entre pérdidas y errores).",
+  "",
+  "## 6. Propuestas de trabajo",
+  "",
+  "1) Salida bajo presión con portero-jugador.",
+  "2) Transición defensa-ataque tras recuperación en Z2.",
+  "",
+  "Acentuación y signos: ñ, á, é, í, ó, ú, ü, ¿?, ¡!, «comillas», 5x4, 4x5 — guion largo.",
+].join("\n");
+
+describe("respaldo JSON ⇄ restauración", () => {
+  it("el JSON contiene EXACTAMENTE el texto completo del análisis", () => {
+    const texto = `${IA_REAL_FORMA}\n`.repeat(40).trim();
+    expect(texto.length).toBeGreaterThan(8000);
+    const json = buildMatchJson({ ...match, tacticalAnalysis: texto });
+    expect(JSON.parse(json).tacticalAnalysis).toBe(texto);
+  });
+
+  it("importar ese JSON restaura exactamente tacticalAnalysis", () => {
+    const restaurado = parseMatchJson(buildMatchJson({ ...match, tacticalAnalysis: IA_REAL_FORMA }));
+    expect(restaurado.tacticalAnalysis).toBe(IA_REAL_FORMA);
+    // Y el resto del partido llega igual: el análisis no es lo único que viaja.
+    expect(restaurado.teamName).toBe(match.teamName);
+    expect(restaurado.events).toHaveLength(match.events.length);
+    expect(restaurado.players[0].name).toBe("Juan, Pérez");
+  });
+
+  it("un respaldo ANTIGUO sin el campo sigue siendo válido, y no se inventa", () => {
+    const antiguo = parseMatchJson(buildMatchJson(match));
+    expect("tacticalAnalysis" in antiguo).toBe(false);
+    expect(antiguo.teamName).toBe("Local");
+    expect(antiguo.events[0].originGrid).toBe("B3");
+  });
+
+  it("acepta las envolturas de la copia local y de la fila remota", () => {
+    const conIa = { ...match, tacticalAnalysis: IA_REAL_FORMA };
+    const local = parseMatchJson(
+      JSON.stringify({ version: 2, matchData: conIa, syncStatus: "synced", savedAt: "x" }),
+    );
+    const remota = parseMatchJson(JSON.stringify({ id: "remoto-1", data: conIa }));
+    expect(local.tacticalAnalysis).toBe(IA_REAL_FORMA);
+    expect(remota.tacticalAnalysis).toBe(IA_REAL_FORMA);
+  });
+
+  it("y el id de la fila guardada no se arrastra al partido", () => {
+    const restaurado = parseMatchJson(JSON.stringify({ ...match, id: "fila-7" }));
+    expect((restaurado as Record<string, unknown>).id).toBeUndefined();
+  });
+
+  it("un archivo que no es un partido se rechaza diciendo qué falta", () => {
+    expect(() => parseMatchJson("{no es json")).toThrow("no es un JSON válido");
+    expect(() => parseMatchJson("[]")).toThrow("no contiene un partido");
+    expect(() => parseMatchJson(JSON.stringify({ teamName: "Solo el nombre" }))).toThrow(
+      /opponentName, players, events/,
+    );
+  });
+
+  it("ni exportar ni importar pueden llamar a Anthropic", () => {
+    // ESTRUCTURAL: el servicio no conoce la capa de IA ni la red. Si alguien
+    // le añadiera una llamada, exportar un respaldo empezaría a gastar saldo.
+    const fuente = readFileSync(new URL("./matchExportService.ts", import.meta.url), "utf8");
+    expect(fuente).not.toMatch(/tacticalAnalysisService/);
+    expect(fuente).not.toMatch(/\bfetch\(/);
+    expect(fuente).not.toMatch(/anthropic/i);
+    // Y el texto solo se copia: no se genera, no se recorta, no se reescribe.
+    const texto = "## 1. Lectura del partido\n\nTal cual.";
+    expect(parseMatchJson(buildMatchJson({ ...match, tacticalAnalysis: texto })).tacticalAnalysis).toBe(
+      texto,
+    );
   });
 });
 

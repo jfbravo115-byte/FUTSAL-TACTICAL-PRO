@@ -47,6 +47,13 @@ import { ACTION_NOUN, describeAllBands, describeTopZone } from "../utils/fieldZo
 import { describeCorners } from "../utils/cornerModel";
 import { describeSetPieceOutcomes } from "../utils/setPieceModel";
 import { streamTacticalReport } from "../services/tacticalAnalysisService";
+import { updatePartidoTacticalAnalysis } from "../services/partidosService";
+import {
+  TacticalSyncState,
+  describeTacticalSync,
+  isPersistableAnalysis,
+  resolveTacticalTargets,
+} from "../utils/tacticalPersistence";
 import { SimpleExportModal } from "../components/SimpleExportModal";
 
 function fmtSeconds(seconds: number) {
@@ -77,8 +84,16 @@ export default function MatchAnalysis() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [match, setMatch] = useState<SavedMatch | null>(null);
-  /** Copia local de ESTE partido, la única a la que se escribe el análisis. */
+  /** Copia local de ESTE partido, si se abrió desde este dispositivo. */
   const [localCopyId, setLocalCopyId] = useState<string | null>(null);
+  /**
+   * Fila remota de ESTE partido, si existe.
+   *
+   * Sale de la copia local cuando el partido ya se sincronizó, y del id de la
+   * ruta cuando se abrió directamente desde el historial remoto. Null = el
+   * partido solo vive en este dispositivo y no hay nada que actualizar fuera.
+   */
+  const [remoteId, setRemoteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ai, setAi] = useState<string>("");
@@ -86,6 +101,15 @@ export default function MatchAnalysis() {
   const [aiError, setAiError] = useState<string | null>(null);
   // El informe llegó a medias: se enseña, se marca y no se da por bueno.
   const [aiPartial, setAiPartial] = useState(false);
+  /**
+   * Cómo fue el guardado remoto del ÚLTIMO análisis completo.
+   *
+   * `fallo` no significa informe incompleto: el texto está entero, se ve y se
+   * puede exportar. Solo dice que el historial remoto todavía no lo tiene, y
+   * por eso se ofrece reintentar la SINCRONIZACIÓN, nunca regenerar.
+   */
+  const [aiSync, setAiSync] = useState<TacticalSyncState>("sin-remoto");
+  const [aiSyncing, setAiSyncing] = useState(false);
   const aiAbortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [zoneOpponent, setZoneOpponent] = useState(false);
@@ -112,11 +136,13 @@ export default function MatchAnalysis() {
       try {
         const decoded = decodeURIComponent(matchId);
         const local = getFinalLocalCopy(decoded);
-        // Id de la copia local de ESTE partido, o null si se abrió desde el
-        // historial remoto. Es la única a la que se le puede escribir el
-        // análisis: guardar en cualquier otra lo asociaría al partido
-        // equivocado.
-        setLocalCopyId(local ? local.id : null);
+        // Los DOS destinos del análisis, resueltos de una vez: la copia local
+        // de ESTE partido —guardar en otra lo asociaría al partido
+        // equivocado— y la fila remota, que puede venir de la copia local ya
+        // sincronizada o ser el propio id de la ruta.
+        const destinos = resolveTacticalTargets(local, decoded);
+        setLocalCopyId(destinos.localCopyId);
+        setRemoteId(destinos.remoteId);
         let data: SavedMatch | null = local ? { ...local.matchData, id: local.id } : null;
         if (!data) {
           try {
@@ -165,6 +191,31 @@ export default function MatchAnalysis() {
   // Salir de la pantalla corta la generación en curso.
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
+  /**
+   * Sube a la fila remota SOLO el análisis, por su ruta aislada.
+   *
+   * No regenera nada: recibe el texto que ya existe. Por eso el botón de
+   * reintento llama aquí y no a `runAI` — volver a pedirle el informe a
+   * Anthropic por un fallo de red costaría dinero para traer lo mismo.
+   */
+  const sincronizarAnalisis = async (texto: string) => {
+    if (!remoteId || !isPersistableAnalysis(texto)) {
+      setAiSync("sin-remoto");
+      return;
+    }
+    setAiSyncing(true);
+    try {
+      await updatePartidoTacticalAnalysis(remoteId, texto);
+      setAiSync("sincronizado");
+    } catch (err) {
+      // El análisis NO se toca: sigue en memoria, visible y exportable.
+      console.warn("No se pudo sincronizar el análisis táctico:", err);
+      setAiSync("fallo");
+    } finally {
+      setAiSyncing(false);
+    }
+  };
+
   const runAI = async () => {
     if (!match) return;
     aiAbortRef.current?.abort();
@@ -173,6 +224,7 @@ export default function MatchAnalysis() {
     setAiLoading(true);
     setAiError(null);
     setAiPartial(false);
+    setAiSync("sin-remoto");
     setAi("");
     try {
       const result = await streamTacticalReport(match, {
@@ -180,19 +232,29 @@ export default function MatchAnalysis() {
         onDelta: (text) => setAi((prev) => prev + text),
       });
       setAi(result);
-      // Solo aquí, con el informe ENTERO, se toca el partido guardado.
+      // Solo aquí, con el informe ENTERO, se guarda en algún sitio.
       //
       // `streamTacticalReport` únicamente resuelve al recibir el fin de
       // transmisión, así que llegar a esta línea significa que el análisis
       // está completo. Un texto vacío no sustituye a uno anterior: sería
       // borrar lo bueno sin haber traído nada mejor.
-      if (result.trim() && localCopyId) {
-        const actualizado: MatchData = { ...match, tacticalAnalysis: result };
-        updateFinalLocalCopyMatchData(localCopyId, actualizado);
-        // La copia en memoria también, para que exportar desde esta misma
-        // pantalla no siga usando la versión sin análisis.
-        setMatch((prev) => (prev ? { ...prev, tacticalAnalysis: result } : prev));
-      }
+      if (!isPersistableAnalysis(result)) return;
+
+      // 1 · MEMORIA, SIEMPRE. Es lo único que hace falta para exportar, y no
+      //     depende de la red ni de que exista copia local. Antes esto vivía
+      //     dentro del `if (localCopyId)`, y por eso un partido abierto solo
+      //     desde el historial remoto enseñaba el análisis en pantalla y lo
+      //     perdía al exportar.
+      const actualizado: MatchData = { ...match, tacticalAnalysis: result };
+      setMatch((prev) => (prev ? { ...prev, tacticalAnalysis: result } : prev));
+
+      // 2 · COPIA LOCAL, si la hay. `updateFinalLocalCopyMatchData` conserva
+      //     `syncStatus`, `remoteId` y todo lo demás del partido.
+      if (localCopyId) updateFinalLocalCopyMatchData(localCopyId, actualizado);
+
+      // 3 · REMOTO, si se puede. Va el último a propósito: lo de arriba ya
+      //     está hecho y un fallo aquí no lo deshace.
+      await sincronizarAnalisis(result);
     } catch (err: any) {
       console.error(err);
       if (err?.name === "AbortError" && aiAbortRef.current !== controller) return;
@@ -594,6 +656,26 @@ export default function MatchAnalysis() {
           </div>
           <div className="p-5">
             {aiError && <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-amber-300 text-xs">{aiError}</div>}
+            {/* El informe está ENTERO: lo que falló es subirlo al historial
+                remoto. Por eso no se marca como incompleto, se dice que ya
+                puede exportarse y lo único que se ofrece reintentar es la
+                sincronización — nunca una segunda llamada a Anthropic. */}
+            {describeTacticalSync(aiSync) && !aiLoading && (
+              <div
+                data-tactical-sync-warning
+                className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 text-xs flex items-center justify-between gap-3"
+              >
+                <span>{describeTacticalSync(aiSync)}</span>
+                <button
+                  data-tactical-sync-retry
+                  disabled={aiSyncing}
+                  onClick={() => void sincronizarAnalisis(ai)}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-black text-[10px] uppercase disabled:opacity-50"
+                >
+                  {aiSyncing ? "Sincronizando…" : "Reintentar sincronización"}
+                </button>
+              </div>
+            )}
             {aiLoading && <div className="mb-4 flex items-center gap-2 text-lime-300/80 text-[10px] font-black uppercase tracking-widest"><Loader2 className="animate-spin" size={12}/>{ai ? "Escribiendo…" : "Analizando…"}</div>}
             {aiPartial && ai && !aiLoading && <div className="mb-3 inline-block rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-amber-300">Informe incompleto · no guardado</div>}
             {ai ? <div className={`prose prose-invert prose-sm max-w-none prose-headings:text-lime-300${aiPartial && !aiLoading ? " opacity-60" : ""}`}><Markdown>{ai}</Markdown></div> : !aiLoading && <div className="py-6 text-center text-slate-500 text-sm"><Users className="mx-auto opacity-20 mb-2"/>El informe determinista ya está disponible. Tactical Pro añade interpretación sin sustituir los datos.</div>}

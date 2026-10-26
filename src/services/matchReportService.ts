@@ -269,7 +269,14 @@ const ACTION_LABEL: Record<string, string> = {
 const isGoalEvent = isGoalEventModel;
 
 
-function countRotations(events: GameEvent[], playerId: string): number {
+/**
+ * Veces que un jugador entra o sale en una sustitución.
+ *
+ * Exportada porque el dossier la necesita TAMBIÉN para el rival, y
+ * `playersUsed` solo cubre nuestra plantilla. Copiarla allí habría dejado dos
+ * definiciones de «rotación» que pueden divergir.
+ */
+export function countRotations(events: GameEvent[], playerId: string): number {
   return events.filter(
     (e) => e.type === ActionType.SUBSTITUTION && e.playerIds.includes(playerId),
   ).length;

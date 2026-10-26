@@ -422,7 +422,14 @@ describe("objetivo 4 · una sola verdad sobre el portero", () => {
 
     // Y 77 ya no aparece en NINGÚN bloque factual: ni en el resumen
     // determinista ni en el contexto táctico.
-    expect(JSON.stringify(payload.deterministicReport)).not.toContain("77");
+    //
+    // `generatedAt` se descarta antes de buscar: es la hora de generación, no
+    // un dato del partido, y lleva milisegundos. Una marca como
+    // «…T09:53:01.779Z» contiene «77» y hacía fallar esta prueba según la
+    // hora a la que se ejecutara.
+    const { generatedAt, ...factual } = payload.deterministicReport as any;
+    expect(typeof generatedAt).toBe("string");
+    expect(JSON.stringify(factual)).not.toContain("77");
     expect(JSON.stringify(payload.tacticalContext)).not.toContain(":77");
   });
 

@@ -20,6 +20,14 @@
  * desmontan inmediatamente después — el usuario nunca ve el proceso ni
  * necesita permitir ninguna ventana emergente.
  *
+ * PIEZAS COMPARTIDAS
+ * ------------------
+ * Varias de estas secciones y la maquinaria de captura están EXPORTADAS
+ * porque el DOSSIER COMPLETO (`fullDossierPdfService.tsx`) las reutiliza tal
+ * cual. No se copian allí: dos plantillas del mismo bloque acabarían
+ * enseñando cifras distintas del mismo partido, que es justo lo que este
+ * archivo lleva varias fases evitando.
+ *
  * PROHIBIDO explícitamente en este archivo: cualquier llamada a IA
  * (generateTacticalReport, tacticalAnalysisService, fetch a
  * /api/tactical-pro). Tactical Pro se muestra ÚNICAMENTE si
@@ -62,7 +70,7 @@ import { safeImageSrc } from "../utils/safeImageSrc";
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
 const PAGE_WIDTH = 794; // ~ A4 a 96dpi
-const pageStyle: React.CSSProperties = {
+export const pageStyle: React.CSSProperties = {
   width: PAGE_WIDTH,
   minHeight: 1123,
   background: "#ffffff",
@@ -74,12 +82,12 @@ const pageStyle: React.CSSProperties = {
   flexDirection: "column",
   gap: 16,
 };
-const cardStyle: React.CSSProperties = {
+export const cardStyle: React.CSSProperties = {
   border: "1px solid #d1d5db",
   borderRadius: 10,
   padding: 10,
 };
-const sectionTitleStyle: React.CSSProperties = {
+export const sectionTitleStyle: React.CSSProperties = {
   fontSize: 16,
   fontWeight: 900,
   margin: "8px 0 4px",
@@ -92,12 +100,12 @@ function fmtDuration(milliseconds: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function safeName(value: string): string {
+export function safeName(value: string): string {
   return value.replace(/[^a-z0-9áéíóúüñ_-]+/gi, "_").replace(/^_+|_+$/g, "") || "partido";
 }
 
 // ── CABECERA (equipo, rival, logos si existen, fecha, resultado) ───────
-function ReportHeader({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
+export function ReportHeader({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
   const teamLogoSrc = safeImageSrc(matchData.teamLogo);
   const opponentLogoSrc = safeImageSrc(matchData.opponentLogo);
   return (
@@ -125,7 +133,7 @@ function ReportHeader({ matchData, report }: { matchData: MatchData; report: Mat
   );
 }
 
-function SummaryKpis({ report }: { report: MatchReport }) {
+export function SummaryKpis({ report }: { report: MatchReport }) {
   const cell = (label: string, value: React.ReactNode) => (
     <div style={cardStyle}>
       <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase" }}>{label}</div>
@@ -171,7 +179,7 @@ function SummaryKpis({ report }: { report: MatchReport }) {
  * inventa un reparto: dice que no está disponible y enseña el contador con
  * su nombre.
  */
-function FoulsByPeriod({ report }: { report: MatchReport }) {
+export function FoulsByPeriod({ report }: { report: MatchReport }) {
   if (!report.hasFoulEvents) {
     const c = report.periodFoulCounter;
     if (c.team === 0 && c.opponent === 0) return null;
@@ -242,7 +250,7 @@ function FoulsByPeriod({ report }: { report: MatchReport }) {
 //   3. el volumen no es rendimiento: la celda más oscura puede ser donde más
 //      se pierde el balón.
 
-function ZoneMapLegend() {
+export function ZoneMapLegend() {
   return (
     <div style={{ fontSize: 8, color: "#6b7280", marginTop: 4, lineHeight: 1.35, maxWidth: 240 }}>
       <div>Número = acciones del equipo registradas con origen en esa zona.</div>
@@ -442,7 +450,7 @@ function FoulsAgainstLine({ matchData }: { matchData: MatchData }) {
   );
 }
 
-function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
+export function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
   const shotsFromFreeKick = countShotsFromSetPiece(matchData.events || [], "free_kick", false);
@@ -581,7 +589,7 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
   );
 }
 
-function PlayersTable({ report }: { report: MatchReport }) {
+export function PlayersTable({ report }: { report: MatchReport }) {
   return (
     <div>
       <div style={sectionTitleStyle}>Jugadores</div>
@@ -635,7 +643,7 @@ function PlayersTable({ report }: { report: MatchReport }) {
  * Ninguna se estima. Una ventana sin cierre declarado dice «duración no
  * disponible», y un gol cuya procedencia nadie registró dice «No registrado».
  */
-function SpecialContextsSection({ report }: { report: MatchReport }) {
+export function SpecialContextsSection({ report }: { report: MatchReport }) {
   if (report.matchContextGroups.length === 0 && report.goalSequence.length === 0) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -697,7 +705,7 @@ function SpecialContextsSection({ report }: { report: MatchReport }) {
   );
 }
 
-function EventsSection({ report }: { report: MatchReport }) {
+export function EventsSection({ report }: { report: MatchReport }) {
   if (report.relevantEvents.length === 0) return null;
   return (
     <div>
@@ -804,7 +812,7 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
   return pages;
 }
 
-function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
+export function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
   return (
     <div>
       <div style={sectionTitleStyle}>Tactical Pro{total > 1 ? ` (${index + 1}/${total})` : ""}</div>
@@ -1003,7 +1011,7 @@ function buildGoalkeeperReportPages(
   return pages;
 }
 
-function PdfPagesRenderer({
+export function PdfPagesRenderer({
   pages,
   refs,
 }: {
@@ -1065,7 +1073,7 @@ export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF>
  * `finally` garantiza que nunca queda un contenedor huérfano en el DOM
  * aunque la captura o el guardado del PDF lancen.
  */
-async function renderOffscreen(
+export async function renderOffscreen(
   element: React.ReactElement,
   refs: React.RefObject<HTMLDivElement>[],
   onReady: () => Promise<void>,
@@ -1089,7 +1097,7 @@ async function renderOffscreen(
   }
 }
 
-function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
+export function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
   return Array.from({ length: count }, () => React.createRef<HTMLDivElement>());
 }
 

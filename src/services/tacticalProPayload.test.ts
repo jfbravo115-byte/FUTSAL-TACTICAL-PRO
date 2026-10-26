@@ -793,7 +793,7 @@ describe("las situaciones especiales y la secuencia de goles llegan al payload",
   it("y lleva los cinco tiros de esa superioridad ya desglosados", () => {
     // El hecho que la IA debe recibir hecho: "durante la superioridad, 5
     // tiros, 3 a portería, 1 fuera, 1 bloqueado, 1 gol".
-    const t = informe().matchContextGroups[0].tally;
+    const t = informe().matchContextGroups[0].production;
     expect(t.shots).toBe(5);
     expect(t.onTarget).toBe(3);
     expect(t.offTarget).toBe(1);

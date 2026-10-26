@@ -40,7 +40,7 @@ import { toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
-import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
+import { UNKNOWN_DURATION_LABEL, concededLabel, productionLabel } from "../utils/matchContexts";
 import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
 import {
   buildZoneDashboard,
@@ -651,28 +651,44 @@ export function SpecialContextsSection({ report }: { report: MatchReport }) {
         <div>
           <div style={sectionTitleStyle}>Situaciones especiales</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {report.matchContextGroups.map((g) => (
-              <div key={g.type} style={{ ...cardStyle, padding: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700 }}>
-                  {g.label}
-                  {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+            {report.matchContextGroups.map((g) => {
+              const nombres = {
+                teamName: report.teamName,
+                opponentName: report.opponentName,
+              };
+              return (
+                <div key={`${g.type}-${g.side}`} style={{ ...cardStyle, padding: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>
+                    {g.label}
+                    {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+                    Duración:{" "}
+                    {g.totalDuration !== null
+                      ? fmtDuration(g.totalDuration)
+                      : UNKNOWN_DURATION_LABEL}
+                  </div>
+                  {/* Dos bandos, dos bloques. No se suman ni se mezclan: el
+                      que tiene el portero-jugador y el que se aprovecha. */}
+                  {([
+                    [productionLabel(g, nombres), g.production, "#0f172a"],
+                    [concededLabel(g, nombres), g.conceded, "#b91c1c"],
+                  ] as const).map(([rotulo, t, color]) => (
+                    <div key={rotulo} style={{ marginTop: 3 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color }}>{rotulo}</div>
+                      <div style={{ fontSize: 11 }}>
+                        Tiros {t.shots} · a portería {t.onTarget} · fuera {t.offTarget} ·
+                        bloqueados {t.blocked} · goles a favor {t.goalsBenefiting}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas{" "}
+                        {t.fouls} · córners {t.corners}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
-                  Duración:{" "}
-                  {g.totalDuration !== null
-                    ? fmtDuration(g.totalDuration)
-                    : UNKNOWN_DURATION_LABEL}
-                </div>
-                <div style={{ fontSize: 11 }}>
-                  Tiros {g.tally.shots} · a portería {g.tally.onTarget} · fuera{" "}
-                  {g.tally.offTarget} · bloqueados {g.tally.blocked} · goles {g.tally.goals}
-                </div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>
-                  Recuperaciones {g.tally.recoveries} · pérdidas {g.tally.turnovers} · faltas{" "}
-                  {g.tally.fouls} · córners {g.tally.corners}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -30,7 +30,9 @@ import {
   MatchContext,
   MatchContextGroup,
   buildMatchContexts,
+  concededLabel,
   groupMatchContexts,
+  productionLabel,
 } from "../utils/matchContexts";
 import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/goalSequence";
 import {
@@ -220,7 +222,10 @@ export type MatchReport = {
    * el operador y con sus agregados. Ver src/utils/matchContexts.ts.
    */
   matchContexts: MatchContext[];
-  /** Las mismas ventanas agrupadas por tipo, que es como se imprimen. */
+  /**
+   * Las mismas ventanas agrupadas por TIPO Y BANDO, que es como se
+   * imprimen. Nunca se suman dos bandos en una misma cifra.
+   */
   matchContextGroups: MatchContextGroup[];
 };
 
@@ -532,7 +537,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     relevantEvents,
     goalSequence,
     matchContexts,
-    matchContextGroups: groupMatchContexts(matchContexts),
+    matchContextGroups: groupMatchContexts(matchContexts, {
+      teamName: matchData.teamName,
+      opponentName: matchData.opponentName,
+    }),
   };
 }
 
@@ -656,20 +664,27 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   // consta, y suponerla sería inventar el dato.
   if (r.matchContextGroups.length) {
     lines.push("## Situaciones especiales");
+    const nombres = { teamName: r.teamName, opponentName: r.opponentName };
     r.matchContextGroups.forEach((g) => {
       const veces = g.windows.length > 1 ? ` · ${g.windows.length} tramos` : "";
       lines.push(`**${g.label}**${veces}`);
       lines.push(
         `Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}`,
       );
-      lines.push(
-        `Tiros **${g.tally.shots}** · a portería **${g.tally.onTarget}** · fuera **${g.tally.offTarget}** · ` +
-          `bloqueados **${g.tally.blocked}** · goles **${g.tally.goals}**`,
-      );
-      lines.push(
-        `Recuperaciones **${g.tally.recoveries}** · pérdidas **${g.tally.turnovers}** · ` +
-          `faltas **${g.tally.fouls}** · córners **${g.tally.corners}**`,
-      );
+      // Las dos líneas NUNCA se suman: son dos equipos distintos.
+      ([
+        [productionLabel(g, nombres), g.production],
+        [concededLabel(g, nombres), g.conceded],
+      ] as const).forEach(([rotulo, t]) => {
+        lines.push(
+          `${rotulo} — tiros **${t.shots}** · a portería **${t.onTarget}** · fuera **${t.offTarget}** · ` +
+            `bloqueados **${t.blocked}** · goles a favor **${t.goalsBenefiting}**`,
+        );
+        lines.push(
+          `${rotulo} — recuperaciones **${t.recoveries}** · pérdidas **${t.turnovers}** · ` +
+            `faltas **${t.fouls}** · córners **${t.corners}**`,
+        );
+      });
       lines.push("");
     });
   }

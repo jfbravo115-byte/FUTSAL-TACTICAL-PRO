@@ -768,6 +768,131 @@ function DossierRenderer({
   );
 }
 
+// ── GUARDIA DE PROCEDENCIA ──────────────────────────────────────────────
+//
+// Este servicio no tiene estado de módulo, no importa ningún fixture y recibe
+// el partido por parámetro: no hay forma de que exporte otro. Aun así, lo que
+// sale de aquí es un documento que el entrenador va a dar por bueno sin
+// contrastarlo, así que antes de guardarlo se COMPRUEBA que lo renderizado es
+// el partido que se pidió. Si alguna vez dejara de serlo, el PDF no se
+// escribe: falla en voz alta en vez de entregar un informe de otro.
+
+export class DossierSourceError extends Error {
+  constructor(public readonly faltan: string[]) {
+    super(
+      `El dossier no corresponde al partido seleccionado. No aparece en la portada: ${faltan.join(" · ")}`,
+    );
+    this.name = "DossierSourceError";
+  }
+}
+
+/** Los rasgos del partido que la portada TIENE que enseñar. */
+export function dossierFingerprint(
+  matchData: MatchData,
+  report: MatchReport,
+): { etiqueta: string; valor: string }[] {
+  const marcas: { etiqueta: string; valor: string }[] = [];
+  if (matchData.teamName?.trim()) marcas.push({ etiqueta: "equipo", valor: matchData.teamName.trim() });
+  if (matchData.opponentName?.trim()) marcas.push({ etiqueta: "rival", valor: matchData.opponentName.trim() });
+  marcas.push({ etiqueta: "goles propios", valor: String(report.score.team) });
+  marcas.push({ etiqueta: "goles rivales", valor: String(report.score.opponent) });
+  return marcas;
+}
+
+/**
+ * ¿La portada que se acaba de renderizar es la de ESTE partido?
+ *
+ * Se mira la portada y no todas las páginas a propósito: es la única que
+ * reúne equipos y marcador, y si ella coincide es porque el árbol se
+ * construyó con el `matchData` recibido —todas las páginas salen del mismo
+ * objeto, en la misma llamada—.
+ */
+export function assertDossierSource(
+  cover: HTMLElement | null | undefined,
+  matchData: MatchData,
+  report: MatchReport,
+): void {
+  const texto = cover?.textContent ?? "";
+  const faltan = dossierFingerprint(matchData, report)
+    .filter((m) => !texto.includes(m.valor))
+    .map((m) => `${m.etiqueta} «${m.valor}»`);
+  if (faltan.length > 0) throw new DossierSourceError(faltan);
+}
+
+// ── COMPROBACIÓN AUTOMÁTICA CONTRA EL INFORME ──────────────────────────
+//
+// La guardia de arriba impide exportar OTRO partido. Esto responde a la
+// pregunta siguiente: dado que es el partido correcto, ¿las cifras del
+// dossier son las del informe? Se contrasta el texto renderizado contra
+// `generateMatchReport`, que es la fuente de la que vive la pantalla.
+//
+// Sirve para cualquier partido —de prueba o real— y por eso se exporta: con
+// un partido real delante, verificar el dossier es una sola llamada.
+
+export type DossierCheck = { etiqueta: string; esperado: string; ok: boolean };
+
+/**
+ * Contrasta lo renderizado con el informe determinista del mismo partido.
+ *
+ * Devuelve una lista, no un booleano: lo útil es saber QUÉ no cuadra. No
+ * corrige nada ni rellena nada; solo mira.
+ */
+export function verifyDossierAgainstReport(
+  pages: (HTMLElement | null | undefined)[],
+  matchData: MatchData,
+  report: MatchReport = generateMatchReport(matchData),
+): DossierCheck[] {
+  const texto = pages.map((p) => p?.textContent ?? "").join("\n");
+  const propio = buildZoneDashboard(matchData, false);
+  const rival = buildZoneDashboard(matchData, true);
+  const porteros = buildGoalkeeperReports(matchData);
+  const comprobar = (etiqueta: string, esperado: string | number): DossierCheck => ({
+    etiqueta,
+    esperado: String(esperado),
+    ok: texto.includes(String(esperado)),
+  });
+
+  const checks: DossierCheck[] = [
+    comprobar("equipo", matchData.teamName),
+    comprobar("rival", matchData.opponentName),
+    comprobar("marcador propio", report.score.team),
+    comprobar("marcador rival", report.score.opponent),
+    comprobar("tiros propios", propio.totals.attempts),
+    comprobar("tiros rivales", rival.totals.attempts),
+    comprobar("recuperaciones propias", propio.totals.recoveries),
+    comprobar("pérdidas propias", propio.totals.losses),
+  ];
+  // Cada jugador utilizado tiene que aparecer, con el nombre con el que la
+  // aplicación lo llama.
+  for (const p of report.playersUsed) {
+    const ident = playerDisplayIdentity(
+      matchData.players.find((x) => x.id === p.id)!,
+      { players: matchData.players, maxCaracteres: 22 },
+    );
+    checks.push(
+      comprobar(
+        `jugador ${p.number}`,
+        ident.kind === "nombre" ? ident.nombreCompleto! : ident.etiquetaProvisional,
+      ),
+    );
+  }
+  // Y cada portero relevante, de los dos equipos.
+  for (const gk of porteros) checks.push(comprobar(`portero ${gk.name}`, gk.name));
+  // La secuencia de goles, uno por uno, por el marcador que dejó: dos goles
+  // del mismo minuto no se confunden, y el orden queda fijado.
+  report.goalSequence.forEach((g, i) =>
+    checks.push(
+      comprobar(`gol ${i + 1} · marcador`, `${g.scoreAfter.team}-${g.scoreAfter.opponent}`),
+    ),
+  );
+  return checks;
+}
+
+/** Los que no cuadran. Vacío = el dossier dice lo mismo que el informe. */
+export function failedChecks(checks: DossierCheck[]): DossierCheck[] {
+  return checks.filter((c) => !c.ok);
+}
+
 /** `dossier_completo_<equipo>_<rival>_<fecha>.pdf` */
 export function dossierFileName(matchData: MatchData): string {
   const fecha = matchData.timestamp ? new Date(matchData.timestamp) : new Date();
@@ -785,7 +910,11 @@ export function dossierFileName(matchData: MatchData): string {
  * contenedor temporal en el DOM —`renderOffscreen` lo limpia en su `finally`,
  * también si `toJpeg` o `pdf.save` lanzan—.
  */
-export async function exportFullMatchDossierPdf(matchData: MatchData): Promise<void> {
+export async function exportFullMatchDossierPdf(match: MatchData): Promise<void> {
+  // El partido llega por parámetro y es la ÚNICA fuente de todo lo que sigue.
+  // No se lee de ningún almacén, ni de un estado de módulo, ni de un fixture:
+  // dos exportaciones seguidas de partidos distintos no comparten nada.
+  const matchData = match;
   const report = generateMatchReport(matchData);
   const pages = buildDossierPages(matchData);
   const refs = makeRefs(pages.length + 1);
@@ -794,6 +923,8 @@ export async function exportFullMatchDossierPdf(matchData: MatchData): Promise<v
     <DossierRenderer matchData={matchData} report={report} pages={pages} refs={refs} />,
     refs,
     async () => {
+      // Antes de capturar nada: lo renderizado tiene que ser este partido.
+      assertDossierSource(refs[0].current, matchData, report);
       const nodes = refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n);
       const pdf = await capturePagesToPdf(nodes);
       pdf.save(dossierFileName(matchData));

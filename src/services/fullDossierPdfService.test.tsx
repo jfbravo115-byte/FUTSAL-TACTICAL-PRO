@@ -68,6 +68,11 @@ vi.mock("./tacticalAnalysisService", () => ({
 
 import {
   DOSSIER_MAP_METRICS,
+  DossierSourceError,
+  failedChecks,
+  verifyDossierAgainstReport,
+  assertDossierSource,
+  dossierFingerprint,
   TACTICAL_INCLUDED_LABEL,
   TACTICAL_MISSING_LABEL,
   buildDossierIndex,
@@ -604,6 +609,196 @@ describe("5 bis · 34 · dos botones distintos en el modal de exportación", () 
   it("y el modal no sabe nada de IA", () => {
     expect(modal).not.toContain("tacticalAnalysisService");
     expect(modal).not.toContain("tactical-pro");
+  });
+});
+
+// ── 5 ter · EL DOSSIER ES DEL PARTIDO QUE SE LE DA ──────────────────────
+//
+// El informe que el entrenador imprime no puede ser el de otro partido. Aquí
+// se fija que el servicio no tenga de dónde sacar uno distinto, que dos
+// exportaciones seguidas no se contaminen, y que si alguna vez lo renderizado
+// no coincidiera con lo pedido, el PDF NO se escriba.
+
+describe("5 ter · el dossier solo puede salir del partido recibido", () => {
+  /** Un segundo partido, con todo distinto del denso. */
+  const partidoB = (): MatchData => ({
+    teamName: "OTRO CLUB",
+    opponentName: "VISITANTE B",
+    period: Period.FINISHED,
+    matchClock: 1200000,
+    isClockRunning: false,
+    fouls: { team: 1, opponent: 0 },
+    timeoutsUsed: {
+      team: { period1: false, period2: false },
+      opponent: { period1: false, period2: false },
+    },
+    teamDefendsAtKickoff: "right",
+    timestamp: "2026-02-02T10:00:00.000Z",
+    players: [
+      jugador({ id: "bgk", number: 25, name: "Portero B", role: Role.GOALKEEPER, stats: stats({ saves: 1 }) }),
+      jugador({ id: "b99", number: 99, name: "Unico Deb", stats: stats({ goals: 1, shots: 1 }) }),
+      jugador({ id: "bq", number: 5, name: "Rival Bravo", isOpponent: true, stats: stats({ shots: 1 }) }),
+    ],
+    events: [
+      {
+        id: "b1", timestamp: 1000, wallClock: 1, period: Period.FIRST, playerIds: ["b99"],
+        onPitchPlayerIds: ["bgk", "b99", "bq"], type: ActionType.GOAL,
+        gameState: GameState.FOUR_VS_FOUR, originGrid: "Z2L", destinationGrid: "G4",
+        attackDirection: "ltr", metadata: { isOpponent: false, setPiece: "normal" },
+        scoreAtEvent: { team: 1, opponent: 0 },
+      } as GameEvent,
+    ],
+    tacticalAnalysis: "## Analisis exclusivo de B\nSolo aqui.",
+  });
+
+  it("ESTRUCTURAL · el servicio no tiene de dónde sacar otro partido", () => {
+    const fuente = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "./fullDossierPdfService.tsx"),
+      "utf-8",
+    ) as string;
+    const codigo = fuente
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((l) => l.replace(/\/\/.*$/, ""))
+      .join("\n");
+    // Ni fixtures, ni demos, ni almacenamiento, ni estado de módulo.
+    for (const prohibido of [
+      "localStorage", "sessionStorage", "getPartido", "getFinalLocalCopy",
+      "loadMatchSnapshot", "listFinalLocalCopies", ".test", "fixture", "demo",
+      "PR7", "Juan Pérez",
+    ]) {
+      expect(codigo, prohibido).not.toContain(prohibido);
+    }
+    // Nada mutable fuera de las funciones: sin caché ni singleton.
+    expect(codigo).not.toMatch(/^let /m);
+    expect(codigo).not.toMatch(/^var /m);
+    expect(codigo).not.toContain("new Map(");
+    expect(codigo).not.toContain("WeakMap");
+    // Y el partido entra por parámetro, no se busca.
+    expect(codigo).toContain("export async function exportFullMatchDossierPdf(match: MatchData)");
+    expect(codigo).toContain("export function buildDossierPages(matchData: MatchData)");
+  });
+
+  it("6 · dos partidos seguidos SIN recargar: B no lleva nada de A", async () => {
+    const A = partidoDenso({ tacticalAnalysis: "## Solo de A\nTexto exclusivo de A." });
+    const B = partidoB();
+
+    toJpegMock.mockClear(); pdfSaveMock.mockClear();
+    await exportFullMatchDossierPdf(A);
+    const textoA = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "").join("\n");
+    const nombreA = pdfSaveMock.mock.calls[0][0] as string;
+
+    toJpegMock.mockClear(); pdfSaveMock.mockClear();
+    await exportFullMatchDossierPdf(B);
+    const textoB = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "").join("\n");
+    const nombreB = pdfSaveMock.mock.calls[0][0] as string;
+
+    // A está entero en su dossier…
+    expect(textoA).toContain("CD MURCIA");
+    expect(textoA).toContain("PR7");
+    expect(textoA).toContain("Texto exclusivo de A.");
+
+    // …y NADA de A aparece en el de B.
+    for (const deA of ["CD MURCIA", "PR7", "Juan Pérez", "Marco Villa", "Texto exclusivo de A."]) {
+      expect(textoB, deA).not.toContain(deA);
+    }
+    // B sí está entero en el suyo.
+    expect(textoB).toContain("OTRO CLUB");
+    expect(textoB).toContain("VISITANTE B");
+    expect(textoB).toContain("Unico Deb");
+    expect(textoB).toContain("Solo aqui.");
+
+    // Hasta el nombre del archivo cambia de partido.
+    expect(nombreA).toBe("dossier_completo_CD_MURCIA_PR7_2026-10-26.pdf");
+    expect(nombreB).toBe("dossier_completo_OTRO_CLUB_VISITANTE_B_2026-02-02.pdf");
+  }, TIEMPO);
+
+  it("y el marcador de cada uno es el suyo", async () => {
+    const B = partidoB();
+    toJpegMock.mockClear();
+    await exportFullMatchDossierPdf(B);
+    const portada = toJpegMock.mock.calls[0][0] as HTMLElement;
+    expect(portada.querySelector("[data-dossier-footer]")!.textContent).toContain(
+      "OTRO CLUB 1 – 0 VISITANTE B",
+    );
+  }, TIEMPO);
+
+  it("7 · un partido abierto desde el historial REMOTO se exporta igual", async () => {
+    // El caso del Mac: el objeto viene de `getPartido`, con `id` remoto y sin
+    // copia local. Para el exportador es un partido más: lo recibe entero.
+    const remoto = {
+      ...partidoDenso({ tacticalAnalysis: "## Guardado en remoto\nYa estaba." }),
+      id: "fila-remota-123",
+    } as MatchData & { id: string };
+
+    toJpegMock.mockClear(); pdfSaveMock.mockClear();
+    await exportFullMatchDossierPdf(remoto);
+    const texto = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "").join("\n");
+    expect(texto).toContain("CD MURCIA");
+    expect(texto).toContain("Ya estaba.");
+    expect(texto).toContain(TACTICAL_INCLUDED_LABEL);
+    // Y no se ha pedido ningún análisis nuevo.
+    expect(generateTacticalReportMock).not.toHaveBeenCalled();
+    expect(streamTacticalReportMock).not.toHaveBeenCalled();
+  }, TIEMPO);
+
+  it("5 · la guardia reconoce el partido correcto", () => {
+    const md = partidoDenso();
+    const report = generateMatchReport(md);
+    const portada = document.createElement("div");
+    portada.textContent = `CD MURCIA 3 - 1 PR7`;
+    expect(() => assertDossierSource(portada, md, report)).not.toThrow();
+    expect(dossierFingerprint(md, report).map((m) => m.valor)).toEqual([
+      "CD MURCIA", "PR7", "3", "1",
+    ]);
+  });
+
+  it("5 · y FALLA, sin guardar nada, si lo renderizado es otro partido", async () => {
+    const md = partidoDenso();
+    const report = generateMatchReport(md);
+    const otra = document.createElement("div");
+    otra.textContent = "OTRO CLUB 9 - 9 VISITANTE B";
+    expect(() => assertDossierSource(otra, md, report)).toThrow(DossierSourceError);
+    try {
+      assertDossierSource(otra, md, report);
+    } catch (e: any) {
+      expect(e.message).toContain("no corresponde al partido seleccionado");
+      expect(e.faltan.join(" ")).toContain("CD MURCIA");
+    }
+    // Y una portada ausente tampoco pasa.
+    expect(() => assertDossierSource(null, md, report)).toThrow(DossierSourceError);
+  });
+});
+
+// ── 5 quater · COMPROBACIÓN AUTOMÁTICA CONTRA EL INFORME ───────────────
+
+describe("5 quater · el dossier dice lo mismo que el informe", () => {
+  it("todas las comprobaciones pasan con el partido denso", async () => {
+    const md = partidoDenso({ tacticalAnalysis: "## Corto\nTexto." });
+    const ns = await dossier("verificacion", md);
+    const fallos = failedChecks(verifyDossierAgainstReport(ns, md));
+    expect(fallos.map((f) => `${f.etiqueta}=${f.esperado}`)).toEqual([]);
+  }, TIEMPO);
+
+  it("y detectan cuando falta algo", () => {
+    const md = partidoDenso();
+    const vacio = document.createElement("div");
+    const fallos = failedChecks(verifyDossierAgainstReport([vacio], md));
+    expect(fallos.length).toBeGreaterThan(5);
+    expect(fallos.map((f) => f.etiqueta)).toContain("equipo");
+    expect(fallos.map((f) => f.etiqueta)).toContain("tiros propios");
+  });
+
+  it("comprueba marcador, cifras, jugadores, porteros y secuencia de goles", () => {
+    const md = partidoDenso();
+    const etiquetas = verifyDossierAgainstReport([], md).map((c) => c.etiqueta);
+    expect(etiquetas).toContain("marcador propio");
+    expect(etiquetas).toContain("tiros rivales");
+    expect(etiquetas).toContain("recuperaciones propias");
+    expect(etiquetas).toContain("pérdidas propias");
+    expect(etiquetas.some((e) => e.startsWith("jugador "))).toBe(true);
+    expect(etiquetas.some((e) => e.startsWith("portero "))).toBe(true);
+    expect(etiquetas.some((e) => e.startsWith("gol "))).toBe(true);
   });
 });
 

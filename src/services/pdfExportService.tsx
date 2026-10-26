@@ -762,6 +762,12 @@ export function EventsSection({ report }: { report: MatchReport }) {
 const TACTICAL_PRO_CHARS_PER_PAGE = 3200;
 
 /**
+ * Longitud por debajo de la cual una última línea se considera un título
+ * suelto y se baja a la página siguiente, con lo que introduce.
+ */
+export const ORPHAN_HEADING_CHARS = 60;
+
+/**
  * Divide un texto largo (una unidad que por sí sola excede maxChars) en
  * fragmentos más pequeños, respetando límites de PALABRA/FRASE — nunca
  * corta una palabra a mitad. Primero intenta dividir por frases
@@ -834,15 +840,50 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
     currentLen += unit.length + 2;
   }
   if (current.length) pages.push(current.join("\n\n"));
+
+  // Un título no se queda solo al final de una página. «Sin balón» como
+  // última línea, con su apartado empezando en la hoja siguiente, obliga a
+  // pasar página para saber de qué hablaba.
+  for (let i = 0; i < pages.length - 1; i++) {
+    const unidades = pages[i].split("\n\n");
+    const ultima = unidades[unidades.length - 1];
+    if (unidades.length > 1 && ultima.length <= ORPHAN_HEADING_CHARS) {
+      pages[i] = unidades.slice(0, -1).join("\n\n");
+      pages[i + 1] = `${ultima}\n\n${pages[i + 1]}`;
+    }
+  }
   return pages;
 }
+
+/**
+ * Las listas del análisis, con su marcador visible.
+ *
+ * Tailwind le quita a `ol` y `ul` el marcador y la sangría, y nadie se los
+ * devolvía aquí. Un informe que empieza sus apartados por «1. Lectura del
+ * partido» salía en el PDF como «Lectura del partido»: react-markdown lo
+ * convierte en lista ordenada y el número se perdía por el camino. Se
+ * perdían también las viñetas de cualquier enumeración.
+ *
+ * `start` viaja en las props, así que el apartado 4 sigue numerando 4 y no
+ * vuelve a empezar por 1.
+ */
+const listaStyle: React.CSSProperties = { paddingLeft: 20, margin: "3px 0" };
+const MARKDOWN_COMPONENTS = {
+  ol: ({ node: _node, ...props }: any) => (
+    <ol style={{ ...listaStyle, listStyle: "decimal" }} {...props} />
+  ),
+  ul: ({ node: _node, ...props }: any) => (
+    <ul style={{ ...listaStyle, listStyle: "disc" }} {...props} />
+  ),
+  li: ({ node: _node, ...props }: any) => <li style={{ margin: "1px 0" }} {...props} />,
+};
 
 export function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
   return (
     <div>
       <div style={sectionTitleStyle}>Tactical Pro{total > 1 ? ` (${index + 1}/${total})` : ""}</div>
       <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-        <Markdown>{chunk}</Markdown>
+        <Markdown components={MARKDOWN_COMPONENTS}>{chunk}</Markdown>
       </div>
     </div>
   );

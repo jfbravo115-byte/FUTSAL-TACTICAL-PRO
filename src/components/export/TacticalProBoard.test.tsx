@@ -17,7 +17,7 @@ import path from "node:path";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { TACTICAL_PRO_CAVEAT, TacticalProBoard } from "./TacticalProBoard";
-import { splitTacticalProIntoPages } from "../../services/pdfExportService";
+import { ORPHAN_HEADING_CHARS, splitTacticalProIntoPages } from "../../services/pdfExportService";
 import { teamReportPageCount } from "../../utils/reportPagination";
 
 function render(node: React.ReactNode): HTMLElement {
@@ -211,5 +211,52 @@ describe("15 · imprimir el PDF no provoca ninguna llamada", () => {
     const codigo = sinComentarios(leer("../../services/pdfExportService.tsx"));
     expect(codigo).not.toContain("streamTacticalReport");
     expect(codigo).toContain("matchData.tacticalAnalysis");
+  });
+});
+
+// ── LOS APARTADOS NUMERADOS NO PIERDEN SU NÚMERO ───────────────────────
+//
+// El Tactical Pro real de CD MURCIA–JIMBEE empieza sus seis apartados por
+// «1. Lectura del partido», «2. Con balón»… react-markdown los convierte en
+// listas ordenadas, y Tailwind le quita el marcador a `ol`: en el PDF salía
+// «Lectura del partido», sin el número. El lector perdía la numeración del
+// informe que había leído en pantalla.
+
+describe("apartados numerados y viñetas", () => {
+  it("la plantilla pinta las listas con marcador y sangría", () => {
+    const fuente = fs.readFileSync(
+      path.join(__dirname, "../../services/pdfExportService.tsx"),
+      "utf8",
+    );
+    expect(fuente).toContain('listStyle: "decimal"');
+    expect(fuente).toContain('listStyle: "disc"');
+    // Y se las pasa a react-markdown, que si no usa las suyas.
+    expect(fuente).toContain("<Markdown components={MARKDOWN_COMPONENTS}>");
+  });
+
+  it("un título suelto al final de página baja con su apartado", () => {
+    const parrafo = "x".repeat(1000);
+    const paginas = splitTacticalProIntoPages(
+      [parrafo, parrafo, "4. Portería", parrafo].join("\n\n"),
+      2200,
+    );
+    expect(paginas).toHaveLength(2);
+    expect(paginas[0].endsWith("4. Portería")).toBe(false);
+    expect(paginas[1].startsWith("4. Portería")).toBe(true);
+  });
+
+  it("y no se pierde ni se duplica nada al bajarlo", () => {
+    const parrafo = "y".repeat(1000);
+    const texto = [parrafo, parrafo, "6. Propuestas de trabajo", parrafo].join("\n\n");
+    const unido = splitTacticalProIntoPages(texto, 2200).join("\n\n");
+    expect(unido.split("6. Propuestas de trabajo")).toHaveLength(2);
+    expect(unido.replace(/\s+/g, "")).toBe(texto.replace(/\s+/g, ""));
+  });
+
+  it("una última línea larga NO se mueve: no es un título", () => {
+    const parrafo = "z".repeat(1000);
+    const cola = "w".repeat(ORPHAN_HEADING_CHARS + 1);
+    const paginas = splitTacticalProIntoPages([parrafo, cola, parrafo].join("\n\n"), 1200);
+    expect(paginas[0].endsWith(cola)).toBe(true);
   });
 });

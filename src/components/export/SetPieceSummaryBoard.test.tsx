@@ -404,9 +404,15 @@ describe("tiros directos de córner en el informe", () => {
     expect(fila(host, "data-shot-origin-row", "Equipo Local")[2]).toBe("1");
   });
 
-  it("la página explica que son registros independientes", async () => {
+  it("la página explica que son dos magnitudes distintas y que no se suman", async () => {
+    // Un córner lanzado directo aparece en las DOS tablas —una vez en cada
+    // una— porque fue un córner y fue un remate. Lo que la página tiene que
+    // impedir es que alguien las sume como si fueran acciones distintas.
     const texto = await exportarPagina(partidoCompleto());
-    expect(texto).toContain("«Tiro directo» indica que el córner se ejecutó directamente hacia portería");
-    expect(texto).toContain("Son registros independientes");
+    expect(texto).toContain("«Tiro directo» cuenta CÓRNERS ejecutados hacia portería");
+    expect(texto).toContain("Son dos magnitudes distintas y nunca se suman");
+    expect(texto).toContain("una vez en cada tabla");
+    // Y la procedencia sigue sin deducirse por cercanía temporal.
+    expect(texto).toContain("nunca se deduce por cercanía temporal");
   });
 });

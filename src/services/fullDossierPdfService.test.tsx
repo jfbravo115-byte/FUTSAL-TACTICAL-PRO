@@ -68,6 +68,10 @@ vi.mock("./tacticalAnalysisService", () => ({
 
 import {
   DOSSIER_MAP_METRICS,
+  SIN_DATOS,
+  destacadoLabel,
+  firmaBalance,
+  golesLabel,
   DOSSIER_TACTICAL_CHARS_PER_PAGE,
   INDEX_ROWS_PER_COLUMN,
   hasZoneData,
@@ -490,7 +494,11 @@ describe("4 · 16-24-25 · informe, porteros y gol en propia", () => {
   it("16 · el dossier contiene el informe automático completo", async () => {
     const ns = await dossier(DENSO, partidoDenso());
     const t = unirTexto(ns);
-    expect(t).toContain("Datos clave");
+    // El resumen ejecutivo con todas las cifras vive en la PORTADA; la
+    // página 2 es el resumen visual. La antigua hoja «Datos clave» repetía
+    // una por una las cifras de la portada y se quitó por eso.
+    expect(t).toContain("Resumen");
+    expect(t).toContain("Resultado");
     expect(t).toContain("Jugadores utilizados y rotaciones");
     expect(t).toContain("Balón parado");
     expect(t).toContain("Acciones relevantes");
@@ -618,16 +626,22 @@ describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
     ).toBe("1");
   }, TIEMPO);
 
-  it("«datos clave» y el bloque de zonas van en páginas distintas", async () => {
+  it("el bloque de zonas tiene su propia página, sin nada más", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    const clave = ns.find((n) => n.getAttribute("data-dossier-section") === "report-key");
     const zonas = ns.find((n) => n.getAttribute("data-dossier-section") === "report-zones");
-    expect(clave).toBeDefined();
     expect(zonas).toBeDefined();
-    expect(clave!.textContent).toContain("Datos clave");
-    expect(clave!.textContent).not.toContain("Mapas / Zonas");
     expect(zonas!.textContent).toContain("Mapas / Zonas");
+    expect(zonas!.textContent).not.toContain("Resultado");
   }, TIEMPO);
+
+  it("y la antigua hoja «datos clave» ya no existe: la portada ya la daba", () => {
+    // Era `SummaryKpis` + `FoulsByPeriod`, y `SummaryKpis` ya incluye el
+    // desglose de faltas: la portada imprimía exactamente lo mismo.
+    expect(seccionesDe([]).length).toBe(0);
+    const secciones = buildDossierPages(partidoDenso()).map((p) => p.key);
+    expect(secciones).not.toContain("report-key");
+    expect(secciones[0]).toBe("visual-summary");
+  });
 
   it("y sin zonas que contar no se crea la página de zonas", async () => {
     const md = partidoDenso({ events: [], players: [] });
@@ -649,6 +663,150 @@ describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
     );
     expect(paginasIa).toHaveLength(trozos.length);
   }, TIEMPO);
+});
+
+// ── 5 quinquies · EL RESUMEN VISUAL ────────────────────────────────────
+//
+// La página 2 es la pantalla RESUMEN dibujada de nuevo, no una captura. Lo
+// que estos tests protegen es que NO calcule nada: cada cifra tiene que ser
+// la que devuelve `generateMatchReport`, que es la que ve el usuario en la
+// aplicación. Y que cuando no hay a quién destacar lo diga, en vez de
+// enseñar un hueco, un NaN o un jugador inventado.
+
+describe("5 quinquies · resumen visual", () => {
+  const resumenDe = (ns: HTMLElement[]) =>
+    ns.find((n) => n.getAttribute("data-dossier-section") === "visual-summary")!;
+
+  it("es la página 2, justo detrás de la portada", async () => {
+    const ns = await dossier(DENSO, partidoDenso());
+    expect(ns[1].getAttribute("data-dossier-section")).toBe("visual-summary");
+    expect(ns[1].textContent).toContain("Página 2 de");
+  }, TIEMPO);
+
+  it("el índice y los pies cuentan con ella", async () => {
+    const md = partidoDenso();
+    const ns = await dossier(DENSO, md);
+    const indice = buildDossierIndex(buildDossierPages(md));
+    expect(indice[0]).toEqual({ section: "Resumen visual", page: 2 });
+    expect(ns[0].textContent).toContain("Resumen visual");
+    textosDe(ns).forEach((t, i) => {
+      expect(t, `página ${i + 1}`).toContain(`Página ${i + 1} de ${ns.length}`);
+    });
+  }, TIEMPO);
+
+  it("marcador, equipos y las cuatro cifras salen del informe", async () => {
+    const md = partidoDenso();
+    const ns = await dossier(DENSO, md);
+    const r = generateMatchReport(md);
+    const t = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
+    expect(t).toContain(`${md.teamName} · ${md.opponentName}`);
+    expect(t).toContain(`${r.score.team}–${r.score.opponent}`);
+    expect(t).toContain(`${r.teamTotals.shots}`);
+    expect(t).toContain(`${r.teamTotals.goalConversionPct}%`);
+    expect(t).toContain(`${r.teamTotals.recoveries}`);
+    expect(t).toContain("Balance Rec-(P+E)");
+  }, TIEMPO);
+
+  it("los tres destacados son los del informe, con dorsal y dato", async () => {
+    const md = partidoDenso();
+    const ns = await dossier(DENSO, md);
+    const h = generateMatchReport(md).highlights;
+    const t = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
+    expect(t).toContain("Mayor TOT");
+    expect(t).toContain(h.topTot!.totLabel);
+    expect(t).toContain("Máximo goleador");
+    expect(t).toContain(golesLabel(h.topScorer!.goals));
+    expect(t).toContain("Más recuperaciones");
+    expect(t).toContain(String(h.topRecoverer!.recoveries));
+  }, TIEMPO);
+
+  it("un 0-0 sin eventos ni jugadores dice «Sin datos», nunca undefined", async () => {
+    const vacio = partidoDenso({ events: [], players: [] });
+    const ns = await dossier("vacio-indice", vacio);
+    const t = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
+    expect(t).toContain("0–0");
+    expect(t).toContain("0 goles"); // sin goleador, presentación neutra
+    expect(t).toContain(SIN_DATOS);
+    expect(t).not.toMatch(/undefined|NaN/);
+  }, TIEMPO);
+
+  it("sin recuperaciones no inventa un recuperador", () => {
+    const sinRecuperaciones = partidoDenso({
+      events: partidoDenso().events.filter(
+        (e) => e.type !== ActionType.STEAL && e.type !== ActionType.INTERCEPTION,
+      ),
+      players: PLANTILLA.map((p) => ({ ...p, stats: { ...p.stats, steals: 0, interceptions: 0 } })),
+    });
+    const h = generateMatchReport(sinRecuperaciones).highlights;
+    expect(h.topRecoverer).toBeNull();
+    expect(destacadoLabel(h.topRecoverer, sinRecuperaciones.players)).toBe(SIN_DATOS);
+  });
+
+  it("el empate entre goleadores lo rompe el dorsal más bajo, como la pantalla", () => {
+    // Misma regla que usa la pantalla: más goles y, a igualdad, dorsal menor.
+    const empate = partidoDenso({
+      players: PLANTILLA.map((p) =>
+        p.id === "l7" || p.id === "l10"
+          ? { ...p, stats: { ...p.stats, goals: 1 } }
+          : { ...p, stats: { ...p.stats, goals: 0 } },
+      ),
+    });
+    const h = generateMatchReport(empate).highlights;
+    expect(h.topScorer!.goals).toBe(1);
+    expect(h.topScorer!.number).toBe(7); // #7 por delante de #10
+    expect(destacadoLabel(h.topScorer, empate.players)).toContain("#7");
+  });
+
+  it("un dorsal desconocido se enseña como «#?», no como 0", () => {
+    const conIncognito = partidoDenso({
+      players: PLANTILLA.map((p) =>
+        p.id === "l7" ? { ...p, number: 0, jerseyNumberKnown: false } : p,
+      ),
+    });
+    const h = generateMatchReport(conIncognito).highlights;
+    const etiquetas = [h.topTot, h.topScorer, h.topRecoverer]
+      .map((x) => destacadoLabel(x, conIncognito.players))
+      .join(" | ");
+    expect(etiquetas).toContain("#?");
+    expect(destacadoLabel({ id: "l7", number: 0, jerseyNumberKnown: false, name: "X" },
+      conIncognito.players)).toContain("#?");
+  });
+
+  it("el balance se firma tal como lo da el informe", async () => {
+    // La aritmética es de `matchReportService` y allí está probada. Lo que
+    // se comprueba aquí es que la página la imprima con su signo y sin
+    // recalcularla: positivo con «+», negativo con «-», cero sin adornos.
+    const md = partidoDenso();
+    const balance = generateMatchReport(md).teamTotals.recoveryLossBalance;
+    const ns = await dossier(DENSO, md);
+    const t = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
+    expect(t).toContain(`${balance >= 0 ? "+" : ""}${balance}`);
+    expect(firmaBalance(4)).toBe("+4");
+    expect(firmaBalance(0)).toBe("+0");
+    expect(firmaBalance(-19)).toBe("-19");
+  }, TIEMPO);
+
+  it("«1 gol» en singular y «0 goles» en plural", () => {
+    expect(golesLabel(1)).toBe("1 gol");
+    expect(golesLabel(0)).toBe("0 goles");
+    expect(golesLabel(3)).toBe("3 goles");
+  });
+
+  it("ESTRUCTURAL · la página no replica ninguna fórmula", () => {
+    const fuente = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "./fullDossierPdfService.tsx"),
+      "utf-8",
+    ) as string;
+    const bloque = fuente.slice(
+      fuente.indexOf("export function VisualSummaryBoard"),
+      fuente.indexOf("export function hasZoneData"),
+    );
+    expect(bloque.length).toBeGreaterThan(500);
+    // Ni filtra eventos, ni suma, ni calcula porcentajes: solo lee el informe.
+    expect(bloque).not.toMatch(/events\.(filter|reduce|map)/);
+    expect(bloque).not.toMatch(/goalsFor|scoresFor|summarizeShots|Math\.round/);
+    expect(bloque).not.toMatch(/\+\s*1\b/);
+  });
 });
 
 // ── 5 bis · EL MODAL OFRECE LOS DOS ─────────────────────────────────────

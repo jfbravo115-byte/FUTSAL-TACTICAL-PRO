@@ -30,7 +30,7 @@
  * importa `tacticalAnalysisService` ni se hace `fetch` a ningún sitio.
  */
 import React from "react";
-import { MatchData, Period, Role } from "../types/futsal";
+import { MatchData, Period, Player, Role } from "../types/futsal";
 import { countRotations, generateMatchReport, MatchReport } from "./matchReportService";
 import {
   ZoneMetric,
@@ -49,6 +49,7 @@ import { PHASE_METRICS, hasPhaseData, phasePeriods } from "../utils/phaseAnalysi
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
 import { TACTICAL_PRO_CAVEAT } from "../components/export/TacticalProBoard";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
+import { formatJerseyNumber } from "../utils/jerseyNumber";
 import { playerDisplayIdentity } from "../utils/playerIdentity";
 import { formatPlayerTime } from "../utils/playerClock";
 import { ShotTally, EMPTY_SHOT_TALLY, playerShotTallies } from "../utils/shotModel";
@@ -491,6 +492,230 @@ export function DossierIndexTable({
  * datos NO entran — una hoja vacía no informa de nada y hace pensar que el
  * dato existe y es cero.
  */
+
+// ── RESUMEN VISUAL ──────────────────────────────────────────────────────
+//
+// La página 2 del dossier es la pantalla RESUMEN de la aplicación, dibujada
+// de nuevo con los mismos datos. No es una captura: es un componente que
+// recibe el partido y el informe y no calcula NADA por su cuenta —marcador,
+// totales y destacados salen de `generateMatchReport`, que es lo que alimenta
+// también a la pantalla—. Si el informe cambiara una cifra, esta página
+// cambiaría con él, que es justo lo que se quiere.
+
+/** Fondo y tintas, tomadas de la pantalla. Se imprimen bien en papel. */
+const RESUMEN_FONDO = "#0A0B0E";
+const RESUMEN_TARJETA = "rgba(15,23,42,0.6)";
+const RESUMEN_BORDE = "rgba(255,255,255,0.12)";
+const TINTA_TIROS = "#67e8f9";
+const TINTA_CONVERSION = "#bef264";
+const TINTA_RECUPERACIONES = "#93c5fd";
+const TINTA_POSITIVO = "#6ee7b7";
+const TINTA_NEGATIVO = "#fca5a5";
+const TINTA_TOT = "#fbbf24";
+const TINTA_GOLEADOR = "#a3e635";
+const TINTA_RECUPERADOR = "#60a5fa";
+
+/** «Sin datos» es la única respuesta honesta cuando no hay a quién destacar. */
+export const SIN_DATOS = "Sin datos";
+
+/**
+ * Cómo se llama y qué dorsal lleva un destacado.
+ *
+ * El nombre sale de `playerDisplayIdentity` —nombre real por delante del
+ * dorsal, etiqueta provisional cuando no hay nombre— y el dorsal de
+ * `formatJerseyNumber`, que escribe «?» cuando todavía no consta. Si el
+ * jugador ya no estuviera en la plantilla, se usa lo que guardó el informe
+ * en vez de inventar nada.
+ */
+export function destacadoLabel(
+  highlight: { id: string; number: number; jerseyNumberKnown?: boolean; name: string } | null,
+  players: Player[],
+): string {
+  if (!highlight) return SIN_DATOS;
+  const player = players.find((p) => p.id === highlight.id);
+  const dorsal = formatJerseyNumber(player ?? highlight);
+  if (!player) return `#${dorsal} ${highlight.name}`.trim();
+  const ident = playerDisplayIdentity(player, { players, maxCaracteres: 22 });
+  const nombre = ident.kind === "nombre" ? ident.nombreCompleto! : ident.etiquetaProvisional;
+  return `#${dorsal} ${nombre}`;
+}
+
+/**
+ * El balance, firmado como en la pantalla: «+4», «+0», «-19».
+ *
+ * El cero lleva «+» a propósito, igual que en la aplicación: un balance
+ * neutro no es una pérdida, y escribirlo pelado invitaba a leerlo como tal.
+ */
+export function firmaBalance(balance: number): string {
+  return `${balance >= 0 ? "+" : ""}${balance}`;
+}
+
+/** «1 gol» / «0 goles». El singular existe y se nota. */
+export function golesLabel(goles: number): string {
+  return `${goles} ${goles === 1 ? "gol" : "goles"}`;
+}
+
+function KpiCard({ label, value, tinta }: { label: string; value: string; tinta: string }) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${RESUMEN_BORDE}`,
+        background: RESUMEN_TARJETA,
+        borderRadius: 16,
+        padding: "14px 10px",
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: 30, fontWeight: 900, color: tinta, lineHeight: 1.1 }}>{value}</div>
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 900,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "#94a3b8",
+          marginTop: 6,
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function DestacadoCard({
+  label,
+  quien,
+  dato,
+  tinta,
+}: {
+  label: string;
+  quien: string;
+  dato: string;
+  tinta: string;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${tinta}55`,
+        background: `${tinta}14`,
+        borderRadius: 16,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 900,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: tinta,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 900, color: "#ffffff" }}>{quien}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: tinta, marginTop: 2 }}>{dato}</div>
+    </div>
+  );
+}
+
+export function VisualSummaryBoard({
+  matchData,
+  report,
+}: {
+  matchData: MatchData;
+  report: MatchReport;
+}) {
+  const t = report.teamTotals;
+  const h = report.highlights;
+  const players = matchData.players || [];
+  const balance = t.recoveryLossBalance;
+  const conversion = t.goalConversionPct === null ? "—" : `${t.goalConversionPct}%`;
+  return (
+    <div
+      data-dossier-visual-summary
+      style={{
+        background: RESUMEN_FONDO,
+        borderRadius: 20,
+        padding: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }}
+    >
+      {/* RESULTADO ───────────────────────────────────────────────────── */}
+      <div
+        style={{
+          border: `1px solid ${RESUMEN_BORDE}`,
+          background: "rgba(255,255,255,0.05)",
+          borderRadius: 20,
+          padding: "16px 20px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 900,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "#64748b",
+            }}
+          >
+            Resultado
+          </div>
+          <div style={{ fontSize: 19, fontWeight: 900, color: "#ffffff", marginTop: 2 }}>
+            {matchData.teamName} · {matchData.opponentName}
+          </div>
+        </div>
+        <div style={{ fontSize: 54, fontWeight: 900, color: "#ffffff", lineHeight: 1 }}>
+          {report.score.team}–{report.score.opponent}
+        </div>
+      </div>
+
+      {/* PRIMERA FILA · LAS CUATRO CIFRAS DE CABECERA ─────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+        <KpiCard label="Tiros totales" value={String(t.shots)} tinta={TINTA_TIROS} />
+        <KpiCard label="Conversión" value={conversion} tinta={TINTA_CONVERSION} />
+        <KpiCard label="Recuperaciones" value={String(t.recoveries)} tinta={TINTA_RECUPERACIONES} />
+        <KpiCard
+          label="Balance Rec-(P+E)"
+          value={firmaBalance(balance)}
+          tinta={balance >= 0 ? TINTA_POSITIVO : TINTA_NEGATIVO}
+        />
+      </div>
+
+      {/* SEGUNDA FILA · QUIÉN ─────────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <DestacadoCard
+          label="Mayor TOT"
+          quien={destacadoLabel(h.topTot, players)}
+          dato={h.topTot ? h.topTot.totLabel : SIN_DATOS}
+          tinta={TINTA_TOT}
+        />
+        <DestacadoCard
+          label="Máximo goleador"
+          quien={destacadoLabel(h.topScorer, players)}
+          dato={golesLabel(h.topScorer ? h.topScorer.goals : 0)}
+          tinta={TINTA_GOLEADOR}
+        />
+        <DestacadoCard
+          label="Más recuperaciones"
+          quien={destacadoLabel(h.topRecoverer, players)}
+          dato={h.topRecoverer ? String(h.topRecoverer.recoveries) : SIN_DATOS}
+          tinta={TINTA_RECUPERADOR}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Si el bloque de zonas tiene algo que contar.
  *
@@ -529,23 +754,21 @@ export function buildDossierPages(matchData: MatchData): DossierPage[] {
   const push = (key: string, section: string, content: React.ReactNode) =>
     pages.push({ key, section, content });
 
-  // ── 1 · INFORME AUTOMÁTICO ────────────────────────────────────────────
+  // ── 1 · RESUMEN VISUAL ────────────────────────────────────────────────
   //
+  // Nada más abrir: el partido de un vistazo, con el lenguaje de la pantalla.
+  //
+  // Ocupa el sitio de la antigua página «Informe automático · datos clave»,
+  // que no aportaba nada: era `SummaryKpis` + `FoulsByPeriod`, exactamente lo
+  // que la PORTADA ya imprime en su resumen ejecutivo —`SummaryKpis` incluye
+  // dentro el desglose de faltas—. Se quita la repetición, no el dato.
+  push("visual-summary", "Resumen visual", <VisualSummaryBoard matchData={matchData} report={report} />);
+
   // «Datos clave» y el bloque de zonas NO caben juntos en una A4 cuando el
   // partido trae datos de verdad: medido en el Deploy Preview con 30 fichas y
   // 121 acciones, la página desbordaba 146 px y el marco los recortaba sin
-  // avisar. Son dos páginas. La de zonas solo existe si hay zonas que contar:
-  // una hoja con «Sin datos registrados» hace pensar que el dato existe y es
-  // cero.
-  push(
-    "report-key",
-    "Informe automático · datos clave",
-    <>
-      <div style={sectionTitleStyle}>Datos clave</div>
-      <SummaryKpis report={report} />
-      <FoulsByPeriod report={report} />
-    </>,
-  );
+  // avisar. La de zonas solo existe si hay zonas que contar: una hoja con
+  // «Sin datos registrados» hace pensar que el dato existe y es cero.
 
   if (hasZoneData(propio)) {
     push(

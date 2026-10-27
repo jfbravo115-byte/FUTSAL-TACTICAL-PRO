@@ -200,9 +200,21 @@ export type MatchReport = {
     redCards: number;
   };
   highlights: {
-    topTot: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "totLabel" | "totSeconds"> | null;
-    topScorer: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "goals"> | null;
-    topRecoverer: (Pick<MatchReportPlayerLine, "id" | "number" | "name"> & { recoveries: number }) | null;
+    // `jerseyNumberKnown` viaja con el destacado porque quien lo pinta tiene
+    // que poder respetar el «?» de un dorsal que todavía no consta.
+    topTot: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "totLabel" | "totSeconds"
+    > | null;
+    topScorer: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "goals"
+    > | null;
+    topRecoverer:
+      | (Pick<MatchReportPlayerLine, "id" | "number" | "jerseyNumberKnown" | "name"> & {
+          recoveries: number;
+        })
+      | null;
   };
   goalkeeper: {
     name: string;
@@ -528,9 +540,9 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     },
     teamTotals,
     highlights: {
-      topTot: topTot ? { id: topTot.id, number: topTot.number, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
-      topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, name: topScorer.name, goals: topScorer.goals } : null,
-      topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
+      topTot: topTot ? { id: topTot.id, number: topTot.number, jerseyNumberKnown: topTot.jerseyNumberKnown, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
+      topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, jerseyNumberKnown: topScorer.jerseyNumberKnown, name: topScorer.name, goals: topScorer.goals } : null,
+      topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, jerseyNumberKnown: topRecoverer.jerseyNumberKnown, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
     },
     goalkeeper,
     zoneDistribution,

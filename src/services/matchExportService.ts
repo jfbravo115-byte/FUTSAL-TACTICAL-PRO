@@ -6,7 +6,12 @@ import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../ut
 import { formatGoalkeeperZone } from "../utils/goalkeeperZones";
 import { formatSetPieceOrigin, formatSetPieceOutcome, formatShotOriginLabel } from "../utils/setPieceModel";
 import { formatMatchTime } from "../utils/goalSequence";
-import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
+import {
+  UNKNOWN_DURATION_LABEL,
+  concededGoalsNote,
+  concededLabel,
+  productionLabel,
+} from "../utils/matchContexts";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import { isCornerSide, formatCornerSideLabel, cornerSideFromGrid } from "../utils/cornerModel";
 import { phaseCsvLabel } from "../utils/phaseModel";
@@ -156,6 +161,64 @@ export function buildMatchJson(matchData: MatchData): string {
   return JSON.stringify(matchData, null, 2);
 }
 
+/**
+ * Leer un respaldo JSON y devolver el partido.
+ *
+ * `buildMatchJson` escribe el `MatchData` tal cual, así que `tacticalAnalysis`
+ * viaja SIEMPRE que el objeto lo traiga —el respaldo nunca lo ha filtrado—. Lo
+ * que se perdía estaba antes: el análisis no llegaba a estar en el partido.
+ * Ver `MatchAnalysis`, donde ahora se guarda en memoria aunque no exista copia
+ * local ni se pueda escribir en remoto.
+ *
+ * COMPATIBILIDAD. Esta función acepta las tres formas que puede tener un
+ * archivo guardado por alguna versión de la aplicación:
+ *
+ *   1. `MatchData` en la raíz — lo que escribe `buildMatchJson`, con o sin
+ *      `id` y con o sin `tacticalAnalysis`.
+ *   2. `{ version, matchData, … }` — la envoltura de la copia local.
+ *   3. `{ data: { … } }` — la fila remota tal como la devuelve el backend.
+ *
+ * Lo que NO hace es rellenar huecos. Un respaldo antiguo sin
+ * `tacticalAnalysis`, sin `timestamp` o sin `teamDefendsAtKickoff` se devuelve
+ * sin esos campos: inventarlos convertiría una ausencia en un dato y el
+ * dossier acabaría afirmando algo que nadie registró.
+ */
+export function parseMatchJson(text: string): MatchData {
+  let crudo: unknown;
+  try {
+    crudo = JSON.parse(text);
+  } catch {
+    throw new Error("El archivo no es un JSON válido");
+  }
+  const envoltura = crudo as Record<string, unknown> | null;
+  const cuerpo =
+    envoltura && typeof envoltura === "object"
+      ? ((envoltura.matchData as Record<string, unknown> | undefined) ??
+        (envoltura.data as Record<string, unknown> | undefined) ??
+        envoltura)
+      : null;
+  if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) {
+    throw new Error("El archivo no contiene un partido");
+  }
+  const faltan = (
+    [
+      ["teamName", "string"],
+      ["opponentName", "string"],
+      ["players", "array"],
+      ["events", "array"],
+    ] as const
+  ).filter(([clave, tipo]) =>
+    tipo === "array" ? !Array.isArray(cuerpo[clave]) : typeof cuerpo[clave] !== tipo,
+  );
+  if (faltan.length) {
+    throw new Error(`El respaldo no trae ${faltan.map(([c]) => c).join(", ")}`);
+  }
+  // El `id` es de la fila guardada, no del partido: no se arrastra a un
+  // objeto que puede acabar exportándose o guardándose en otro sitio.
+  const { id: _id, ...partido } = cuerpo as Record<string, unknown>;
+  return partido as unknown as MatchData;
+}
+
 function esc(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
@@ -171,12 +234,19 @@ export function buildPrintableReportHtml(matchData: MatchData): string {
   // deterministas que imprime el informe, sin recalcular nada.
   const contextos = report.matchContextGroups.length
     ? report.matchContextGroups
-        .map(
-          (g) => `<div class="card"><b style="font-size:13px">${esc(g.label)}</b>` +
+        .map((g) => {
+          const nombres = { teamName: report.teamName, opponentName: report.opponentName };
+          // Un bloque por bando. Sumarlos diría que marcó quien encajó.
+          const lado = (rotulo: string, t: typeof g.production) =>
+            `<div><b style="font-size:11px">${esc(rotulo)}</b>` +
+            `<div>Tiros ${t.shots} · a portería ${t.onTarget} · fuera ${t.offTarget} · bloqueados ${t.blocked} · goles ${t.goalsBenefiting}</div>` +
+            `<div class="muted">Recuperaciones ${t.recoveries} · pérdidas ${t.turnovers} · faltas ${t.fouls} · córners ${t.corners}</div></div>`;
+          return `<div class="card"><b style="font-size:13px">${esc(g.label)}</b>` +
             `<div class="muted">Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}</div>` +
-            `<div>Tiros ${g.tally.shots} · a portería ${g.tally.onTarget} · fuera ${g.tally.offTarget} · bloqueados ${g.tally.blocked} · goles ${g.tally.goals}</div>` +
-            `<div class="muted">Recuperaciones ${g.tally.recoveries} · pérdidas ${g.tally.turnovers} · faltas ${g.tally.fouls} · córners ${g.tally.corners}</div></div>`,
-        )
+            lado(productionLabel(g, nombres), g.production) +
+            lado(concededLabel(g, nombres), g.conceded) +
+            `<div><b>${esc(concededGoalsNote(g, nombres))}</b></div></div>`;
+        })
         .join("")
     : "";
   const goles = report.goalSequence.length

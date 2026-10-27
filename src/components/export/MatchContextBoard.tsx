@@ -26,7 +26,15 @@
  */
 import React from "react";
 import { Period } from "../../types/futsal";
-import { MATCH_CONTEXT_LABEL, MatchContext, UNKNOWN_DURATION_LABEL } from "../../utils/matchContexts";
+import {
+  CONTEXT_DURING_LABEL,
+  MATCH_CONTEXT_LABEL,
+  MatchContext,
+  UNKNOWN_DURATION_LABEL,
+  UNKNOWN_SIDE_LABEL,
+  otherSide,
+  sideName,
+} from "../../utils/matchContexts";
 import { GoalSequenceEntry, formatMatchTime } from "../../utils/goalSequence";
 
 /** Nombres de parte para el PDF. Nunca el número interno. */
@@ -92,14 +100,43 @@ function Metric({ label, value, accent }: { label: string; value: number; accent
   );
 }
 
-export function MatchContextCard({ context }: { context: MatchContext }) {
-  const t = context.tally;
+export function MatchContextCard({
+  context,
+  teamName,
+  opponentName,
+}: {
+  context: MatchContext;
+  teamName?: string;
+  opponentName?: string;
+}) {
   const marcador = formatContextScore(context);
+  const nombres = { teamName, opponentName };
+  // Los dos bandos de la ventana, cada uno con su rótulo. Nunca sumados:
+  // el que tiene el portero-jugador y el que se aprovechó de tenerlo.
+  const bando = context.side === "unknown" ? "team" : context.side;
+  const otro = context.side === "unknown" ? "opponent" : otherSide(context.side);
+  const encajados = context.conceded.goalsBenefiting;
+  const bloques = [
+    {
+      rotulo: `Producción de ${sideName(bando, nombres)}`,
+      t: context.production,
+      accent: "#16a34a",
+    },
+    {
+      // Dicho entero: de quién son las cifras y durante qué.
+      rotulo:
+        context.side === "unknown"
+          ? `Producción de ${sideName(otro, nombres)}`
+          : `Producción de ${sideName(otro, nombres)} durante ${CONTEXT_DURING_LABEL[context.type]} de ${sideName(bando, nombres)}`,
+      t: context.conceded,
+      accent: "#b91c1c",
+    },
+  ];
   return (
     <div style={cardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 800, color: "#0f172a" }}>
-          {MATCH_CONTEXT_LABEL[context.type]}
+          {context.side === "unknown" ? UNKNOWN_SIDE_LABEL : MATCH_CONTEXT_LABEL[context.type]}
         </span>
         <span style={{ fontSize: 9, color: "#64748b", whiteSpace: "nowrap" }}>
           {periodPdfLabel(context.period)} · {formatContextDuration(context.duration)}
@@ -107,16 +144,26 @@ export function MatchContextCard({ context }: { context: MatchContext }) {
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Metric label="Tiros" value={t.shots} accent="#2563eb" />
-        <Metric label="A portería" value={t.onTarget} />
-        <Metric label="Fuera" value={t.offTarget} />
-        <Metric label="Bloqueados" value={t.blocked} />
-        <Metric label="Goles" value={t.goals} accent="#16a34a" />
-      </div>
+      {bloques.map(({ rotulo, t, accent }) => (
+        <div key={rotulo} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: accent }}>{rotulo}</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Metric label="Tiros" value={t.shots} accent="#2563eb" />
+            <Metric label="A portería" value={t.onTarget} />
+            <Metric label="Fuera" value={t.offTarget} />
+            <Metric label="Bloqueados" value={t.blocked} />
+            <Metric label="Goles" value={t.goalsBenefiting} accent={accent} />
+          </div>
+          <div style={{ fontSize: 9, color: "#64748b" }}>
+            Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas {t.fouls} · córners{" "}
+            {t.corners}
+          </div>
+        </div>
+      ))}
 
-      <div style={{ fontSize: 9, color: "#64748b" }}>
-        Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas {t.fouls} · córners {t.corners}
+      <div style={{ fontSize: 9, fontWeight: 700, color: "#b91c1c" }}>
+        {sideName(bando, nombres)} encajó {encajados} {encajados === 1 ? "gol" : "goles"} durante
+        estos tramos.
       </div>
     </div>
   );

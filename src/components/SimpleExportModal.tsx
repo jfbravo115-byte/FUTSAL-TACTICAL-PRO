@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, FileJson, FileSpreadsheet, Printer, Download, Users, ShieldHalf } from "lucide-react";
+import { X, FileJson, FileSpreadsheet, Printer, Download, Users, ShieldHalf, Layers } from "lucide-react";
 import { MatchData } from "../types/futsal";
 import {
   downloadActionsCsv,
@@ -7,6 +7,7 @@ import {
   downloadPlayersCsv,
 } from "../services/matchExportService";
 import { exportMatchReportPdf, exportGoalkeeperReportPdf } from "../services/pdfExportService";
+import { exportFullMatchDossierPdf } from "../services/fullDossierPdfService";
 
 type Props = {
   isOpen: boolean;
@@ -34,18 +35,26 @@ export function SimpleExportModal({ isOpen, onClose, matchData }: Props) {
 
   return (
     <div className="fixed inset-0 z-[1600] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-slate-900 border border-white/10 rounded-3xl shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div>
             <h2 className="text-white font-black uppercase italic flex items-center gap-2"><Download size={18} className="text-blue-400" /> Exportar</h2>
-            <p className="text-[10px] text-slate-500 uppercase mt-1">Informe, jugadores, acciones o respaldo</p>
+            <p className="text-[10px] text-slate-500 uppercase mt-1">Dossier, informe, jugadores, acciones o respaldo</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><X size={18} /></button>
         </div>
         <div className="p-5 grid gap-3">
-          <button disabled={busy} onClick={() => run(() => exportMatchReportPdf(matchData), "PDF del informe generado")} className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 flex items-center gap-4 text-left disabled:opacity-50">
+          {/* DOS PRODUCTOS DISTINTOS, DOS BOTONES.
+              El de arriba se llamaba «Informe completo» y no lo era: traía los
+              mapas esenciales del equipo analizado y ninguno del rival. Ahora
+              dice lo que es, y al lado está el que sí lo trae todo. */}
+          <button data-export-dossier disabled={busy} onClick={() => run(() => exportFullMatchDossierPdf(matchData), "Dossier completo generado")} className="p-4 rounded-2xl bg-violet-500/15 border-2 border-violet-500/40 hover:bg-violet-500/25 flex items-center gap-4 text-left disabled:opacity-50">
+            <Layers className="text-violet-300" />
+            <div><div className="font-black text-white uppercase text-sm">Dossier completo (PDF)</div><div className="text-[10px] text-slate-400">Informe automático, Tactical Pro y todos los mapas registrados</div></div>
+          </button>
+          <button data-export-summary disabled={busy} onClick={() => run(() => exportMatchReportPdf(matchData), "PDF del informe generado")} className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 flex items-center gap-4 text-left disabled:opacity-50">
             <Printer className="text-blue-400" />
-            <div><div className="font-black text-white uppercase text-sm">Informe completo (PDF)</div><div className="text-[10px] text-slate-500">Resumen, jugadores, zonas, porteros · descarga directa, sin ventanas emergentes</div></div>
+            <div><div className="font-black text-white uppercase text-sm">Informe resumido (PDF)</div><div className="text-[10px] text-slate-500">Datos principales, jugadores, porteros, mapas esenciales y Tactical Pro</div></div>
           </button>
           <button disabled={busy} onClick={() => run(() => exportGoalkeeperReportPdf(matchData), "PDF de porteros generado")} className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 hover:bg-indigo-500/20 flex items-center gap-4 text-left disabled:opacity-50">
             <ShieldHalf className="text-indigo-400" />

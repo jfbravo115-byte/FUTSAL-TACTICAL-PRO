@@ -20,6 +20,14 @@
  * desmontan inmediatamente después — el usuario nunca ve el proceso ni
  * necesita permitir ninguna ventana emergente.
  *
+ * PIEZAS COMPARTIDAS
+ * ------------------
+ * Varias de estas secciones y la maquinaria de captura están EXPORTADAS
+ * porque el DOSSIER COMPLETO (`fullDossierPdfService.tsx`) las reutiliza tal
+ * cual. No se copian allí: dos plantillas del mismo bloque acabarían
+ * enseñando cifras distintas del mismo partido, que es justo lo que este
+ * archivo lleva varias fases evitando.
+ *
  * PROHIBIDO explícitamente en este archivo: cualquier llamada a IA
  * (generateTacticalReport, tacticalAnalysisService, fetch a
  * /api/tactical-pro). Tactical Pro se muestra ÚNICAMENTE si
@@ -28,11 +36,16 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
-import { toJpeg } from "html-to-image";
+import { getFontEmbedCSS, toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
-import { UNKNOWN_DURATION_LABEL } from "../utils/matchContexts";
+import {
+  UNKNOWN_DURATION_LABEL,
+  concededGoalsNote,
+  concededLabel,
+  productionLabel,
+} from "../utils/matchContexts";
 import { PERIOD_PDF_LABEL } from "../components/export/MatchContextBoard";
 import {
   buildZoneDashboard,
@@ -62,7 +75,7 @@ import { safeImageSrc } from "../utils/safeImageSrc";
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
 const PAGE_WIDTH = 794; // ~ A4 a 96dpi
-const pageStyle: React.CSSProperties = {
+export const pageStyle: React.CSSProperties = {
   width: PAGE_WIDTH,
   minHeight: 1123,
   background: "#ffffff",
@@ -74,12 +87,12 @@ const pageStyle: React.CSSProperties = {
   flexDirection: "column",
   gap: 16,
 };
-const cardStyle: React.CSSProperties = {
+export const cardStyle: React.CSSProperties = {
   border: "1px solid #d1d5db",
   borderRadius: 10,
   padding: 10,
 };
-const sectionTitleStyle: React.CSSProperties = {
+export const sectionTitleStyle: React.CSSProperties = {
   fontSize: 16,
   fontWeight: 900,
   margin: "8px 0 4px",
@@ -92,12 +105,12 @@ function fmtDuration(milliseconds: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function safeName(value: string): string {
+export function safeName(value: string): string {
   return value.replace(/[^a-z0-9áéíóúüñ_-]+/gi, "_").replace(/^_+|_+$/g, "") || "partido";
 }
 
 // ── CABECERA (equipo, rival, logos si existen, fecha, resultado) ───────
-function ReportHeader({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
+export function ReportHeader({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
   const teamLogoSrc = safeImageSrc(matchData.teamLogo);
   const opponentLogoSrc = safeImageSrc(matchData.opponentLogo);
   return (
@@ -125,7 +138,7 @@ function ReportHeader({ matchData, report }: { matchData: MatchData; report: Mat
   );
 }
 
-function SummaryKpis({ report }: { report: MatchReport }) {
+export function SummaryKpis({ report }: { report: MatchReport }) {
   const cell = (label: string, value: React.ReactNode) => (
     <div style={cardStyle}>
       <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase" }}>{label}</div>
@@ -171,7 +184,7 @@ function SummaryKpis({ report }: { report: MatchReport }) {
  * inventa un reparto: dice que no está disponible y enseña el contador con
  * su nombre.
  */
-function FoulsByPeriod({ report }: { report: MatchReport }) {
+export function FoulsByPeriod({ report }: { report: MatchReport }) {
   if (!report.hasFoulEvents) {
     const c = report.periodFoulCounter;
     if (c.team === 0 && c.opponent === 0) return null;
@@ -242,7 +255,7 @@ function FoulsByPeriod({ report }: { report: MatchReport }) {
 //   3. el volumen no es rendimiento: la celda más oscura puede ser donde más
 //      se pierde el balón.
 
-function ZoneMapLegend() {
+export function ZoneMapLegend() {
   return (
     <div style={{ fontSize: 8, color: "#6b7280", marginTop: 4, lineHeight: 1.35, maxWidth: 240 }}>
       <div>Número = acciones del equipo registradas con origen en esa zona.</div>
@@ -442,7 +455,7 @@ function FoulsAgainstLine({ matchData }: { matchData: MatchData }) {
   );
 }
 
-function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
+export function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
   const shotsFromFreeKick = countShotsFromSetPiece(matchData.events || [], "free_kick", false);
@@ -581,7 +594,7 @@ function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: M
   );
 }
 
-function PlayersTable({ report }: { report: MatchReport }) {
+export function PlayersTable({ report }: { report: MatchReport }) {
   return (
     <div>
       <div style={sectionTitleStyle}>Jugadores</div>
@@ -635,7 +648,7 @@ function PlayersTable({ report }: { report: MatchReport }) {
  * Ninguna se estima. Una ventana sin cierre declarado dice «duración no
  * disponible», y un gol cuya procedencia nadie registró dice «No registrado».
  */
-function SpecialContextsSection({ report }: { report: MatchReport }) {
+export function SpecialContextsSection({ report }: { report: MatchReport }) {
   if (report.matchContextGroups.length === 0 && report.goalSequence.length === 0) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -643,28 +656,48 @@ function SpecialContextsSection({ report }: { report: MatchReport }) {
         <div>
           <div style={sectionTitleStyle}>Situaciones especiales</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {report.matchContextGroups.map((g) => (
-              <div key={g.type} style={{ ...cardStyle, padding: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700 }}>
-                  {g.label}
-                  {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+            {report.matchContextGroups.map((g) => {
+              const nombres = {
+                teamName: report.teamName,
+                opponentName: report.opponentName,
+              };
+              return (
+                <div key={`${g.type}-${g.side}`} style={{ ...cardStyle, padding: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>
+                    {g.label}
+                    {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+                    Duración:{" "}
+                    {g.totalDuration !== null
+                      ? fmtDuration(g.totalDuration)
+                      : UNKNOWN_DURATION_LABEL}
+                  </div>
+                  {/* Dos bandos, dos bloques. No se suman ni se mezclan: el
+                      que tiene el portero-jugador y el que se aprovecha. */}
+                  {([
+                    [productionLabel(g, nombres), g.production, "#0f172a"],
+                    [concededLabel(g, nombres), g.conceded, "#b91c1c"],
+                  ] as const).map(([rotulo, t, color]) => (
+                    <div key={rotulo} style={{ marginTop: 3 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color }}>{rotulo}</div>
+                      <div style={{ fontSize: 11 }}>
+                        Tiros {t.shots} · a portería {t.onTarget} · fuera {t.offTarget} ·
+                        bloqueados {t.blocked} · goles {t.goalsBenefiting}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas{" "}
+                        {t.fouls} · córners {t.corners}
+                      </div>
+                    </div>
+                  ))}
+                  {/* La dirección de los goles, dicha con todas las letras. */}
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", marginTop: 3 }}>
+                    {concededGoalsNote(g, nombres)}
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
-                  Duración:{" "}
-                  {g.totalDuration !== null
-                    ? fmtDuration(g.totalDuration)
-                    : UNKNOWN_DURATION_LABEL}
-                </div>
-                <div style={{ fontSize: 11 }}>
-                  Tiros {g.tally.shots} · a portería {g.tally.onTarget} · fuera{" "}
-                  {g.tally.offTarget} · bloqueados {g.tally.blocked} · goles {g.tally.goals}
-                </div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>
-                  Recuperaciones {g.tally.recoveries} · pérdidas {g.tally.turnovers} · faltas{" "}
-                  {g.tally.fouls} · córners {g.tally.corners}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -697,7 +730,7 @@ function SpecialContextsSection({ report }: { report: MatchReport }) {
   );
 }
 
-function EventsSection({ report }: { report: MatchReport }) {
+export function EventsSection({ report }: { report: MatchReport }) {
   if (report.relevantEvents.length === 0) return null;
   return (
     <div>
@@ -727,6 +760,59 @@ function EventsSection({ report }: { report: MatchReport }) {
 // dejándola ilegible. El texto nunca se trunca: todo el contenido acaba
 // repartido en tantas páginas como haga falta.
 const TACTICAL_PRO_CHARS_PER_PAGE = 3200;
+
+/**
+ * Longitud por debajo de la cual una última línea se considera un título
+ * suelto y se baja a la página siguiente, con lo que introduce.
+ */
+export const ORPHAN_HEADING_CHARS = 60;
+
+/**
+ * Un apartado numerado: «4. Portería», «6. Propuestas de trabajo».
+ *
+ * Se mide sobre la línea SIN los asteriscos, porque para entonces el título
+ * ya viaja en negrita.
+ */
+export const NUMBERED_HEADING_RE = /^(\d{1,2})\.\s+(\S.*)$/;
+
+/** Sitio mínimo que ha de quedar bajo un título para no dejarlo colgando. */
+export const MIN_CHARS_AFTER_HEADING = 260;
+
+/**
+ * El número del apartado, DENTRO del texto.
+ *
+ * «1. Lectura del partido» es, para markdown, el primer elemento de una lista
+ * ordenada: el número no es texto, es un marcador que pinta el navegador. En
+ * el PDF rasterizado ese marcador no aparecía —queda fuera de la caja que se
+ * captura— y los seis apartados salían sin numerar. Devolverle la sangría al
+ * `ol` no basta: la numeración seguía dependiendo de cómo decidiera pintar el
+ * marcador quien renderizara.
+ *
+ * Así que el título deja de ser una lista. Una línea suelta con forma de
+ * apartado numerado se convierte en un párrafo en negrita que CONTIENE el
+ * número como texto: lo que se ve es exactamente lo que dice el informe, y
+ * `textContent` puede comprobarlo.
+ *
+ * Una lista de verdad —varias líneas en el mismo bloque— no se toca: sigue
+ * siendo una lista, con sus marcadores.
+ */
+export function inlineHeadingNumbers(markdown: string): string {
+  return markdown
+    .split(/\n{2,}/)
+    .map((bloque) => {
+      const lineas = bloque.split("\n").filter((l) => l.trim());
+      if (lineas.length !== 1) return bloque;
+      const m = NUMBERED_HEADING_RE.exec(lineas[0].trim());
+      return m ? `**${m[1]}. ${m[2]}**` : bloque;
+    })
+    .join("\n\n");
+}
+
+/** ¿Esta unidad es un título de apartado? */
+export function isHeadingUnit(unit: string): boolean {
+  const limpio = unit.replace(/\*\*/g, "").trim();
+  return limpio.length <= ORPHAN_HEADING_CHARS && NUMBERED_HEADING_RE.test(limpio);
+}
 
 /**
  * Divide un texto largo (una unidad que por sí sola excede maxChars) en
@@ -792,7 +878,15 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
   let current: string[] = [];
   let currentLen = 0;
   for (const unit of units) {
-    if (currentLen > 0 && currentLen + unit.length + 2 > maxCharsPerPage) {
+    const noCabe = currentLen > 0 && currentLen + unit.length + 2 > maxCharsPerPage;
+    // Un título necesita sitio para lo que introduce. Si detrás de él no
+    // caben unas líneas de contenido, baja entero a la página siguiente en
+    // vez de quedarse colgando en el borde inferior.
+    const tituloSinSitio =
+      currentLen > 0 &&
+      isHeadingUnit(unit) &&
+      currentLen + unit.length + 2 + MIN_CHARS_AFTER_HEADING > maxCharsPerPage;
+    if (noCabe || tituloSinSitio) {
       pages.push(current.join("\n\n"));
       current = [];
       currentLen = 0;
@@ -801,15 +895,50 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
     currentLen += unit.length + 2;
   }
   if (current.length) pages.push(current.join("\n\n"));
+
+  // Un título no se queda solo al final de una página. «Sin balón» como
+  // última línea, con su apartado empezando en la hoja siguiente, obliga a
+  // pasar página para saber de qué hablaba.
+  for (let i = 0; i < pages.length - 1; i++) {
+    const unidades = pages[i].split("\n\n");
+    const ultima = unidades[unidades.length - 1];
+    if (unidades.length > 1 && ultima.length <= ORPHAN_HEADING_CHARS) {
+      pages[i] = unidades.slice(0, -1).join("\n\n");
+      pages[i + 1] = `${ultima}\n\n${pages[i + 1]}`;
+    }
+  }
   return pages;
 }
 
-function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
+/**
+ * Las listas del análisis, con su marcador visible.
+ *
+ * Tailwind le quita a `ol` y `ul` el marcador y la sangría, y nadie se los
+ * devolvía aquí. Un informe que empieza sus apartados por «1. Lectura del
+ * partido» salía en el PDF como «Lectura del partido»: react-markdown lo
+ * convierte en lista ordenada y el número se perdía por el camino. Se
+ * perdían también las viñetas de cualquier enumeración.
+ *
+ * `start` viaja en las props, así que el apartado 4 sigue numerando 4 y no
+ * vuelve a empezar por 1.
+ */
+const listaStyle: React.CSSProperties = { paddingLeft: 20, margin: "3px 0" };
+const MARKDOWN_COMPONENTS = {
+  ol: ({ node: _node, ...props }: any) => (
+    <ol style={{ ...listaStyle, listStyle: "decimal" }} {...props} />
+  ),
+  ul: ({ node: _node, ...props }: any) => (
+    <ul style={{ ...listaStyle, listStyle: "disc" }} {...props} />
+  ),
+  li: ({ node: _node, ...props }: any) => <li style={{ margin: "1px 0" }} {...props} />,
+};
+
+export function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
   return (
     <div>
       <div style={sectionTitleStyle}>Tactical Pro{total > 1 ? ` (${index + 1}/${total})` : ""}</div>
       <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-        <Markdown>{chunk}</Markdown>
+        <Markdown components={MARKDOWN_COMPONENTS}>{inlineHeadingNumbers(chunk)}</Markdown>
       </div>
     </div>
   );
@@ -1003,7 +1132,7 @@ function buildGoalkeeperReportPages(
   return pages;
 }
 
-function PdfPagesRenderer({
+export function PdfPagesRenderer({
   pages,
   refs,
 }: {
@@ -1035,10 +1164,65 @@ const captureOpts = {
  * botón "Porteros + Mapa" de MatchTracker use ESTA captura y no una copia
  * paralela: había dos, y solo una recibía las correcciones.
  */
+/**
+ * Lo que se espera a que `html-to-image` reúna las fuentes web.
+ *
+ * Antes de rasterizar, la librería descarga la hoja de Google Fonts y TODOS
+ * los archivos de fuente que referencia —decenas de subconjuntos— y los
+ * incrusta. Esa descarga no tiene tiempo límite y, además, la repetía en
+ * CADA página. Generando el dossier real se quedó colgada ahí: veinticinco
+ * páginas sin rasterizar una sola y la exportación esperando para siempre,
+ * sin error ni archivo. Un PDF no puede depender de llegar a un servidor de
+ * tipografías.
+ */
+export const FONT_EMBED_TIMEOUT_MS = 8000;
+
+/**
+ * Lo que se le pasa a `html-to-image` cuando no hay fuentes que incrustar.
+ *
+ * Tiene que ser una cadena NO VACÍA: la librería comprueba el valor por
+ * verdadero, así que `""` no le dice «ninguna», le dice «búscalas tú». Con
+ * esto el texto se dibuja con la pila de fuentes del sistema que declaran
+ * las plantillas, que es legible en papel, y la exportación termina.
+ */
+export const SIN_FUENTES_CSS = "/* sin fuentes incrustadas */";
+
+/** Espera acotada: lo que no llega a tiempo se da por no disponible. */
+async function conTiempo<T>(promesa: Promise<T>, ms: number): Promise<T> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promesa,
+      new Promise<never>((_, reject) => {
+        temporizador = setTimeout(() => reject(new Error("tiempo agotado")), ms);
+      }),
+    ]);
+  } finally {
+    if (temporizador) clearTimeout(temporizador);
+  }
+}
+
+/**
+ * Las fuentes se reúnen UNA VEZ para todo el documento.
+ *
+ * Son las mismas en las veinticinco páginas: pedirlas una por página era
+ * multiplicar por veinticinco una descarga que ya es la parte más lenta de
+ * exportar.
+ */
+export async function embedCssDelDocumento(node: HTMLElement): Promise<string> {
+  try {
+    const css = await conTiempo(getFontEmbedCSS(node), FONT_EMBED_TIMEOUT_MS);
+    return css && css.trim() ? css : SIN_FUENTES_CSS;
+  } catch {
+    return SIN_FUENTES_CSS;
+  }
+}
+
 export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
   const images: string[] = [];
+  const fontEmbedCSS = nodes.length ? await embedCssDelDocumento(nodes[0]) : SIN_FUENTES_CSS;
   for (const node of nodes) {
-    const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });
+    const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth, fontEmbedCSS });
     if (url && url.length > 1000) images.push(url);
   }
   if (images.length === 0) throw new Error("No se pudo generar ninguna página del PDF.");
@@ -1047,9 +1231,21 @@ export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF>
   const pdfH = pdf.internal.pageSize.getHeight();
   for (let i = 0; i < images.length; i++) {
     if (i > 0) pdf.addPage();
+    // Los manejadores van ANTES de `src`, y después se mira `complete`.
+    //
+    // Al revés hay carrera: una imagen en data URL puede acabar de decodificar
+    // antes de que se le enganche el `onload`, y entonces el evento ya pasó y
+    // la espera no termina NUNCA. No es teórico: el dossier se quedaba colgado
+    // montando el PDF —todas las páginas rasterizadas, ninguna añadida— y la
+    // exportación no volvía ni fallaba. `onerror` existe por lo mismo: una
+    // imagen que no decodifica tiene que romper la exportación, no congelarla.
     const img = new Image();
-    img.src = images[i];
-    await new Promise((resolve) => { img.onload = resolve; });
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error(`No se pudo leer la página ${i + 1} del PDF.`));
+      img.src = images[i];
+      if (img.complete) resolve();
+    });
     const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
     pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
   }
@@ -1065,7 +1261,7 @@ export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF>
  * `finally` garantiza que nunca queda un contenedor huérfano en el DOM
  * aunque la captura o el guardado del PDF lancen.
  */
-async function renderOffscreen(
+export async function renderOffscreen(
   element: React.ReactElement,
   refs: React.RefObject<HTMLDivElement>[],
   onReady: () => Promise<void>,
@@ -1089,7 +1285,7 @@ async function renderOffscreen(
   }
 }
 
-function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
+export function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
   return Array.from({ length: count }, () => React.createRef<HTMLDivElement>());
 }
 

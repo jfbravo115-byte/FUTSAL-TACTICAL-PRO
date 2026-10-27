@@ -58,6 +58,34 @@ export async function getPartido(id: string): Promise<SavedMatch> {
   return res.json();
 }
 
+/**
+ * Actualiza ÚNICAMENTE el análisis táctico de un partido remoto.
+ *
+ * Es la única escritura parcial que existe sobre el recurso, y por eso tiene
+ * ruta propia: `PATCH /api/partidos/:id/tactical-analysis`. El servidor toca
+ * exactamente la clave `tacticalAnalysis` del JSON —con `jsonb_set`, sin
+ * reescribir el documento—, así que eventos, jugadores, marcador, tiempos y
+ * zonas no pueden verse afectados aunque esta llamada se repita.
+ *
+ * Lanza si la respuesta no es correcta. Quien llama decide qué hacer con el
+ * fallo: el análisis ya está en memoria y no se pierde por esto.
+ */
+export async function updatePartidoTacticalAnalysis(
+  remoteId: string,
+  tacticalAnalysis: string,
+): Promise<void> {
+  const texto = (tacticalAnalysis ?? "").trim();
+  // Un análisis vacío no se envía: borraría el bueno sin traer nada mejor.
+  if (!remoteId || !texto) {
+    throw new Error("updatePartidoTacticalAnalysis: faltan id o analisis");
+  }
+  const res = await apiFetch(`/${remoteId}/tactical-analysis`, {
+    method: "PATCH",
+    body: JSON.stringify({ tacticalAnalysis: texto }),
+  });
+  if (!res.ok) throw new Error(`updatePartidoTacticalAnalysis: ${res.status}`);
+}
+
 /** Elimina uno o varios partidos. */
 export async function deletePartidos(ids: string[]): Promise<void> {
   await Promise.all(

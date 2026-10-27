@@ -545,7 +545,7 @@ describe("el informe incorpora las situaciones especiales", () => {
   });
 
   it("con los cinco tiros de la ventana: 5 · 3 · 1 · 1 · 1", () => {
-    const t = generateMatchReport(md()).matchContextGroups[0].tally;
+    const t = generateMatchReport(md()).matchContextGroups[0].production;
     expect([t.shots, t.onTarget, t.offTarget, t.blocked, t.goals]).toEqual([5, 3, 1, 1, 1]);
   });
 
@@ -554,7 +554,14 @@ describe("el informe incorpora las situaciones especiales", () => {
     expect(texto).toContain("## Situaciones especiales");
     expect(texto).toContain("Superioridad por expulsión rival");
     expect(texto).toContain("01:42");
-    expect(texto).toContain("Tiros **5**");
+    // Las cifras van rotuladas con el bando: «tiros 5» a secas no decía de
+    // quién eran, y en un partido con declaraciones de los dos lados eso
+    // acababa atribuyendo al equipo los goles que le metieron.
+    expect(texto).toContain("Producción de Mi Equipo — tiros **5**");
+    expect(texto).toContain(
+      "Producción de Rival CF durante la superioridad de Mi Equipo — tiros **0**",
+    );
+    expect(texto).toContain("Mi Equipo encajó 0 goles durante estos tramos.");
   });
 
   it("nunca imprime el código interno del estado", () => {
@@ -808,7 +815,7 @@ describe("11 · las situaciones especiales conservan sus conteos", () => {
     });
     const r = generateMatchReport(md);
     // Dentro de la ventana: 2. En todo el partido: 4. Dos preguntas distintas.
-    expect(r.matchContexts[0].tally.fouls).toBe(2);
+    expect(r.matchContexts[0].production.fouls).toBe(2);
     expect(r.fouls.team).toBe(4);
   });
 });

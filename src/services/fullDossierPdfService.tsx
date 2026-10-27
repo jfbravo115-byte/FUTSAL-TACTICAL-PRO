@@ -502,10 +502,20 @@ export function DossierIndexTable({
 // también a la pantalla—. Si el informe cambiara una cifra, esta página
 // cambiaría con él, que es justo lo que se quiere.
 
-/** Fondo y tintas, tomadas de la pantalla. Se imprimen bien en papel. */
+/**
+ * Fondo y tintas, tomadas de la pantalla. Se imprimen bien en papel.
+ *
+ * TODO EN HEXADECIMAL SÓLIDO, A PROPÓSITO. El resto de las plantillas del
+ * dossier no usa `rgba()` ni hexadecimales de ocho dígitos, y esta página
+ * tampoco debe: al introducirlos, `html-to-image` se quedaba colgado
+ * rasterizando justo esta hoja —el export se paraba en la página 2 y no
+ * volvía—. Los tonos ya vienen mezclados contra el fondo oscuro, así que se
+ * ve igual sin pedirle transparencias a la captura.
+ */
 const RESUMEN_FONDO = "#0A0B0E";
-const RESUMEN_TARJETA = "rgba(15,23,42,0.6)";
-const RESUMEN_BORDE = "rgba(255,255,255,0.12)";
+const RESUMEN_TARJETA = "#0F172A";
+const RESUMEN_BORDE = "#262B36";
+const RESUMEN_PANEL = "#16181D";
 const TINTA_TIROS = "#67e8f9";
 const TINTA_CONVERSION = "#bef264";
 const TINTA_RECUPERACIONES = "#93c5fd";
@@ -514,6 +524,13 @@ const TINTA_NEGATIVO = "#fca5a5";
 const TINTA_TOT = "#fbbf24";
 const TINTA_GOLEADOR = "#a3e635";
 const TINTA_RECUPERADOR = "#60a5fa";
+
+/** Fondo y borde de cada destacado, ya mezclados contra el fondo oscuro. */
+const FONDO_DESTACADO: Record<string, { fondo: string; borde: string }> = {
+  [TINTA_TOT]: { fondo: "#1F1A10", borde: "#5A4718" },
+  [TINTA_GOLEADOR]: { fondo: "#171E10", borde: "#41551C" },
+  [TINTA_RECUPERADOR]: { fondo: "#101826", borde: "#28446B" },
+};
 
 /** «Sin datos» es la única respuesta honesta cuando no hay a quién destacar. */
 export const SIN_DATOS = "Sin datos";
@@ -594,11 +611,12 @@ function DestacadoCard({
   dato: string;
   tinta: string;
 }) {
+  const tono = FONDO_DESTACADO[tinta];
   return (
     <div
       style={{
-        border: `1px solid ${tinta}55`,
-        background: `${tinta}14`,
+        border: `1px solid ${tono.borde}`,
+        background: tono.fondo,
         borderRadius: 16,
         padding: 14,
       }}
@@ -649,7 +667,7 @@ export function VisualSummaryBoard({
       <div
         style={{
           border: `1px solid ${RESUMEN_BORDE}`,
-          background: "rgba(255,255,255,0.05)",
+          background: RESUMEN_PANEL,
           borderRadius: 20,
           padding: "16px 20px",
           display: "flex",

@@ -39,7 +39,14 @@ vi.mock("./tacticalAnalysisService", () => ({
   generateTacticalReport: (...args: any[]) => generateTacticalReportMock(...args),
 }));
 
-import { exportMatchReportPdf, exportGoalkeeperReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  capturePagesToPdf,
+  exportMatchReportPdf,
+  exportGoalkeeperReportPdf,
+  splitTacticalProIntoPages,
+} from "./pdfExportService";
 import { generateMatchReport } from "./matchReportService";
 import { buildZoneDashboard, primaryBucket } from "./matchZonesService";
 
@@ -1774,5 +1781,73 @@ describe("PDF · fases de juego", () => {
     generateTacticalReportMock.mockClear();
     await paginas(conFases());
     expect(generateTacticalReportMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── LA CARRERA QUE COLGABA LA EXPORTACIÓN ──────────────────────────────
+//
+// `capturePagesToPdf` enganchaba el `onload` DESPUÉS de asignar `src`. Una
+// imagen en data URL puede decodificar antes de esa línea: el evento ya
+// pasó, la promesa no se resuelve nunca y la exportación se queda colgada
+// con todas las páginas rasterizadas y ninguna añadida. Pasó de verdad: el
+// dossier real se paró tres veces seguidas sin error ni PDF.
+
+describe("capturePagesToPdf · la espera de la imagen no puede colgarse", () => {
+  const original = window.Image;
+  afterEach(() => {
+    window.Image = original;
+  });
+
+  it("una imagen YA decodificada no cuelga la exportación", async () => {
+    // Nunca dispara onload: solo se marca como completa, como hace el
+    // navegador cuando la decodificación gana la carrera.
+    class ImagenYaCargada {
+      width = 794;
+      height = 1123;
+      complete = true;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        /* ni un evento */
+      }
+    }
+    // @ts-expect-error sustitución deliberada solo para el test
+    window.Image = ImagenYaCargada;
+    const nodo = document.createElement("div");
+    Object.defineProperty(nodo, "offsetWidth", { value: 794 });
+    await expect(capturePagesToPdf([nodo as HTMLDivElement])).resolves.toBeDefined();
+  }, 10_000);
+
+  it("y una que no decodifica ROMPE, en vez de congelarse", async () => {
+    class ImagenRota {
+      width = 0;
+      height = 0;
+      complete = false;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) {
+        setTimeout(() => this.onerror?.(), 0);
+      }
+    }
+    // @ts-expect-error sustitución deliberada solo para el test
+    window.Image = ImagenRota;
+    const nodo = document.createElement("div");
+    Object.defineProperty(nodo, "offsetWidth", { value: 794 });
+    await expect(capturePagesToPdf([nodo as HTMLDivElement])).rejects.toThrow(
+      "No se pudo leer la página 1",
+    );
+  }, 10_000);
+
+  it("ESTRUCTURAL · el `src` se asigna con los manejadores ya puestos", () => {
+    const fuente = readFileSync(
+      resolve(__dirname, "./pdfExportService.tsx"),
+      "utf-8",
+    );
+    const bloque = fuente.slice(
+      fuente.indexOf("export async function capturePagesToPdf"),
+      fuente.indexOf("export async function renderOffscreen"),
+    );
+    expect(bloque.indexOf("img.onload")).toBeLessThan(bloque.indexOf("img.src = images[i]"));
+    expect(bloque).toContain("if (img.complete) resolve();");
   });
 });

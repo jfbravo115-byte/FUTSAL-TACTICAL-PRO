@@ -1077,3 +1077,28 @@ describe("6 · 27 · el exportador no filtra eventos por su cuenta", () => {
     expect(codigo).not.toContain("fetch(");
   });
 });
+
+// ── EL RESUMEN VISUAL SE TIENE QUE PODER RASTERIZAR ────────────────────
+//
+// `html-to-image` se quedó colgado en esta página —el export se paraba en la
+// hoja 2 y no volvía— en cuanto se le pusieron `rgba()` y hexadecimales de
+// ocho dígitos, que no usa ninguna otra plantilla del dossier. El color se
+// mezcla a mano contra el fondo oscuro y se escribe sólido.
+
+describe("5 sexies · la página 2 usa el mismo vocabulario de color que el resto", () => {
+  it("ni rgba() ni hexadecimales de ocho dígitos en el bloque del resumen", () => {
+    const fuente = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "./fullDossierPdfService.tsx"),
+      "utf-8",
+    ) as string;
+    const bloque = fuente
+      .slice(fuente.indexOf("// ── RESUMEN VISUAL"), fuente.indexOf("export function hasZoneData"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((l) => l.replace(/\/\/.*$/, ""))
+      .join("\n");
+    expect(bloque).not.toMatch(/rgba\(/);
+    expect(bloque).not.toMatch(/#[0-9a-fA-F]{8}\b/);
+    expect(bloque).not.toMatch(/\$\{[a-zA-Z]+\}[0-9a-fA-F]{2}/);
+  });
+});

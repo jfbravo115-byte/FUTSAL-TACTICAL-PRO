@@ -1176,9 +1176,21 @@ export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF>
   const pdfH = pdf.internal.pageSize.getHeight();
   for (let i = 0; i < images.length; i++) {
     if (i > 0) pdf.addPage();
+    // Los manejadores van ANTES de `src`, y después se mira `complete`.
+    //
+    // Al revés hay carrera: una imagen en data URL puede acabar de decodificar
+    // antes de que se le enganche el `onload`, y entonces el evento ya pasó y
+    // la espera no termina NUNCA. No es teórico: el dossier se quedaba colgado
+    // montando el PDF —todas las páginas rasterizadas, ninguna añadida— y la
+    // exportación no volvía ni fallaba. `onerror` existe por lo mismo: una
+    // imagen que no decodifica tiene que romper la exportación, no congelarla.
     const img = new Image();
-    img.src = images[i];
-    await new Promise((resolve) => { img.onload = resolve; });
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error(`No se pudo leer la página ${i + 1} del PDF.`));
+      img.src = images[i];
+      if (img.complete) resolve();
+    });
     const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
     pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
   }

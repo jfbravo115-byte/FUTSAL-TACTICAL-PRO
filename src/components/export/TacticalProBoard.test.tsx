@@ -17,7 +17,12 @@ import path from "node:path";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { TACTICAL_PRO_CAVEAT, TacticalProBoard } from "./TacticalProBoard";
-import { ORPHAN_HEADING_CHARS, splitTacticalProIntoPages } from "../../services/pdfExportService";
+import {
+  ORPHAN_HEADING_CHARS,
+  TacticalProChunk,
+  inlineHeadingNumbers,
+  splitTacticalProIntoPages,
+} from "../../services/pdfExportService";
 import { teamReportPageCount } from "../../utils/reportPagination";
 
 function render(node: React.ReactNode): HTMLElement {
@@ -222,7 +227,58 @@ describe("15 · imprimir el PDF no provoca ninguna llamada", () => {
 // «Lectura del partido», sin el número. El lector perdía la numeración del
 // informe que había leído en pantalla.
 
+const APARTADOS = [
+  "1. Lectura del partido",
+  "2. Con balón",
+  "3. Sin balón",
+  "4. Portería",
+  "5. Claves para el cuerpo técnico",
+  "6. Propuestas de trabajo",
+];
+
 describe("apartados numerados y viñetas", () => {
+  it("EL NÚMERO ES TEXTO: sale en lo renderizado, no en un marcador CSS", () => {
+    // Lo que se comprueba aquí es `textContent`, es decir lo que de verdad
+    // acaba dibujado. Un marcador de lista NO está en `textContent`: por eso
+    // el PDF salía sin numerar aunque el DOM tuviera `list-style: decimal`.
+    for (const apartado of APARTADOS) {
+      const host = render(
+        <TacticalProChunk chunk={`${apartado}\n\nUn párrafo del apartado.`} index={0} total={1} />,
+      );
+      expect(texto(host)).toContain(apartado);
+    }
+  });
+
+  it("y el número sobrevive a que el apartado no empiece por 1", () => {
+    const host = render(
+      <TacticalProChunk chunk={"6. Propuestas de trabajo\n\nTexto."} index={0} total={1} />,
+    );
+    // Si esto fuera una lista ordenada, volvería a numerar desde 1.
+    expect(texto(host)).toContain("6. Propuestas de trabajo");
+    expect(texto(host)).not.toContain("1. Propuestas");
+  });
+
+  it("una lista de verdad SIGUE siendo una lista", () => {
+    const host = render(
+      <TacticalProChunk chunk={"- Punto A\n- Punto B\n- Punto C"} index={0} total={1} />,
+    );
+    expect(host.querySelectorAll("li")).toHaveLength(3);
+    expect(host.querySelector("ul")?.getAttribute("style")).toContain("disc");
+  });
+
+  it("inlineHeadingNumbers no toca lo que no es un título suelto", () => {
+    expect(inlineHeadingNumbers("1. Uno\n2. Dos")).toBe("1. Uno\n2. Dos");
+    expect(inlineHeadingNumbers("Un párrafo normal.")).toBe("Un párrafo normal.");
+    expect(inlineHeadingNumbers("4. Portería")).toBe("**4. Portería**");
+  });
+
+  it("las tres cabeceras se rotulan completas", () => {
+    for (let i = 0; i < 3; i++) {
+      const host = render(<TacticalProChunk chunk="x" index={i} total={3} />);
+      expect(texto(host)).toContain(`Tactical Pro (${i + 1}/3)`);
+    }
+  });
+
   it("la plantilla pinta las listas con marcador y sangría", () => {
     const fuente = fs.readFileSync(
       path.join(__dirname, "../../services/pdfExportService.tsx"),
@@ -230,8 +286,19 @@ describe("apartados numerados y viñetas", () => {
     );
     expect(fuente).toContain('listStyle: "decimal"');
     expect(fuente).toContain('listStyle: "disc"');
-    // Y se las pasa a react-markdown, que si no usa las suyas.
-    expect(fuente).toContain("<Markdown components={MARKDOWN_COMPONENTS}>");
+  });
+
+  it("un título no se queda sin contenido detrás", () => {
+    const parrafo = "x".repeat(900);
+    // El título cabría por caracteres, pero detrás no queda sitio para nada.
+    const paginas = splitTacticalProIntoPages(
+      [parrafo, parrafo, "3. Sin balón", parrafo].join("\n\n"),
+      2000,
+    );
+    const conTitulo = paginas.findIndex((p) => p.includes("3. Sin balón"));
+    expect(paginas[conTitulo].startsWith("3. Sin balón")).toBe(true);
+    // Y su primer párrafo está en la MISMA página.
+    expect(paginas[conTitulo].split("\n\n")).toHaveLength(2);
   });
 
   it("un título suelto al final de página baja con su apartado", () => {

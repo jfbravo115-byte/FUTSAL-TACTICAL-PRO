@@ -768,6 +768,53 @@ const TACTICAL_PRO_CHARS_PER_PAGE = 3200;
 export const ORPHAN_HEADING_CHARS = 60;
 
 /**
+ * Un apartado numerado: «4. Portería», «6. Propuestas de trabajo».
+ *
+ * Se mide sobre la línea SIN los asteriscos, porque para entonces el título
+ * ya viaja en negrita.
+ */
+export const NUMBERED_HEADING_RE = /^(\d{1,2})\.\s+(\S.*)$/;
+
+/** Sitio mínimo que ha de quedar bajo un título para no dejarlo colgando. */
+export const MIN_CHARS_AFTER_HEADING = 260;
+
+/**
+ * El número del apartado, DENTRO del texto.
+ *
+ * «1. Lectura del partido» es, para markdown, el primer elemento de una lista
+ * ordenada: el número no es texto, es un marcador que pinta el navegador. En
+ * el PDF rasterizado ese marcador no aparecía —queda fuera de la caja que se
+ * captura— y los seis apartados salían sin numerar. Devolverle la sangría al
+ * `ol` no basta: la numeración seguía dependiendo de cómo decidiera pintar el
+ * marcador quien renderizara.
+ *
+ * Así que el título deja de ser una lista. Una línea suelta con forma de
+ * apartado numerado se convierte en un párrafo en negrita que CONTIENE el
+ * número como texto: lo que se ve es exactamente lo que dice el informe, y
+ * `textContent` puede comprobarlo.
+ *
+ * Una lista de verdad —varias líneas en el mismo bloque— no se toca: sigue
+ * siendo una lista, con sus marcadores.
+ */
+export function inlineHeadingNumbers(markdown: string): string {
+  return markdown
+    .split(/\n{2,}/)
+    .map((bloque) => {
+      const lineas = bloque.split("\n").filter((l) => l.trim());
+      if (lineas.length !== 1) return bloque;
+      const m = NUMBERED_HEADING_RE.exec(lineas[0].trim());
+      return m ? `**${m[1]}. ${m[2]}**` : bloque;
+    })
+    .join("\n\n");
+}
+
+/** ¿Esta unidad es un título de apartado? */
+export function isHeadingUnit(unit: string): boolean {
+  const limpio = unit.replace(/\*\*/g, "").trim();
+  return limpio.length <= ORPHAN_HEADING_CHARS && NUMBERED_HEADING_RE.test(limpio);
+}
+
+/**
  * Divide un texto largo (una unidad que por sí sola excede maxChars) en
  * fragmentos más pequeños, respetando límites de PALABRA/FRASE — nunca
  * corta una palabra a mitad. Primero intenta dividir por frases
@@ -831,7 +878,15 @@ export function splitTacticalProIntoPages(markdown: string, maxCharsPerPage = TA
   let current: string[] = [];
   let currentLen = 0;
   for (const unit of units) {
-    if (currentLen > 0 && currentLen + unit.length + 2 > maxCharsPerPage) {
+    const noCabe = currentLen > 0 && currentLen + unit.length + 2 > maxCharsPerPage;
+    // Un título necesita sitio para lo que introduce. Si detrás de él no
+    // caben unas líneas de contenido, baja entero a la página siguiente en
+    // vez de quedarse colgando en el borde inferior.
+    const tituloSinSitio =
+      currentLen > 0 &&
+      isHeadingUnit(unit) &&
+      currentLen + unit.length + 2 + MIN_CHARS_AFTER_HEADING > maxCharsPerPage;
+    if (noCabe || tituloSinSitio) {
       pages.push(current.join("\n\n"));
       current = [];
       currentLen = 0;
@@ -883,7 +938,7 @@ export function TacticalProChunk({ chunk, index, total }: { chunk: string; index
     <div>
       <div style={sectionTitleStyle}>Tactical Pro{total > 1 ? ` (${index + 1}/${total})` : ""}</div>
       <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-        <Markdown components={MARKDOWN_COMPONENTS}>{chunk}</Markdown>
+        <Markdown components={MARKDOWN_COMPONENTS}>{inlineHeadingNumbers(chunk)}</Markdown>
       </div>
     </div>
   );

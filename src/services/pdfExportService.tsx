@@ -36,7 +36,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
-import { toJpeg } from "html-to-image";
+import { getFontEmbedCSS, toJpeg } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { MatchData, Role, GameEvent } from "../types/futsal";
 import { generateMatchReport, MatchReport } from "./matchReportService";
@@ -1164,10 +1164,65 @@ const captureOpts = {
  * botón "Porteros + Mapa" de MatchTracker use ESTA captura y no una copia
  * paralela: había dos, y solo una recibía las correcciones.
  */
+/**
+ * Lo que se espera a que `html-to-image` reúna las fuentes web.
+ *
+ * Antes de rasterizar, la librería descarga la hoja de Google Fonts y TODOS
+ * los archivos de fuente que referencia —decenas de subconjuntos— y los
+ * incrusta. Esa descarga no tiene tiempo límite y, además, la repetía en
+ * CADA página. Generando el dossier real se quedó colgada ahí: veinticinco
+ * páginas sin rasterizar una sola y la exportación esperando para siempre,
+ * sin error ni archivo. Un PDF no puede depender de llegar a un servidor de
+ * tipografías.
+ */
+export const FONT_EMBED_TIMEOUT_MS = 8000;
+
+/**
+ * Lo que se le pasa a `html-to-image` cuando no hay fuentes que incrustar.
+ *
+ * Tiene que ser una cadena NO VACÍA: la librería comprueba el valor por
+ * verdadero, así que `""` no le dice «ninguna», le dice «búscalas tú». Con
+ * esto el texto se dibuja con la pila de fuentes del sistema que declaran
+ * las plantillas, que es legible en papel, y la exportación termina.
+ */
+export const SIN_FUENTES_CSS = "/* sin fuentes incrustadas */";
+
+/** Espera acotada: lo que no llega a tiempo se da por no disponible. */
+async function conTiempo<T>(promesa: Promise<T>, ms: number): Promise<T> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promesa,
+      new Promise<never>((_, reject) => {
+        temporizador = setTimeout(() => reject(new Error("tiempo agotado")), ms);
+      }),
+    ]);
+  } finally {
+    if (temporizador) clearTimeout(temporizador);
+  }
+}
+
+/**
+ * Las fuentes se reúnen UNA VEZ para todo el documento.
+ *
+ * Son las mismas en las veinticinco páginas: pedirlas una por página era
+ * multiplicar por veinticinco una descarga que ya es la parte más lenta de
+ * exportar.
+ */
+export async function embedCssDelDocumento(node: HTMLElement): Promise<string> {
+  try {
+    const css = await conTiempo(getFontEmbedCSS(node), FONT_EMBED_TIMEOUT_MS);
+    return css && css.trim() ? css : SIN_FUENTES_CSS;
+  } catch {
+    return SIN_FUENTES_CSS;
+  }
+}
+
 export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
   const images: string[] = [];
+  const fontEmbedCSS = nodes.length ? await embedCssDelDocumento(nodes[0]) : SIN_FUENTES_CSS;
   for (const node of nodes) {
-    const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });
+    const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth, fontEmbedCSS });
     if (url && url.length > 1000) images.push(url);
   }
   if (images.length === 0) throw new Error("No se pudo generar ninguna página del PDF.");

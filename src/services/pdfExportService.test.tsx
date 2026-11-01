@@ -205,7 +205,7 @@ describe("exportMatchReportPdf", () => {
     const text = (summary?.textContent || "").replace(/\s+/g, " ");
     expect(text).toContain("Mi Equipo · Rival CF");
     expect(text).toContain("1–0");
-    expect(text).toContain("Máximo goleador");
+    expect(text).toContain("Goleador");
   });
 
   // 3. sin Tactical Pro

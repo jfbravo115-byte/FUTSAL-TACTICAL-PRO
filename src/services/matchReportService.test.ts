@@ -260,6 +260,23 @@ describe("generateMatchReport — tiros y destacados descriptivos", () => {
     ] }));
     expect(r.highlights.topScorers.map((scorer) => scorer.name)).toEqual(["MORALES", "JOSÉ", "RAMÓN"]);
     expect(r.highlights.topScorers.every((scorer) => scorer.goals === 1)).toBe(true);
+    expect(r.highlights.scorers.map((scorer) => scorer.name)).toEqual(["MORALES", "JOSÉ", "RAMÓN"]);
+  });
+
+  it("publica todos los goleadores aunque no estén empatados por el máximo", () => {
+    const stats = (goals: number) => ({
+      goals, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
+      fouls: 0, yellowCards: 0, redCards: 0, shots: goals, shotsOffTarget: 0, saves: 0, conceded: 0,
+    });
+    const r = generateMatchReport(matchData({ players: [
+      player({ id: "p11", number: 11, name: "JOSÉ", individualTimeSeconds: 60, stats: stats(2) }),
+      player({ id: "p7", number: 7, name: "MORALES", individualTimeSeconds: 60, stats: stats(1) }),
+      player({ id: "p10", number: 10, name: "RAMÓN", individualTimeSeconds: 60, stats: stats(1) }),
+    ] }));
+    expect(r.highlights.topScorers.map((scorer) => scorer.name)).toEqual(["JOSÉ"]);
+    expect(r.highlights.scorers.map((scorer) => [scorer.name, scorer.goals])).toEqual([
+      ["JOSÉ", 2], ["MORALES", 1], ["RAMÓN", 1],
+    ]);
   });
 });
 

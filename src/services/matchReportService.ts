@@ -215,6 +215,11 @@ export type MatchReport = {
       MatchReportPlayerLine,
       "id" | "number" | "jerseyNumberKnown" | "name" | "goals"
     >[];
+    /** Todos los jugadores que marcaron, ordenados por goles y dorsal. */
+    scorers: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "goals"
+    >[];
     topRecoverer:
       | (Pick<MatchReportPlayerLine, "id" | "number" | "jerseyNumberKnown" | "name"> & {
           recoveries: number;
@@ -552,6 +557,7 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
       topTot: topTot ? { id: topTot.id, number: topTot.number, jerseyNumberKnown: topTot.jerseyNumberKnown, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
       topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, jerseyNumberKnown: topScorer.jerseyNumberKnown, name: topScorer.name, goals: topScorer.goals } : null,
       topScorers: topScorers.map((scorer) => ({ id: scorer.id, number: scorer.number, jerseyNumberKnown: scorer.jerseyNumberKnown, name: scorer.name, goals: scorer.goals })),
+      scorers: orderedScorers.map((scorer) => ({ id: scorer.id, number: scorer.number, jerseyNumberKnown: scorer.jerseyNumberKnown, name: scorer.name, goals: scorer.goals })),
       topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, jerseyNumberKnown: topRecoverer.jerseyNumberKnown, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
     },
     goalkeeper,
@@ -647,12 +653,11 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   const highlights: string[] = [];
   if (r.highlights.topTot) highlights.push(`Mayor TOT: **#${r.highlights.topTot.number} ${r.highlights.topTot.name} (${r.highlights.topTot.totLabel})**`);
-  if (r.highlights.topScorers.length) {
-    const goleadores = r.highlights.topScorers
-      .map((scorer) => `#${scorer.number} ${scorer.name}`)
+  if (r.highlights.scorers.length) {
+    const goleadores = r.highlights.scorers
+      .map((scorer) => `#${scorer.number} ${scorer.name} (${scorer.goals} ${scorer.goals === 1 ? "gol" : "goles"})`)
       .join(" · ");
-    const goles = r.highlights.topScorers[0].goals;
-    highlights.push(`Máximo${r.highlights.topScorers.length > 1 ? "s" : ""} goleador${r.highlights.topScorers.length > 1 ? "es" : ""}: **${goleadores} (${goles} ${goles === 1 ? "gol cada uno" : "goles cada uno"})**`);
+    highlights.push(`Goleador${r.highlights.scorers.length > 1 ? "es" : ""}: **${goleadores}**`);
   }
   if (r.highlights.topRecoverer) highlights.push(`Más recuperaciones: **#${r.highlights.topRecoverer.number} ${r.highlights.topRecoverer.name} (${r.highlights.topRecoverer.recoveries})**`);
   if (highlights.length) {

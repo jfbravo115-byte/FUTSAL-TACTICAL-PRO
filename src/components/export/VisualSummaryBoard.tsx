@@ -47,6 +47,14 @@ export function goalsLabel(goals: number): string {
   return `${goals} ${goals === 1 ? "gol" : "goles"}`;
 }
 
+export function scorerLeadersLabel(
+  scorers: MatchReport["highlights"]["topScorers"],
+  players: Player[],
+): string {
+  if (!scorers.length) return NO_DATA;
+  return scorers.map((scorer) => highlightLabel(scorer, players)).join(" · ");
+}
+
 function KpiCard({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div style={{ border: `1px solid ${BORDER}`, background: CARD, borderRadius: 16, padding: "14px 10px", textAlign: "center" }}>
@@ -99,7 +107,7 @@ export function VisualSummaryBoard({ matchData, report }: { matchData: MatchData
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
         <HighlightCard label="Mayor TOT" who={highlightLabel(highlights.topTot, players)} value={highlights.topTot ? highlights.topTot.totLabel : NO_DATA} color={TOT} />
-        <HighlightCard label="Máximo goleador" who={highlightLabel(highlights.topScorer, players)} value={goalsLabel(highlights.topScorer ? highlights.topScorer.goals : 0)} color={SCORER} />
+        <HighlightCard label={highlights.topScorers.length > 1 ? "Máximos goleadores" : "Máximo goleador"} who={scorerLeadersLabel(highlights.topScorers, players)} value={highlights.topScorers.length > 1 ? `${goalsLabel(highlights.topScorers[0].goals)} cada uno` : goalsLabel(highlights.topScorer ? highlights.topScorer.goals : 0)} color={SCORER} />
         <HighlightCard label="Más recuperaciones" who={highlightLabel(highlights.topRecoverer, players)} value={highlights.topRecoverer ? String(highlights.topRecoverer.recoveries) : NO_DATA} color={RECOVERER} />
       </div>
     </div>

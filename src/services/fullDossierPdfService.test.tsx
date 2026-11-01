@@ -742,8 +742,7 @@ describe("5 quinquies · resumen visual", () => {
     expect(destacadoLabel(h.topRecoverer, sinRecuperaciones.players)).toBe(SIN_DATOS);
   });
 
-  it("el empate entre goleadores lo rompe el dorsal más bajo, como la pantalla", () => {
-    // Misma regla que usa la pantalla: más goles y, a igualdad, dorsal menor.
+  it("el empate entre goleadores muestra a todos, ordenados por dorsal", async () => {
     const empate = partidoDenso({
       players: PLANTILLA.map((p) =>
         p.id === "l7" || p.id === "l10"
@@ -753,8 +752,13 @@ describe("5 quinquies · resumen visual", () => {
     });
     const h = generateMatchReport(empate).highlights;
     expect(h.topScorer!.goals).toBe(1);
-    expect(h.topScorer!.number).toBe(7); // #7 por delante de #10
-    expect(destacadoLabel(h.topScorer, empate.players)).toContain("#7");
+    expect(h.topScorers.map((scorer) => scorer.number)).toEqual([7, 10]);
+    const ns = await dossier("empate-goleadores", empate);
+    const texto = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
+    expect(texto).toContain("Máximos goleadores");
+    expect(texto).toContain("#7 Juan Pérez");
+    expect(texto).toContain("#10 Alejandro García");
+    expect(texto).toContain("1 gol cada uno");
   });
 
   it("un dorsal desconocido se enseña como «#?», no como 0", () => {

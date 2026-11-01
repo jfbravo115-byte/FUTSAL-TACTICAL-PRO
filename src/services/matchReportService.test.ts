@@ -244,7 +244,22 @@ describe("generateMatchReport — tiros y destacados descriptivos", () => {
     const r = generateMatchReport(matchData({ players: [p1, p2] }));
     expect(r.highlights.topTot?.id).toBe("p2");
     expect(r.highlights.topScorer?.id).toBe("p2");
+    expect(r.highlights.topScorers.map((scorer) => scorer.id)).toEqual(["p2"]);
     expect(r.highlights.topRecoverer?.recoveries).toBe(4);
+  });
+
+  it("con varios máximos goleadores conserva a todos y no oculta goles repartidos", () => {
+    const baseStats = {
+      goals: 1, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
+      fouls: 0, yellowCards: 0, redCards: 0, shots: 1, shotsOffTarget: 0, saves: 0, conceded: 0,
+    };
+    const r = generateMatchReport(matchData({ players: [
+      player({ id: "p10", number: 10, name: "RAMÓN", individualTimeSeconds: 60, stats: baseStats }),
+      player({ id: "p7", number: 7, name: "JOSÉ", individualTimeSeconds: 60, stats: baseStats }),
+      player({ id: "p3", number: 3, name: "MORALES", individualTimeSeconds: 60, stats: baseStats }),
+    ] }));
+    expect(r.highlights.topScorers.map((scorer) => scorer.name)).toEqual(["MORALES", "JOSÉ", "RAMÓN"]);
+    expect(r.highlights.topScorers.every((scorer) => scorer.goals === 1)).toBe(true);
   });
 });
 

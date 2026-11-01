@@ -207,6 +207,41 @@ describe("H · portero-jugador propio con tres tiros", () => {
   });
 });
 
+describe("H2 · 5x4 final abierto con gol propio", () => {
+  it("cuenta el gol aunque no haya un cambio de formación posterior", () => {
+    const partido: MatchData = {
+      ...base(),
+      period: Period.SECOND,
+      events: [
+        formacion(20 * 60_000 + 26_000, GameState.PJ_ATTACK, false, Period.SECOND),
+        ev({
+          timestamp: 23 * 60_000 + 1_000,
+          wallClock: 23 * 60_000 + 1_000,
+          period: Period.SECOND,
+          type: ActionType.GOAL,
+          gameState: GameState.PJ_ATTACK,
+          destinationGrid: "G5",
+          metadata: { isOpponent: false },
+          scoreAtEvent: { team: 3, opponent: 3 },
+        }),
+      ],
+    };
+
+    const ventanas = buildMatchContexts(partido);
+    expect(ventanas).toHaveLength(1);
+    expect(ventanas[0].type).toBe("gk_player_own");
+    expect(ventanas[0].production.shots).toBe(1);
+    expect(ventanas[0].production.onTarget).toBe(1);
+    expect(ventanas[0].production.goalsBenefiting).toBe(1);
+    expect(ventanas[0].conceded.goalsBenefiting).toBe(0);
+    expect(ventanas[0].end).toBeNull();
+
+    const grupo = groupMatchContexts(ventanas)[0];
+    expect(grupo.label).toBe("5x4 · Portero-jugador propio");
+    expect(grupo.production.goalsBenefiting).toBe(1);
+  });
+});
+
 describe("I/Q · superioridad y portero-jugador jamás se mezclan", () => {
   const md = (): MatchData => ({
     ...base(),

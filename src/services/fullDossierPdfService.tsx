@@ -49,8 +49,9 @@ import { PHASE_METRICS, hasPhaseData, phasePeriods } from "../utils/phaseAnalysi
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
 import { TACTICAL_PRO_CAVEAT } from "../components/export/TacticalProBoard";
 import { GoalkeeperPdfCard as GoalkeeperCard } from "../components/export/GoalkeeperPdfCard";
-import { formatJerseyNumber } from "../utils/jerseyNumber";
 import { playerDisplayIdentity } from "../utils/playerIdentity";
+import { formatJerseyNumber } from "../utils/jerseyNumber";
+import { VisualSummaryBoard as SharedVisualSummaryBoard } from "../components/export/VisualSummaryBoard";
 import { formatPlayerTime } from "../utils/playerClock";
 import { ShotTally, EMPTY_SHOT_TALLY, playerShotTallies } from "../utils/shotModel";
 import {
@@ -780,7 +781,7 @@ export function buildDossierPages(matchData: MatchData): DossierPage[] {
   // que no aportaba nada: era `SummaryKpis` + `FoulsByPeriod`, exactamente lo
   // que la PORTADA ya imprime en su resumen ejecutivo —`SummaryKpis` incluye
   // dentro el desglose de faltas—. Se quita la repetición, no el dato.
-  push("visual-summary", "Resumen visual", <VisualSummaryBoard matchData={matchData} report={report} />);
+  push("visual-summary", "Resumen visual", <SharedVisualSummaryBoard matchData={matchData} report={report} />);
 
   // «Datos clave» y el bloque de zonas NO caben juntos en una A4 cuando el
   // partido trae datos de verdad: medido en el Deploy Preview con 30 fichas y

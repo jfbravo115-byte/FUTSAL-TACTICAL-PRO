@@ -13,7 +13,7 @@ import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { ZONE_12_IDS, formatZoneLabel } from "../utils/fieldZones";
 
 const toJpegMock = vi.fn(async (_node?: HTMLElement) => "data:image/jpeg;base64," + "A".repeat(2000));
-const fontEmbedMock = vi.fn(async () => "/* fuentes */");
+const fontEmbedMock = vi.fn(async (_node?: HTMLElement) => "/* fuentes */");
 vi.mock("html-to-image", () => ({
   toJpeg: (node: HTMLElement) => toJpegMock(node),
   getFontEmbedCSS: (node: HTMLElement) => fontEmbedMock(node),
@@ -191,6 +191,21 @@ describe("exportMatchReportPdf", () => {
     expect(toJpegMock).toHaveBeenCalledTimes(6);
     const titulos = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "");
     expect(titulos.some((t) => t.includes("Evolución por periodos"))).toBe(true);
+  });
+
+  it("el informe resumido incluye el mismo resumen visual que el dossier", async () => {
+    const md = matchData({
+      players: [player()],
+      events: [event({ type: ActionType.GOAL, playerIds: ["p1"], destinationGrid: "G5" })],
+    });
+    await exportMatchReportPdf(md);
+    const firstPage = toJpegMock.mock.calls[0][0] as HTMLElement;
+    const summary = firstPage.querySelector("[data-visual-summary]");
+    expect(summary).toBeTruthy();
+    const text = (summary?.textContent || "").replace(/\s+/g, " ");
+    expect(text).toContain("Mi Equipo · Rival CF");
+    expect(text).toContain("1–0");
+    expect(text).toContain("Máximo goleador");
   });
 
   // 3. sin Tactical Pro

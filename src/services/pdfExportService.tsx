@@ -71,6 +71,7 @@ import { countShotsFromSetPiece, describeSetPieceOutcomes } from "../utils/setPi
 import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { safeImageSrc } from "../utils/safeImageSrc";
+import { VisualSummaryBoard } from "../components/export/VisualSummaryBoard";
 
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
@@ -963,6 +964,7 @@ function buildMatchReportPages(
     content: (
       <>
         <ReportHeader matchData={matchData} report={report} />
+        <VisualSummaryBoard matchData={matchData} report={report} />
         <SummaryKpis report={report} />
         <ZonesSection zones={zones} matchData={matchData} />
       </>

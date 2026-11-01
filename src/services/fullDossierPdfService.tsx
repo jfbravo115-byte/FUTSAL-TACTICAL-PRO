@@ -719,9 +719,9 @@ export function VisualSummaryBoard({
           tinta={TINTA_TOT}
         />
         <DestacadoCard
-          label={h.topScorers.length > 1 ? "Máximos goleadores" : "Máximo goleador"}
-          quien={h.topScorers.length ? h.topScorers.map((scorer) => destacadoLabel(scorer, players)).join(" · ") : SIN_DATOS}
-          dato={h.topScorers.length > 1 ? `${golesLabel(h.topScorers[0].goals)} cada uno` : golesLabel(h.topScorer ? h.topScorer.goals : 0)}
+          label={h.scorers.length > 1 ? "Goleadores" : "Goleador"}
+          quien={h.scorers.length ? h.scorers.map((scorer) => `${destacadoLabel(scorer, players)} · ${golesLabel(scorer.goals)}`).join(" | ") : SIN_DATOS}
+          dato={h.scorers.length ? `${h.scorers.reduce((sum, scorer) => sum + scorer.goals, 0)} goles registrados` : golesLabel(0)}
           tinta={TINTA_GOLEADOR}
         />
         <DestacadoCard

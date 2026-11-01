@@ -714,8 +714,10 @@ describe("5 quinquies · resumen visual", () => {
     const t = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
     expect(t).toContain("Mayor TOT");
     expect(t).toContain(h.topTot!.totLabel);
-    expect(t).toContain("Máximo goleador");
-    expect(t).toContain(golesLabel(h.topScorer!.goals));
+    expect(t).toContain("Goleadores");
+    for (const scorer of h.scorers) {
+      expect(t).toContain(golesLabel(scorer.goals));
+    }
     expect(t).toContain("Más recuperaciones");
     expect(t).toContain(String(h.topRecoverer!.recoveries));
   }, TIEMPO);
@@ -755,10 +757,11 @@ describe("5 quinquies · resumen visual", () => {
     expect(h.topScorers.map((scorer) => scorer.number)).toEqual([7, 10]);
     const ns = await dossier("empate-goleadores", empate);
     const texto = (resumenDe(ns).textContent || "").replace(/\s+/g, " ");
-    expect(texto).toContain("Máximos goleadores");
+    expect(texto).toContain("Goleadores");
     expect(texto).toContain("#7 Juan Pérez");
     expect(texto).toContain("#10 Alejandro García");
-    expect(texto).toContain("1 gol cada uno");
+    expect(texto).toContain("#7 Juan Pérez · 1 gol");
+    expect(texto).toContain("#10 Alejandro García · 1 gol");
   });
 
   it("un dorsal desconocido se enseña como «#?», no como 0", () => {

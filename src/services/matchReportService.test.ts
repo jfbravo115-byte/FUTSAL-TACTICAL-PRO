@@ -244,7 +244,22 @@ describe("generateMatchReport — tiros y destacados descriptivos", () => {
     const r = generateMatchReport(matchData({ players: [p1, p2] }));
     expect(r.highlights.topTot?.id).toBe("p2");
     expect(r.highlights.topScorer?.id).toBe("p2");
+    expect(r.highlights.topScorers.map((scorer) => scorer.id)).toEqual(["p2"]);
     expect(r.highlights.topRecoverer?.recoveries).toBe(4);
+  });
+
+  it("con varios máximos goleadores conserva a todos y no oculta goles repartidos", () => {
+    const baseStats = {
+      goals: 1, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0,
+      fouls: 0, yellowCards: 0, redCards: 0, shots: 1, shotsOffTarget: 0, saves: 0, conceded: 0,
+    };
+    const r = generateMatchReport(matchData({ players: [
+      player({ id: "p10", number: 10, name: "RAMÓN", individualTimeSeconds: 60, stats: baseStats }),
+      player({ id: "p7", number: 7, name: "JOSÉ", individualTimeSeconds: 60, stats: baseStats }),
+      player({ id: "p3", number: 3, name: "MORALES", individualTimeSeconds: 60, stats: baseStats }),
+    ] }));
+    expect(r.highlights.topScorers.map((scorer) => scorer.name)).toEqual(["MORALES", "JOSÉ", "RAMÓN"]);
+    expect(r.highlights.topScorers.every((scorer) => scorer.goals === 1)).toBe(true);
   });
 });
 
@@ -545,7 +560,7 @@ describe("el informe incorpora las situaciones especiales", () => {
   });
 
   it("con los cinco tiros de la ventana: 5 · 3 · 1 · 1 · 1", () => {
-    const t = generateMatchReport(md()).matchContextGroups[0].tally;
+    const t = generateMatchReport(md()).matchContextGroups[0].production;
     expect([t.shots, t.onTarget, t.offTarget, t.blocked, t.goals]).toEqual([5, 3, 1, 1, 1]);
   });
 
@@ -554,7 +569,14 @@ describe("el informe incorpora las situaciones especiales", () => {
     expect(texto).toContain("## Situaciones especiales");
     expect(texto).toContain("Superioridad por expulsión rival");
     expect(texto).toContain("01:42");
-    expect(texto).toContain("Tiros **5**");
+    // Las cifras van rotuladas con el bando: «tiros 5» a secas no decía de
+    // quién eran, y en un partido con declaraciones de los dos lados eso
+    // acababa atribuyendo al equipo los goles que le metieron.
+    expect(texto).toContain("Producción de Mi Equipo — tiros **5**");
+    expect(texto).toContain(
+      "Producción de Rival CF durante la superioridad de Mi Equipo — tiros **0**",
+    );
+    expect(texto).toContain("Mi Equipo encajó 0 goles durante estos tramos.");
   });
 
   it("nunca imprime el código interno del estado", () => {
@@ -808,7 +830,7 @@ describe("11 · las situaciones especiales conservan sus conteos", () => {
     });
     const r = generateMatchReport(md);
     // Dentro de la ventana: 2. En todo el partido: 4. Dos preguntas distintas.
-    expect(r.matchContexts[0].tally.fouls).toBe(2);
+    expect(r.matchContexts[0].production.fouls).toBe(2);
     expect(r.fouls.team).toBe(4);
   });
 });

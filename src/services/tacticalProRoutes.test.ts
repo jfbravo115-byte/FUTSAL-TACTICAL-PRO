@@ -114,14 +114,61 @@ describe("persistencia solo con el informe entero", () => {
   });
 
   it("MatchAnalysis solo escribe en la copia local de ESE partido", () => {
-    // `localCopyId` sale del propio identificador con el que se abrió el
-    // partido. Guardar en cualquier otro asociaría el análisis al equivocado.
-    expect(matchAnalysis).toContain("setLocalCopyId(local ? local.id : null);");
+    // Los dos destinos salen del identificador con el que se abrió el
+    // partido, resueltos en un solo sitio. Guardar en cualquier otro
+    // asociaría el análisis al partido equivocado.
+    expect(matchAnalysis).toContain("const destinos = resolveTacticalTargets(local, decoded);");
+    expect(matchAnalysis).toContain("setLocalCopyId(destinos.localCopyId);");
+    expect(matchAnalysis).toContain("setRemoteId(destinos.remoteId);");
     expect(matchAnalysis).toMatch(/updateFinalLocalCopyMatchData\(localCopyId,/);
   });
 
-  it("un texto vacío no sustituye a un análisis anterior", () => {
-    expect(matchAnalysis).toContain("if (result.trim() && localCopyId) {");
+  it("un texto vacío o incompleto no sustituye a un análisis anterior", () => {
+    // La guarda está ANTES de tocar nada: si el informe no es persistible, no
+    // se escribe ni en memoria, ni en local, ni en remoto.
+    expect(matchAnalysis).toContain("if (!isPersistableAnalysis(result)) return;");
+  });
+
+  it("la MEMORIA se actualiza aunque el partido venga solo del historial remoto", () => {
+    // El defecto corregido: `setMatch` vivía dentro de `if (localCopyId)`, así
+    // que un partido abierto desde otro dispositivo enseñaba el análisis en
+    // pantalla y exportaba un PDF sin él.
+    const runAI = matchAnalysis.slice(
+      matchAnalysis.indexOf("const runAI = async"),
+      matchAnalysis.indexOf("const scrollTo ="),
+    );
+    const memoria = runAI.indexOf("setMatch((prev) => (prev ? { ...prev, tacticalAnalysis: result } : prev));");
+    const local = runAI.indexOf("if (localCopyId) updateFinalLocalCopyMatchData(localCopyId, actualizado);");
+    expect(memoria).toBeGreaterThan(-1);
+    expect(local).toBeGreaterThan(-1);
+    // La memoria va ANTES y fuera de cualquier condición sobre la copia local.
+    expect(memoria).toBeLessThan(local);
+  });
+
+  it("el remoto se actualiza por su ruta aislada y es lo ÚLTIMO", () => {
+    const runAI = matchAnalysis.slice(
+      matchAnalysis.indexOf("const runAI = async"),
+      matchAnalysis.indexOf("const scrollTo ="),
+    );
+    expect(runAI).toContain("await sincronizarAnalisis(result);");
+    expect(matchAnalysis).toContain("await updatePartidoTacticalAnalysis(remoteId, texto);");
+    // Y el reintento sincroniza, NUNCA vuelve a llamar a Anthropic.
+    const reintento = matchAnalysis.slice(matchAnalysis.indexOf("data-tactical-sync-retry"));
+    expect(reintento.slice(0, 400)).toContain("sincronizarAnalisis(ai)");
+    expect(reintento.slice(0, 400)).not.toContain("runAI(");
+  });
+
+  it("un fallo de sincronización no borra ni degrada el análisis", () => {
+    const sync = matchAnalysis.slice(
+      matchAnalysis.indexOf("const sincronizarAnalisis = async"),
+      matchAnalysis.indexOf("const runAI = async"),
+    );
+    const fallo = sync.slice(sync.indexOf("} catch (err)")).replace(/^\s*\/\/.*$/gm, "");
+    expect(fallo).toContain('setAiSync("fallo")');
+    expect(fallo).not.toContain("setAi(");
+    expect(fallo).not.toContain("setMatch(");
+    expect(fallo).not.toContain("setAiPartial(");
+    expect(fallo).not.toContain("streamTacticalReport");
   });
 });
 

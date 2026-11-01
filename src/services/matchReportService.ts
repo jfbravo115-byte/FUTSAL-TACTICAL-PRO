@@ -30,7 +30,10 @@ import {
   MatchContext,
   MatchContextGroup,
   buildMatchContexts,
+  concededGoalsNote,
+  concededLabel,
   groupMatchContexts,
+  productionLabel,
 } from "../utils/matchContexts";
 import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/goalSequence";
 import {
@@ -197,9 +200,26 @@ export type MatchReport = {
     redCards: number;
   };
   highlights: {
-    topTot: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "totLabel" | "totSeconds"> | null;
-    topScorer: Pick<MatchReportPlayerLine, "id" | "number" | "name" | "goals"> | null;
-    topRecoverer: (Pick<MatchReportPlayerLine, "id" | "number" | "name"> & { recoveries: number }) | null;
+    // `jerseyNumberKnown` viaja con el destacado porque quien lo pinta tiene
+    // que poder respetar el «?» de un dorsal que todavía no consta.
+    topTot: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "totLabel" | "totSeconds"
+    > | null;
+    topScorer: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "goals"
+    > | null;
+    /** Todos los jugadores empatados con el máximo de goles, ordenados por dorsal. */
+    topScorers: Pick<
+      MatchReportPlayerLine,
+      "id" | "number" | "jerseyNumberKnown" | "name" | "goals"
+    >[];
+    topRecoverer:
+      | (Pick<MatchReportPlayerLine, "id" | "number" | "jerseyNumberKnown" | "name"> & {
+          recoveries: number;
+        })
+      | null;
   };
   goalkeeper: {
     name: string;
@@ -220,7 +240,10 @@ export type MatchReport = {
    * el operador y con sus agregados. Ver src/utils/matchContexts.ts.
    */
   matchContexts: MatchContext[];
-  /** Las mismas ventanas agrupadas por tipo, que es como se imprimen. */
+  /**
+   * Las mismas ventanas agrupadas por TIPO Y BANDO, que es como se
+   * imprimen. Nunca se suman dos bandos en una misma cifra.
+   */
   matchContextGroups: MatchContextGroup[];
 };
 
@@ -269,7 +292,14 @@ const ACTION_LABEL: Record<string, string> = {
 const isGoalEvent = isGoalEventModel;
 
 
-function countRotations(events: GameEvent[], playerId: string): number {
+/**
+ * Veces que un jugador entra o sale en una sustitución.
+ *
+ * Exportada porque el dossier la necesita TAMBIÉN para el rival, y
+ * `playersUsed` solo cubre nuestra plantilla. Copiarla allí habría dejado dos
+ * definiciones de «rotación» que pueden divergir.
+ */
+export function countRotations(events: GameEvent[], playerId: string): number {
   return events.filter(
     (e) => e.type === ActionType.SUBSTITUTION && e.playerIds.includes(playerId),
   ).length;
@@ -398,9 +428,13 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     ? playersUsed.slice().sort((a, b) => b.totSeconds - a.totSeconds || a.number - b.number)[0]
     : null;
   const scorerCandidates = playersUsed.filter((p) => p.goals > 0);
-  const topScorer = scorerCandidates.length
-    ? scorerCandidates.slice().sort((a, b) => b.goals - a.goals || a.number - b.number)[0]
-    : null;
+  const orderedScorers = scorerCandidates
+    .slice()
+    .sort((a, b) => b.goals - a.goals || a.number - b.number);
+  const topScorer = orderedScorers[0] ?? null;
+  const topScorers = topScorer
+    ? orderedScorers.filter((candidate) => candidate.goals === topScorer.goals)
+    : [];
   const recovererCandidates = playersUsed
     .map((p) => ({ ...p, recoveries: p.steals + p.interceptions }))
     .filter((p) => p.recoveries > 0);
@@ -515,9 +549,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     },
     teamTotals,
     highlights: {
-      topTot: topTot ? { id: topTot.id, number: topTot.number, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
-      topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, name: topScorer.name, goals: topScorer.goals } : null,
-      topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
+      topTot: topTot ? { id: topTot.id, number: topTot.number, jerseyNumberKnown: topTot.jerseyNumberKnown, name: topTot.name, totLabel: topTot.totLabel, totSeconds: topTot.totSeconds } : null,
+      topScorer: topScorer ? { id: topScorer.id, number: topScorer.number, jerseyNumberKnown: topScorer.jerseyNumberKnown, name: topScorer.name, goals: topScorer.goals } : null,
+      topScorers: topScorers.map((scorer) => ({ id: scorer.id, number: scorer.number, jerseyNumberKnown: scorer.jerseyNumberKnown, name: scorer.name, goals: scorer.goals })),
+      topRecoverer: topRecoverer ? { id: topRecoverer.id, number: topRecoverer.number, jerseyNumberKnown: topRecoverer.jerseyNumberKnown, name: topRecoverer.name, recoveries: topRecoverer.recoveries } : null,
     },
     goalkeeper,
     zoneDistribution,
@@ -525,7 +560,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
     relevantEvents,
     goalSequence,
     matchContexts,
-    matchContextGroups: groupMatchContexts(matchContexts),
+    matchContextGroups: groupMatchContexts(matchContexts, {
+      teamName: matchData.teamName,
+      opponentName: matchData.opponentName,
+    }),
   };
 }
 
@@ -609,7 +647,13 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
 
   const highlights: string[] = [];
   if (r.highlights.topTot) highlights.push(`Mayor TOT: **#${r.highlights.topTot.number} ${r.highlights.topTot.name} (${r.highlights.topTot.totLabel})**`);
-  if (r.highlights.topScorer) highlights.push(`Máximo goleador: **#${r.highlights.topScorer.number} ${r.highlights.topScorer.name} (${r.highlights.topScorer.goals})**`);
+  if (r.highlights.topScorers.length) {
+    const goleadores = r.highlights.topScorers
+      .map((scorer) => `#${scorer.number} ${scorer.name}`)
+      .join(" · ");
+    const goles = r.highlights.topScorers[0].goals;
+    highlights.push(`Máximo${r.highlights.topScorers.length > 1 ? "s" : ""} goleador${r.highlights.topScorers.length > 1 ? "es" : ""}: **${goleadores} (${goles} ${goles === 1 ? "gol cada uno" : "goles cada uno"})**`);
+  }
   if (r.highlights.topRecoverer) highlights.push(`Más recuperaciones: **#${r.highlights.topRecoverer.number} ${r.highlights.topRecoverer.name} (${r.highlights.topRecoverer.recoveries})**`);
   if (highlights.length) {
     lines.push("## Destacados descriptivos");
@@ -649,20 +693,28 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   // consta, y suponerla sería inventar el dato.
   if (r.matchContextGroups.length) {
     lines.push("## Situaciones especiales");
+    const nombres = { teamName: r.teamName, opponentName: r.opponentName };
     r.matchContextGroups.forEach((g) => {
       const veces = g.windows.length > 1 ? ` · ${g.windows.length} tramos` : "";
       lines.push(`**${g.label}**${veces}`);
       lines.push(
         `Duración: ${g.totalDuration !== null ? formatMatchTime(g.totalDuration) : UNKNOWN_DURATION_LABEL}`,
       );
-      lines.push(
-        `Tiros **${g.tally.shots}** · a portería **${g.tally.onTarget}** · fuera **${g.tally.offTarget}** · ` +
-          `bloqueados **${g.tally.blocked}** · goles **${g.tally.goals}**`,
-      );
-      lines.push(
-        `Recuperaciones **${g.tally.recoveries}** · pérdidas **${g.tally.turnovers}** · ` +
-          `faltas **${g.tally.fouls}** · córners **${g.tally.corners}**`,
-      );
+      // Las dos líneas NUNCA se suman: son dos equipos distintos.
+      ([
+        [productionLabel(g, nombres), g.production],
+        [concededLabel(g, nombres), g.conceded],
+      ] as const).forEach(([rotulo, t]) => {
+        lines.push(
+          `${rotulo} — tiros **${t.shots}** · a portería **${t.onTarget}** · fuera **${t.offTarget}** · ` +
+            `bloqueados **${t.blocked}** · goles **${t.goalsBenefiting}**`,
+        );
+        lines.push(
+          `${rotulo} — recuperaciones **${t.recoveries}** · pérdidas **${t.turnovers}** · ` +
+            `faltas **${t.fouls}** · córners **${t.corners}**`,
+        );
+      });
+      lines.push(concededGoalsNote(g, nombres));
       lines.push("");
     });
   }

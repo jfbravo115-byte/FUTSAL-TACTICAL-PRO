@@ -154,9 +154,16 @@ describe("el PDF dice exactamente lo que dice el informe determinista", () => {
   it("una tarjeta por ventana registrada, ni una más", () => {
     const { host, report } = render(partidoReal());
     expect(report.matchContexts).toHaveLength(3);
-    // Cada tarjeta lleva su propia línea de métricas secundarias.
-    const tarjetas = (texto(host).match(/Recuperaciones \d+ · pérdidas/g) || []).length;
-    expect(tarjetas).toBe(report.matchContexts.length);
+    // Cada tarjeta lleva DOS líneas de métricas secundarias: la del bando
+    // que tiene la ventaja y la de lo que le concedió al otro.
+    const lineas = (texto(host).match(/Recuperaciones \d+ · pérdidas/g) || []).length;
+    expect(lineas).toBe(report.matchContexts.length * 2);
+    // Dos rótulos «Producción de …» por tarjeta: el del bando que tiene la
+    // ventaja y el del otro, cada uno con sus cifras.
+    const rotulos = (texto(host).match(/Producción de /g) || []).length;
+    expect(rotulos).toBe(report.matchContexts.length * 2);
+    const notas = (texto(host).match(/encajó \d+ gol/g) || []).length;
+    expect(notas).toBe(report.matchContexts.length);
   });
 
   it("los tipos salen con etiqueta humana y en el orden del informe", () => {
@@ -194,9 +201,9 @@ describe("el PDF dice exactamente lo que dice el informe determinista", () => {
   it("los tiros y los goles de cada ventana son los del informe", () => {
     const { report } = render(partidoReal());
     const sup = report.matchContexts.find((c) => c.type === "superiority_expulsion")!;
-    expect([sup.tally.shots, sup.tally.onTarget, sup.tally.goals]).toEqual([2, 2, 0]);
+    expect([sup.production.shots, sup.production.onTarget, sup.production.goals]).toEqual([2, 2, 0]);
     const pj = report.matchContexts.find((c) => c.type === "gk_player_own")!;
-    expect([pj.tally.shots, pj.tally.onTarget]).toEqual([1, 1]);
+    expect([pj.production.shots, pj.production.onTarget]).toEqual([1, 1]);
   });
 
   it("la secuencia de goles es la del informe, gol a gol", () => {
@@ -263,7 +270,7 @@ describe("el PDF no calcula nada: consume MatchReport", () => {
     // tiros, aquí seguiría enseñando el número "correcto".
     const report = generateMatchReport(partidoReal());
     const sup = report.matchContexts.find((c) => c.type === "superiority_expulsion")!;
-    const falseado = { ...sup, tally: { ...sup.tally, shots: 99, onTarget: 77 } };
+    const falseado = { ...sup, production: { ...sup.production, shots: 99, onTarget: 77 } };
 
     const host = document.createElement("div");
     document.body.appendChild(host);

@@ -422,7 +422,14 @@ describe("objetivo 4 · una sola verdad sobre el portero", () => {
 
     // Y 77 ya no aparece en NINGÚN bloque factual: ni en el resumen
     // determinista ni en el contexto táctico.
-    expect(JSON.stringify(payload.deterministicReport)).not.toContain("77");
+    //
+    // `generatedAt` se descarta antes de buscar: es la hora de generación, no
+    // un dato del partido, y lleva milisegundos. Una marca como
+    // «…T09:53:01.779Z» contiene «77» y hacía fallar esta prueba según la
+    // hora a la que se ejecutara.
+    const { generatedAt, ...factual } = payload.deterministicReport as any;
+    expect(typeof generatedAt).toBe("string");
+    expect(JSON.stringify(factual)).not.toContain("77");
     expect(JSON.stringify(payload.tacticalContext)).not.toContain(":77");
   });
 
@@ -786,7 +793,7 @@ describe("las situaciones especiales y la secuencia de goles llegan al payload",
   it("y lleva los cinco tiros de esa superioridad ya desglosados", () => {
     // El hecho que la IA debe recibir hecho: "durante la superioridad, 5
     // tiros, 3 a portería, 1 fuera, 1 bloqueado, 1 gol".
-    const t = informe().matchContextGroups[0].tally;
+    const t = informe().matchContextGroups[0].production;
     expect(t.shots).toBe(5);
     expect(t.onTarget).toBe(3);
     expect(t.offTarget).toBe(1);

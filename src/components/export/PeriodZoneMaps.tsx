@@ -88,10 +88,17 @@ export function periodZonePeriods(matchData: MatchData): number[] {
   return [...BASE_PERIODS, ...[...extra].sort((a, b) => a - b)];
 }
 
-/** Una columna por periodo, construida con el motor de siempre. */
-export function buildPeriodColumns(matchData: MatchData): PeriodZoneColumn[] {
+/**
+ * Una columna por periodo, construida con el motor de siempre.
+ *
+ * `opponent` elige de QUIÉN son las acciones, igual que en el resto de la
+ * aplicación. La perspectiva NO cambia: los sectores se guardan desde el
+ * punto de vista del equipo que ejecuta, así que un mapa rival ya viene
+ * normalizado y aquí no se invierte nada.
+ */
+export function buildPeriodColumns(matchData: MatchData, opponent = false): PeriodZoneColumn[] {
   return periodZonePeriods(matchData).map((period) => {
-    const dashboard = buildZoneDashboard(matchData, false, period as Period);
+    const dashboard = buildZoneDashboard(matchData, opponent, period as Period);
     return {
       period,
       label: periodLabel(period),
@@ -188,8 +195,8 @@ export function periodGoals(dashboard: ZoneDashboard): number {
  * permite. Y un partido moderno sin ninguna de las tres acciones ubicadas
  * tampoco: una página con seis pistas vacías no informa de nada.
  */
-export function hasPeriodZoneData(matchData: MatchData): boolean {
-  const global = primaryBucket(buildZoneDashboard(matchData, false));
+export function hasPeriodZoneData(matchData: MatchData, opponent = false): boolean {
+  const global = primaryBucket(buildZoneDashboard(matchData, opponent));
   if (!global || global.system !== "zone12") return false;
   return PERIOD_ZONE_METRICS.some((m) => metricLocated(global, m.key) > 0);
 }
@@ -201,13 +208,16 @@ const LEYENDA =
 
 export function PeriodZoneMapsBoard({
   matchData,
+  opponent = false,
   pitchWidth = 300,
 }: {
   matchData: MatchData;
+  /** De qué equipo son las acciones. Por defecto, el nuestro. */
+  opponent?: boolean;
   pitchWidth?: number;
 }) {
-  const columns = buildPeriodColumns(matchData);
-  const globalBucket = primaryBucket(buildZoneDashboard(matchData, false));
+  const columns = buildPeriodColumns(matchData, opponent);
+  const globalBucket = primaryBucket(buildZoneDashboard(matchData, opponent));
   // Con prórroga hay más de dos columnas y las pistas tienen que encoger: el
   // alto de la página es fijo y pasarse no recorta, comprime.
   const width = columns.length > 2 ? Math.round(pitchWidth * (2 / columns.length)) : pitchWidth;
@@ -226,8 +236,8 @@ export function PeriodZoneMapsBoard({
       {PERIOD_ZONE_METRICS.map((metric) => {
         const max = sharedMax(columns, metric.key);
         const sinPeriodo = unlocatedInTime(globalBucket, columns, metric.key);
-        const totalGlobal = metricTotal(buildZoneDashboard(matchData, false), metric.key);
-        const golesGlobal = periodGoals(buildZoneDashboard(matchData, false));
+        const totalGlobal = metricTotal(buildZoneDashboard(matchData, opponent), metric.key);
+        const golesGlobal = periodGoals(buildZoneDashboard(matchData, opponent));
         return (
           <div key={metric.key} style={{ marginBottom: 12 }}>
             <div

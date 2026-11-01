@@ -17,7 +17,12 @@ import path from "node:path";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { TACTICAL_PRO_CAVEAT, TacticalProBoard } from "./TacticalProBoard";
-import { splitTacticalProIntoPages } from "../../services/pdfExportService";
+import {
+  ORPHAN_HEADING_CHARS,
+  TacticalProChunk,
+  inlineHeadingNumbers,
+  splitTacticalProIntoPages,
+} from "../../services/pdfExportService";
 import { teamReportPageCount } from "../../utils/reportPagination";
 
 function render(node: React.ReactNode): HTMLElement {
@@ -211,5 +216,114 @@ describe("15 · imprimir el PDF no provoca ninguna llamada", () => {
     const codigo = sinComentarios(leer("../../services/pdfExportService.tsx"));
     expect(codigo).not.toContain("streamTacticalReport");
     expect(codigo).toContain("matchData.tacticalAnalysis");
+  });
+});
+
+// ── LOS APARTADOS NUMERADOS NO PIERDEN SU NÚMERO ───────────────────────
+//
+// El Tactical Pro real de CD MURCIA–JIMBEE empieza sus seis apartados por
+// «1. Lectura del partido», «2. Con balón»… react-markdown los convierte en
+// listas ordenadas, y Tailwind le quita el marcador a `ol`: en el PDF salía
+// «Lectura del partido», sin el número. El lector perdía la numeración del
+// informe que había leído en pantalla.
+
+const APARTADOS = [
+  "1. Lectura del partido",
+  "2. Con balón",
+  "3. Sin balón",
+  "4. Portería",
+  "5. Claves para el cuerpo técnico",
+  "6. Propuestas de trabajo",
+];
+
+describe("apartados numerados y viñetas", () => {
+  it("EL NÚMERO ES TEXTO: sale en lo renderizado, no en un marcador CSS", () => {
+    // Lo que se comprueba aquí es `textContent`, es decir lo que de verdad
+    // acaba dibujado. Un marcador de lista NO está en `textContent`: por eso
+    // el PDF salía sin numerar aunque el DOM tuviera `list-style: decimal`.
+    for (const apartado of APARTADOS) {
+      const host = render(
+        <TacticalProChunk chunk={`${apartado}\n\nUn párrafo del apartado.`} index={0} total={1} />,
+      );
+      expect(texto(host)).toContain(apartado);
+    }
+  });
+
+  it("y el número sobrevive a que el apartado no empiece por 1", () => {
+    const host = render(
+      <TacticalProChunk chunk={"6. Propuestas de trabajo\n\nTexto."} index={0} total={1} />,
+    );
+    // Si esto fuera una lista ordenada, volvería a numerar desde 1.
+    expect(texto(host)).toContain("6. Propuestas de trabajo");
+    expect(texto(host)).not.toContain("1. Propuestas");
+  });
+
+  it("una lista de verdad SIGUE siendo una lista", () => {
+    const host = render(
+      <TacticalProChunk chunk={"- Punto A\n- Punto B\n- Punto C"} index={0} total={1} />,
+    );
+    expect(host.querySelectorAll("li")).toHaveLength(3);
+    expect(host.querySelector("ul")?.getAttribute("style")).toContain("disc");
+  });
+
+  it("inlineHeadingNumbers no toca lo que no es un título suelto", () => {
+    expect(inlineHeadingNumbers("1. Uno\n2. Dos")).toBe("1. Uno\n2. Dos");
+    expect(inlineHeadingNumbers("Un párrafo normal.")).toBe("Un párrafo normal.");
+    expect(inlineHeadingNumbers("4. Portería")).toBe("**4. Portería**");
+  });
+
+  it("las tres cabeceras se rotulan completas", () => {
+    for (let i = 0; i < 3; i++) {
+      const host = render(<TacticalProChunk chunk="x" index={i} total={3} />);
+      expect(texto(host)).toContain(`Tactical Pro (${i + 1}/3)`);
+    }
+  });
+
+  it("la plantilla pinta las listas con marcador y sangría", () => {
+    const fuente = fs.readFileSync(
+      path.join(__dirname, "../../services/pdfExportService.tsx"),
+      "utf8",
+    );
+    expect(fuente).toContain('listStyle: "decimal"');
+    expect(fuente).toContain('listStyle: "disc"');
+  });
+
+  it("un título no se queda sin contenido detrás", () => {
+    const parrafo = "x".repeat(900);
+    // El título cabría por caracteres, pero detrás no queda sitio para nada.
+    const paginas = splitTacticalProIntoPages(
+      [parrafo, parrafo, "3. Sin balón", parrafo].join("\n\n"),
+      2000,
+    );
+    const conTitulo = paginas.findIndex((p) => p.includes("3. Sin balón"));
+    expect(paginas[conTitulo].startsWith("3. Sin balón")).toBe(true);
+    // Y su primer párrafo está en la MISMA página.
+    expect(paginas[conTitulo].split("\n\n")).toHaveLength(2);
+  });
+
+  it("un título suelto al final de página baja con su apartado", () => {
+    const parrafo = "x".repeat(1000);
+    const paginas = splitTacticalProIntoPages(
+      [parrafo, parrafo, "4. Portería", parrafo].join("\n\n"),
+      2200,
+    );
+    expect(paginas).toHaveLength(2);
+    expect(paginas[0].endsWith("4. Portería")).toBe(false);
+    expect(paginas[1].startsWith("4. Portería")).toBe(true);
+  });
+
+  it("y no se pierde ni se duplica nada al bajarlo", () => {
+    const parrafo = "y".repeat(1000);
+    const texto = [parrafo, parrafo, "6. Propuestas de trabajo", parrafo].join("\n\n");
+    const unido = splitTacticalProIntoPages(texto, 2200).join("\n\n");
+    expect(unido.split("6. Propuestas de trabajo")).toHaveLength(2);
+    expect(unido.replace(/\s+/g, "")).toBe(texto.replace(/\s+/g, ""));
+  });
+
+  it("una última línea larga NO se mueve: no es un título", () => {
+    const parrafo = "z".repeat(1000);
+    const cola = "w".repeat(ORPHAN_HEADING_CHARS + 1);
+    const paginas = splitTacticalProIntoPages([parrafo, cola, parrafo].join("\n\n"), 1200);
+    expect(paginas[0].endsWith(cola)).toBe(true);
   });
 });

@@ -95,6 +95,30 @@ export enum ActionType {
    * utils/setPieceModel.
    */
   SET_PIECE = 'SET_PIECE',
+  /**
+   * Saque de banda ejecutado.
+   *
+   * TIPO PROPIO, NO UN `SET_PIECE` CON ETIQUETA
+   * -------------------------------------------
+   * Se registra mucho —es la reanudación más frecuente del fútbol sala— y
+   * tiene un dominio que ninguna otra acción comparte: banda izquierda o
+   * derecha y sector Z1-Z4, los dos normalizados desde la perspectiva del
+   * equipo que saca. Meterlo dentro de `SET_PIECE` habría obligado a filtrar
+   * por metadatos en cada agregado para separarlo de las faltas jugadas.
+   *
+   * NO ES UN TIRO Y NO PUEDE SERLO
+   * ------------------------------
+   * `isShotAttempt` es una enumeración cerrada (SHOT, GOAL, GOAL_CONCEDED),
+   * así que un tipo nuevo queda fuera de tiros, precisión, conversión y mapas
+   * de finalización sin sembrar excepciones. Y el reglamento acompaña: de
+   * banda no se marca directamente. Si la jugada acaba en remate, ese remate
+   * es un SHOT o un GOAL aparte, enlazado por `sequenceId`.
+   *
+   * COMPATIBILIDAD TOTAL
+   * --------------------
+   * Ningún partido anterior puede contenerlo. No hay nada que migrar.
+   */
+  THROW_IN = 'THROW_IN',
   SUBSTITUTION = 'SUBSTITUTION',
   TIMEOUT = 'TIMEOUT',
   FORMATION_CHANGE = 'FORMATION_CHANGE',

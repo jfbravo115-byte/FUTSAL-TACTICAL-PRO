@@ -165,9 +165,9 @@ describe("Geometría del anillo", () => {
     }
   });
 
-  it("8 botones (jugador de campo) tampoco solapan", () => {
+  it("10 botones (jugador de campo, con córner y banda) tampoco solapan", () => {
     for (const ancho of [MOVIL, ESCRITORIO]) {
-      expect(radialGeometry(8, RADIAL_BUTTON_PX, ancho).fits).toBe(true);
+      expect(radialGeometry(10, RADIAL_BUTTON_PX, ancho).fits).toBe(true);
     }
   });
 
@@ -404,5 +404,44 @@ describe("las tarjetas se ven y pertenecen a un jugador concreto", () => {
     const estilo = gk.getAttribute("style") || "";
     expect(estilo).toContain("env(safe-area-inset-bottom");
     expect(estilo).toContain("7rem");
+  });
+});
+
+// ── BALÓN PARADO DESDE EL RADIAL ───────────────────────────────────────
+//
+// El radial ya no registra la reanudación: entrega el tipo y el jugador, y
+// MatchTracker abre la ventana única con ESE jugador como sacador. Lo que
+// se protege aquí es que el radial no apunte nada por su cuenta.
+
+describe("córner, banda y jugada de falta desde el radial", () => {
+  const campo = { id: "l7", number: 7, name: "Ramón", role: Role.PLAYER };
+
+  it("el anillo del jugador de campo tiene 10 botones", () => {
+    const { host } = mount(campo);
+    const anillo = Array.from(host.querySelectorAll("button")).filter(
+      (b) => b.style.width === `${RADIAL_BUTTON_PX}px`,
+    );
+    expect(anillo).toHaveLength(10);
+  });
+
+  for (const [rotulo, tipo] of [
+    ["CÓRNER", ActionType.CORNER],
+    ["BANDA", ActionType.THROW_IN],
+    ["J.FALTA", ActionType.SET_PIECE],
+  ] as const) {
+    it(`${rotulo} entrega el jugador como sacador, sin metadatos inventados`, () => {
+      const { host, onAction, onClose } = mount(campo);
+      click(host, rotulo);
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(onAction).toHaveBeenCalledWith(tipo, "l7");
+      expect(onClose).toHaveBeenCalled();
+    });
+  }
+
+  it("el portero no tiene córner ni banda: su anillo sigue en 10", () => {
+    const { host } = mount();
+    const textos = Array.from(host.querySelectorAll("button")).map((b) => b.textContent || "");
+    expect(textos.some((t) => t.includes("CÓRNER"))).toBe(false);
+    expect(textos.some((t) => t.includes("BANDA"))).toBe(false);
   });
 });

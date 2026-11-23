@@ -24,6 +24,7 @@ import {
   eventIdsToDeleteWith,
   eventsOfSequence,
   finisherIdOf,
+  groupTimeline,
   newSetPieceSequenceId,
   outcomeCreatesEvent,
   rootKindOf,
@@ -635,5 +636,63 @@ describe("el remate de la jugada es un remate normal", () => {
       shot: { finisherId: "l1" },
     });
     expect(eventos[1].originGrid).toBe("Z4L");
+  });
+});
+
+// ── TIMELINE ────────────────────────────────────────────────────────────
+
+describe("el historial pinta una fila por jugada", () => {
+  it("agrupa los eventos de cada jugada sin perder ni duplicar ninguno", () => {
+    const a = construir({
+      root: "corner",
+      isOpponent: false,
+      modality: "prepared",
+      outcome: "goal",
+      cornerSide: "left",
+      shot: { finisherId: "l2" },
+    });
+    const suelto = { id: "suelto", type: ActionType.STEAL, metadata: {} } as unknown as GameEvent;
+    const b = construir({
+      root: "throw_in",
+      isOpponent: true,
+      modality: "quick",
+      outcome: "loss",
+      throwInSide: "left",
+      throwInSector: "Z2",
+    });
+    const lista = [...a.eventos, suelto, ...b.eventos];
+    const filas = groupTimeline(lista);
+    expect(filas.map((f) => f.kind)).toEqual(["sequence", "event", "sequence"]);
+    const total = filas.reduce(
+      (n, f) => n + (f.kind === "event" ? 1 : f.events.length),
+      0,
+    );
+    expect(total).toBe(lista.length);
+  });
+
+  it("la jugada se coloca donde aparece su primer evento", () => {
+    const a = construir({
+      root: "corner",
+      isOpponent: false,
+      modality: "prepared",
+      outcome: "shot",
+      cornerSide: "left",
+      shot: { finisherId: "l2" },
+    });
+    const suelto = { id: "s", type: ActionType.STEAL, metadata: {} } as unknown as GameEvent;
+    // El tiro arriba, el córner debajo del suelto: la fila va arriba.
+    const filas = groupTimeline([a.eventos[1], suelto, a.eventos[0]]);
+    expect(filas).toHaveLength(2);
+    expect(filas[0].kind).toBe("sequence");
+    expect(filas[1].kind).toBe("event");
+  });
+
+  it("un partido antiguo se pinta exactamente como antes: una fila por evento", () => {
+    const viejos = ["a", "b", "c"].map(
+      (id) => ({ id, type: ActionType.CORNER, metadata: {} }) as unknown as GameEvent,
+    );
+    const filas = groupTimeline(viejos);
+    expect(filas.every((f) => f.kind === "event")).toBe(true);
+    expect(filas).toHaveLength(3);
   });
 });

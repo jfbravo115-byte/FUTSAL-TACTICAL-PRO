@@ -681,3 +681,39 @@ export const ROOT_KIND_BY_ACTION: Partial<Record<string, SetPieceRootKind>> = {
   [ActionType.SET_PIECE]: "free_kick",
   [ActionType.THROW_IN]: "throw_in",
 };
+
+// ── TIMELINE ────────────────────────────────────────────────────────────
+
+/** Una fila del historial: un evento suelto o una jugada entera. */
+export type TimelineItem =
+  | { kind: "event"; event: GameEvent }
+  | { kind: "sequence"; sequenceId: string; events: GameEvent[] };
+
+/**
+ * Agrupa una lista de eventos —ya ordenada como se va a pintar— en filas.
+ *
+ * Cada jugada ocupa UNA fila, en la posición de su primer evento en la
+ * lista, con todos sus eventos dentro en el mismo orden. Los eventos sin
+ * `sequenceId` siguen siendo una fila cada uno, como siempre. No se pierde
+ * ni se duplica ningún evento: solo se agrupan para pintarse.
+ */
+export function groupTimeline(events: GameEvent[]): TimelineItem[] {
+  const filas: TimelineItem[] = [];
+  const porJugada = new Map<string, GameEvent[]>();
+  for (const event of events) {
+    const id = sequenceIdOf(event);
+    if (!id) {
+      filas.push({ kind: "event", event });
+      continue;
+    }
+    const grupo = porJugada.get(id);
+    if (grupo) {
+      grupo.push(event);
+      continue;
+    }
+    const nuevo = [event];
+    porJugada.set(id, nuevo);
+    filas.push({ kind: "sequence", sequenceId: id, events: nuevo });
+  }
+  return filas;
+}

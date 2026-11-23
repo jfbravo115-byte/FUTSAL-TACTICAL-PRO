@@ -173,7 +173,9 @@ import {
   SetPieceSequenceDraft,
   buildSequenceSeeds,
   deflectOutcomeLeadsToThrowIn,
+  describeSequence,
   eventIdsToDeleteWith,
+  groupTimeline,
   newSetPieceSequenceId,
   throwInTakerIsOpponent,
 } from "../utils/setPieceSequence";
@@ -1921,6 +1923,8 @@ export default function MatchTracker() {
     fromFoulEventId?: string;
     token: number;
   } | null>(null);
+  /** Jugadas desplegadas en el historial. Solo presentación: no es un dato. */
+  const [expandedSequences, setExpandedSequences] = useState<Set<string>>(() => new Set());
   /** Despeje ya registrado, a la espera de cómo siguió el balón (opcional). */
   const [pendingDeflectOutcome, setPendingDeflectOutcome] = useState<{
     eventId: string;
@@ -5334,9 +5338,8 @@ export default function MatchTracker() {
                             <div className="h-[1px] flex-1 bg-white/10" />
                           </div>
                           
-                          {periodEvents
-                            .sort((a, b) => b.timestamp - a.timestamp)
-                            .map((e) => (
+                          {(() => {
+                            const filaEvento = (e: GameEvent, interno = false) => (
                               <div
                                 key={e.id}
                                 className={`p-2 bg-white/5 border border-white/5 rounded-lg flex items-center justify-between gap-3 group transition-all hover:bg-white/10 ${
@@ -5399,15 +5402,112 @@ export default function MatchTracker() {
                                   <span className="text-[10px] font-mono font-bold text-slate-500">
                                     #{matchData.events.indexOf(e) + 1}
                                   </span>
+                                  {!interno && (
                                   <button
                                     onClick={() => setDeleteConfirmEvent(e)}
                                     className="p-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-md transition-all shadow-sm shrink-0"
                                   >
                                     <Trash2 size={16} />
                                   </button>
+                                  )}
                                 </div>
                               </div>
-                            ))}
+                            );
+                            const ordenados = [...periodEvents].sort(
+                              (a, b) => b.timestamp - a.timestamp,
+                            );
+                            // Una jugada a balón parado es UNA fila. Sus
+                            // eventos siguen existiendo —alimentan las
+                            // cifras— y se ven al desplegarla.
+                            return groupTimeline(ordenados).map((item) => {
+                              if (item.kind === "event") return filaEvento(item.event);
+                              const card = describeSequence(matchData.events, item.sequenceId);
+                              const raiz = item.events.find(
+                                (x) => x.metadata?.sequenceRole === "root",
+                              ) ?? item.events[0];
+                              const abierta = expandedSequences.has(item.sequenceId);
+                              const nombreDe = (id: string | null) => {
+                                if (!id) return "no identificado";
+                                const p = matchData.players.find((x) => x.id === id);
+                                if (!p) return "no identificado";
+                                const ident = playerDisplayIdentity(p, {
+                                  players: matchData.players,
+                                  maxCaracteres: 18,
+                                });
+                                return `#${ident.dorsal} ${
+                                  ident.kind === "nombre" ? ident.nombreCorto : ident.letra
+                                }`;
+                              };
+                              return (
+                                <div
+                                  key={item.sequenceId}
+                                  data-timeline-sequence={item.sequenceId}
+                                  className={`rounded-lg border ${
+                                    card?.outcome === "goal"
+                                      ? "border-green-500/30 bg-green-500/5"
+                                      : "border-violet-500/25 bg-violet-500/5"
+                                  }`}
+                                >
+                                  <div className="p-2 flex items-center justify-between gap-3">
+                                    <button
+                                      data-timeline-sequence-toggle
+                                      onClick={() =>
+                                        setExpandedSequences((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(item.sequenceId)) next.delete(item.sequenceId);
+                                          else next.add(item.sequenceId);
+                                          return next;
+                                        })
+                                      }
+                                      className="flex flex-col gap-1 min-w-0 text-left flex-1 min-h-[44px]"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[8px] font-mono font-black text-violet-300">
+                                          {formatTime(raiz.timestamp)}
+                                        </span>
+                                        <span
+                                          className={`text-[8px] font-black uppercase ${
+                                            card?.isOpponent ? "text-red-400" : "text-blue-400"
+                                          }`}
+                                        >
+                                          {card?.isOpponent
+                                            ? matchData.opponentName || "RIVAL"
+                                            : matchData.teamName || "LOCAL"}
+                                        </span>
+                                        <span className="text-[7px] font-black text-slate-500 uppercase">
+                                          {abierta ? "▾" : "▸"} {item.events.length} eventos
+                                        </span>
+                                      </div>
+                                      <span className="text-[9px] font-black uppercase text-white truncate">
+                                        {card?.rootLabel ?? "Balón parado"}
+                                        {card?.locationLabel ? ` · ${card.locationLabel}` : ""}
+                                        {card?.modalityLabel ? ` · ${card.modalityLabel}` : ""}
+                                      </span>
+                                      <span className="text-[8px] font-bold text-slate-400 uppercase truncate">
+                                        Saca {nombreDe(card?.takerId ?? null)}
+                                        {card?.outcome === "shot" || card?.outcome === "goal"
+                                          ? ` · remata ${nombreDe(card?.finisherId ?? null)}`
+                                          : ""}
+                                        {card?.outcomeLabel ? ` · ${card.outcomeLabel}` : ""}
+                                      </span>
+                                    </button>
+                                    <button
+                                      data-timeline-sequence-delete
+                                      onClick={() => setDeleteConfirmEvent(raiz)}
+                                      className="p-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-md transition-all shadow-sm shrink-0"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                  {abierta && (
+                                    <div className="px-2 pb-2 space-y-1" data-timeline-sequence-events>
+                                      {item.events.map((x) => filaEvento(x, true))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
                       ));
                   })()}
@@ -8814,13 +8914,27 @@ export default function MatchTracker() {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-red-500/30 bg-red-500/20">
                 <AlertTriangle className="text-red-500" size={24} />
               </div>
-              <h3 className="mb-2 text-sm font-black uppercase text-white">
-                ¿Eliminar Acción?
-              </h3>
-              <p className="mb-6 px-2 text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400">
-                Esta acción restará las estadísticas del jugador y ajustará el
-                marcador si es necesario.
-              </p>
+              {(() => {
+                // Si la acción es parte de una jugada, se va la jugada ENTERA:
+                // hay que decirlo antes, no descubrirlo después.
+                const piezas = eventIdsToDeleteWith(matchData.events, deleteConfirmEvent.id).length;
+                const esJugada = piezas > 1;
+                return (
+                  <>
+                    <h3 className="mb-2 text-sm font-black uppercase text-white">
+                      {esJugada ? "¿Eliminar la jugada?" : "¿Eliminar Acción?"}
+                    </h3>
+                    <p
+                      data-delete-sequence-warning={esJugada ? piezas : undefined}
+                      className="mb-6 px-2 text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400"
+                    >
+                      {esJugada
+                        ? `Se eliminan los ${piezas} eventos de la jugada a la vez, con sus estadísticas y su efecto en el marcador.`
+                        : "Esta acción restará las estadísticas del jugador y ajustará el marcador si es necesario."}
+                    </p>
+                  </>
+                );
+              })()}
 
               <div className="mb-6 rounded-xl border border-white/5 bg-black/40 p-3 text-left">
                 <div className="mb-1 flex items-center justify-between">
@@ -8832,10 +8946,9 @@ export default function MatchTracker() {
                   </span>
                 </div>
                 <span className="text-[10px] font-black uppercase text-white">
-                  {deleteConfirmEvent.type.replace(/_/g, " ")} - #
-                  {matchData.players.find(
-                    (p) => p.id === deleteConfirmEvent.playerIds[0],
-                  )?.number || "--"}
+                  {/* Lo mismo que dice la confirmación al registrar: la
+                      jugada entera si lo es, el evento si no. */}
+                  {describeRegisteredAction(deleteConfirmEvent, matchData)}
                 </span>
               </div>
 

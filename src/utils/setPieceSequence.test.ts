@@ -171,6 +171,22 @@ describe("falta a favor", () => {
     expect(raiz.originGrid).toBe("Z3C");
   });
 
+  it("una falta de TIRO DIRECTO no se disfraza de jugada en corto", () => {
+    const { eventos } = construir({
+      root: "free_kick",
+      isOpponent: false,
+      modality: "direct",
+      outcome: "shot",
+      originGrid: "Z4C",
+      shot: { finisherId: "l1" },
+    });
+    // `SET_PIECE` con desenlace solo admite `play`; `shot` queda fuera.
+    expect(eventos[0].metadata?.setPieceOutcome).toBeUndefined();
+    expect(eventos[0].metadata?.setPieceModality).toBe("direct");
+    // Y el remate dice de dónde viene, como siempre.
+    expect(eventos[1].metadata?.setPiece).toBe("free_kick");
+  });
+
   it("una falta que acaba en gol son UNA falta y UN gol", () => {
     const { id, eventos } = construir({
       root: "free_kick",

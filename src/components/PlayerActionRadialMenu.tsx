@@ -245,7 +245,7 @@ export const PlayerActionRadialMenu = ({ player, players, onAction, onSwap, onCl
             <div className="grid grid-cols-2 gap-2">
               {([
                 { type: GoalieAction.SAVE_CATCH, label: 'BLOCAJE', desc: 'Controla el balón' },
-                { type: GoalieAction.SAVE_DEFLECT, label: 'DESPEJE', desc: 'Sigue en juego' },
+                { type: GoalieAction.SAVE_DEFLECT, label: 'DESPEJE', desc: 'No la controla' },
               ] as const).map(opt => (
                 <button
                   key={opt.type}

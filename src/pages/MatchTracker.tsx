@@ -7470,8 +7470,16 @@ export default function MatchTracker() {
                 </div>
               )}
 
-              {/* BOTTOM BAR: QUICK ACTIONS (horizontal) */}
-              <div className="w-full flex flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll">
+              {/* BOTTOM BAR: QUICK ACTIONS (horizontal)
+                  Con BANDA son ocho. En una sola fila de móvil cada botón se
+                  quedaba en 38 px de ancho, por debajo de lo que se acierta
+                  con el pulgar. En móvil van en dos filas de cuatro —cada
+                  botón el doble de ancho— y desde `sm` en una sola fila,
+                  como siempre. */}
+              <div
+                data-quick-actions-bar
+                className="w-full grid grid-cols-4 sm:flex sm:flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll"
+              >
 
                 {/* Match Actions */}
                 <button
@@ -7590,12 +7598,17 @@ export default function MatchTracker() {
                     >
                       {nombreOtro}
                     </span>
-                    {/* En móvil las cinco acciones no caben en una fila sin
-                        quedarse en botones de 49 px, que es menos de lo que
-                        se acierta con el pulgar en una banda. Se permiten dos
-                        filas: antes dos filas legibles que una sola fila que
-                        obliga a mirar. */}
-                    <div className="flex gap-1 flex-1 basis-full sm:basis-auto min-w-0 flex-wrap sm:flex-nowrap">
+                    {/* Las acciones no siempre caben en una fila sin quedarse
+                        en botones de menos de 72 px, que es menos de lo que se
+                        acierta con el pulgar en una banda. Se permiten dos
+                        filas en CUALQUIER ancho: con córner y banda son siete,
+                        y a 1024 px una sola fila escondía «T. muerto» bajo la
+                        columna derecha. Antes dos filas legibles que un botón
+                        que no se ve. */}
+                    <div
+                      data-other-team-actions
+                      className="flex gap-1 flex-1 basis-full sm:basis-auto min-w-0 flex-wrap"
+                    >
                       {acciones.map((a) => (
                         <button
                           key={a.id}

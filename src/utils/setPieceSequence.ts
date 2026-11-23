@@ -396,7 +396,13 @@ export function buildSequenceSeeds(
   if (draft.root === "free_kick") {
     if (draft.originGrid) raiz.originGrid = draft.originGrid;
     raiz.metadata.setPieceOrigin = "free_kick";
-    raiz.metadata.setPieceOutcome = draft.modality === "direct" ? "shot" : "play";
+    // `SET_PIECE` con desenlace solo admite `play` —falta jugada en corto—:
+    // `setPieceModel` declara que un `shot` ahí «no es una reanudación de
+    // las que esta fase sabe contar». Una falta de tiro directo NO es una
+    // jugada en corto, así que no se le escribe: su modalidad ya va en
+    // `setPieceModality`, y su remate cuenta como tiro desde falta por su
+    // propio `setPiece: 'free_kick'`.
+    if (draft.modality === "prepared") raiz.metadata.setPieceOutcome = "play";
   }
 
   if (draft.root === "throw_in" && draft.throwInSide && draft.throwInSector) {

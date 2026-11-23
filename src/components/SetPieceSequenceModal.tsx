@@ -82,8 +82,13 @@ const panel =
   "rounded-2xl border border-white/10 bg-white/5 p-3 space-y-2";
 const rotulo =
   "text-[9px] font-black uppercase tracking-wider text-slate-400";
+/**
+ * 40 px de alto como mínimo en todos los controles: es el mínimo que la
+ * franja de acciones del otro equipo ya usa para acertar con el pulgar en
+ * una banda, y en tablet la ventana se maneja de pie y con prisa.
+ */
 const opcion =
-  "py-2.5 px-2 rounded-xl border-2 text-[10px] font-black uppercase transition-all";
+  "min-h-[40px] py-2.5 px-2 rounded-xl border-2 text-[10px] font-black uppercase transition-all";
 const elegida = "border-violet-400 bg-violet-500/25 text-white";
 const suelta = "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10";
 
@@ -255,7 +260,7 @@ export function SetPieceSequenceModal({
                   key={z}
                   data-seq-origin={z}
                   onClick={() => setOriginGrid(originGrid === z ? undefined : z)}
-                  className={`py-2 rounded-lg border text-[10px] font-black ${
+                  className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black ${
                     originGrid === z ? elegida : suelta
                   }`}
                 >
@@ -277,7 +282,7 @@ export function SetPieceSequenceModal({
                   <button
                     data-seq-throw-side={side}
                     onClick={() => setThrowInSide(side)}
-                    className={`${opcion} w-24 shrink-0 ${
+                    className={`${opcion} w-20 sm:w-24 shrink-0 ${
                       throwInSide === side ? elegida : suelta
                     }`}
                   >
@@ -292,7 +297,7 @@ export function SetPieceSequenceModal({
                           setThrowInSide(side);
                           setThrowInSector(sector);
                         }}
-                        className={`py-2 rounded-lg border text-[10px] font-black ${
+                        className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black ${
                           throwInSide === side && throwInSector === sector ? elegida : suelta
                         }`}
                       >
@@ -340,7 +345,7 @@ export function SetPieceSequenceModal({
                 key={p.id}
                 data-seq-taker={p.id}
                 onClick={() => setTakerId(takerId === p.id ? undefined : p.id)}
-                className={`py-2 rounded-lg border text-[10px] font-black leading-tight ${
+                className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black leading-tight ${
                   takerId === p.id ? elegida : suelta
                 } ${p.isOnPitch ? "" : "opacity-60"}`}
               >
@@ -353,7 +358,7 @@ export function SetPieceSequenceModal({
               onClick={() =>
                 setTakerId(takerId === SIN_IDENTIFICAR ? undefined : SIN_IDENTIFICAR)
               }
-              className={`py-2 rounded-lg border text-[9px] font-black ${
+              className={`min-h-[40px] py-2 rounded-lg border text-[9px] font-black ${
                 takerId === SIN_IDENTIFICAR ? elegida : suelta
               }`}
             >
@@ -396,7 +401,7 @@ export function SetPieceSequenceModal({
                   key={p.id}
                   data-seq-finisher={p.id}
                   onClick={() => setFinisherId(finisherId === p.id ? undefined : p.id)}
-                  className={`py-2 rounded-lg border text-[10px] font-black leading-tight ${
+                  className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black leading-tight ${
                     finisherId === p.id ? elegida : suelta
                   }`}
                 >
@@ -416,7 +421,7 @@ export function SetPieceSequenceModal({
                   key={g}
                   data-seq-destination={g}
                   onClick={() => setDestination(destination === g ? undefined : g)}
-                  className={`py-2 rounded-lg border text-[10px] font-black ${
+                  className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black ${
                     destination === g ? elegida : suelta
                   }`}
                 >
@@ -462,7 +467,7 @@ export function SetPieceSequenceModal({
                   key={s}
                   data-seq-loss={s}
                   onClick={() => setLossSubType(lossSubType === s ? undefined : s)}
-                  className={`py-2 rounded-lg border text-[10px] font-black ${
+                  className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black ${
                     lossSubType === s ? elegida : suelta
                   }`}
                 >
@@ -481,7 +486,7 @@ export function SetPieceSequenceModal({
           <button
             data-seq-cancel
             onClick={onCancel}
-            className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
+            className="min-h-[44px] py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
           >
             Cancelar
           </button>
@@ -489,7 +494,7 @@ export function SetPieceSequenceModal({
             data-seq-confirm
             disabled={!listo}
             onClick={confirmar}
-            className="py-3 rounded-xl bg-violet-500/25 border-2 border-violet-400 hover:bg-violet-500/40 text-[10px] font-black uppercase text-white disabled:opacity-40 disabled:border-white/10 disabled:bg-white/5"
+            className="min-h-[44px] py-3 rounded-xl bg-violet-500/25 border-2 border-violet-400 hover:bg-violet-500/40 text-[10px] font-black uppercase text-white disabled:opacity-40 disabled:border-white/10 disabled:bg-white/5"
           >
             Confirmar jugada
           </button>

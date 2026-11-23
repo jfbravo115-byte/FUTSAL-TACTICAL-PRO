@@ -15,6 +15,10 @@ import {
   newSetPieceSequenceId,
 } from "./setPieceSequence";
 import {
+  describeCornerStats,
+  describeFreeKickStats,
+  describeThrowInStats,
+  isThrowInMatching,
   setPieceRootKindOf,
   setPieceStatsViolations,
   summarizeSetPieceSequences,
@@ -355,5 +359,78 @@ describe("ausencia de doble conteo", () => {
   it("las invariantes detectan una jugada con dos remates", () => {
     const roto = [...ev, { ...ev[0], id: "dup", type: ActionType.SHOT } as GameEvent];
     expect(setPieceStatsViolations(roto).some((f) => f.includes("remates en una jugada"))).toBe(true);
+  });
+});
+
+// ── FILTRO DE BANDAS Y REDACCIÓN ────────────────────────────────────────
+
+describe("filtro de bandas para los mapas", () => {
+  const rapida = jugada({ root: "throw_in", isOpponent: false, modality: "quick", outcome: "loss",
+    throwInSide: "left", throwInSector: "Z2", loss: { subType: "bad_pass" } });
+  const preparada = jugada({ root: "throw_in", isOpponent: false, modality: "prepared", outcome: "shot",
+    throwInSide: "right", throwInSector: "Z4", shot: { finisherId: "l10" } });
+
+  it("solo la raíz entra en el mapa: el desenlace tiene su propia métrica", () => {
+    expect(isThrowInMatching(rapida[0])).toBe(true);
+    expect(isThrowInMatching(rapida[1])).toBe(false); // la pérdida
+    expect(isThrowInMatching(preparada[1])).toBe(false); // el tiro
+  });
+
+  it("filtra por modalidad y por desenlace", () => {
+    expect(isThrowInMatching(rapida[0], { modality: "quick" })).toBe(true);
+    expect(isThrowInMatching(rapida[0], { modality: "prepared" })).toBe(false);
+    expect(isThrowInMatching(preparada[0], { outcome: "shot" })).toBe(true);
+    expect(isThrowInMatching(preparada[0], { outcome: "loss" })).toBe(false);
+  });
+
+  it("una banda sin jugada registrada no entra en un filtro de modalidad", () => {
+    const sinJugada = suelto({ type: ActionType.THROW_IN, metadata: { isOpponent: false } });
+    expect(isThrowInMatching(sinJugada)).toBe(true);
+    expect(isThrowInMatching(sinJugada, { modality: "quick" })).toBe(false);
+  });
+});
+
+describe("la redacción no inventa", () => {
+  const nombre = (id: string) => `#${id}`;
+
+  it("sin ninguna reanudación no hay frase", () => {
+    expect(describeThrowInStats(summarizeSetPieceSequences([]).team.throwIn, nombre)).toEqual([]);
+  });
+
+  it("sin jugadas registradas no hay porcentajes ni desenlaces", () => {
+    const historico = [suelto({ type: ActionType.CORNER, metadata: { isOpponent: false, cornerSide: "left" } })];
+    const l = describeCornerStats(summarizeSetPieceSequences(historico).team.corner, nombre).join(" | ");
+    expect(l).toContain("1 en total (1 sin jugada registrada)");
+    expect(l).not.toMatch(/%/);
+    expect(l).not.toContain("Producción");
+    expect(l).toContain("Lado: izquierda 1");
+  });
+
+  it("un sacador sin identificar se cuenta, no se nombra", () => {
+    const ev = jugada({ root: "throw_in", isOpponent: false, modality: "quick", outcome: "keep",
+      throwInSide: "left", throwInSector: "Z1" });
+    const l = describeThrowInStats(summarizeSetPieceSequences(ev).team.throwIn, nombre).join(" | ");
+    expect(l).toContain("Sacadores: no identificado 1");
+    expect(l).not.toContain("#rgk");
+  });
+
+  it("dice banda, sector, producción y la banda tras despeje", () => {
+    const ev = jugada({ root: "throw_in", isOpponent: false, modality: "prepared", outcome: "goal",
+      throwInSide: "right", throwInSector: "Z4", takerId: "l7", fromDeflectEventId: "d1",
+      shot: { finisherId: "l10" } });
+    const l = describeThrowInStats(summarizeSetPieceSequences(ev).team.throwIn, nombre).join(" | ");
+    expect(l).toContain("Banda: derecha 1");
+    expect(l).toContain("Sector: Z4 1");
+    expect(l).toContain("Tras despeje del portero: 1");
+    expect(l).toContain("goles 1 (100%)");
+    expect(l).toContain("Sacadores: #l7 1");
+    expect(l).toContain("Finalizadores: #l10 1");
+  });
+
+  it("la falta dice su zona", () => {
+    const ev = jugada({ root: "free_kick", isOpponent: false, modality: "direct", outcome: "shot",
+      originGrid: "Z4C", shot: { finisherId: "l7" } });
+    expect(describeFreeKickStats(summarizeSetPieceSequences(ev).team.freeKick, nombre).join(" | "))
+      .toContain("Zona: Z4C 1");
   });
 });

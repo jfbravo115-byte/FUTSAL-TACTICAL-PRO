@@ -82,11 +82,15 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "origen el sistema reconoce en esa zona. Es un recuento de eventos ubicados, no una " +
     "suma de categorías.",
   "Volumen por zona, el resto: 'total' NO es necesariamente igual a " +
-    "shots + losses + recoveries + fouls + corners. Puede incluir otros eventos ubicados que " +
+    "shots + losses + recoveries + fouls + corners + throwIns. Puede incluir otros eventos ubicados que " +
     "no tienen categoría propia: jugadas de falta (SET_PIECE), paradas (SAVE, SAVE_CATCH, " +
     "SAVE_DEFLECT, SAVE_PARRY) y salidas (EXIT) con sector registrado. Si te salen las " +
     "cuentas cortas, es ese resto: no es un error ni una contradicción y no lo presentes " +
     "como tal.",
+  "Volumen por zona, saques de banda: 'throwIns' cuenta los saques de banda con origen en " +
+    "esa celda, desde la perspectiva del equipo que saca. Un saque de banda NO es un tiro: si " +
+    "la jugada acabó en tiro, en gol o en pérdida, ese desenlace cuenta en 'shots', 'goals' o " +
+    "'losses' de la celda donde ocurrió, no aquí. No sumes 'throwIns' a los tiros.",
   "Volumen por zona, tiros y goles: 'goals' está INCLUIDO dentro de 'shots'. NO sumes " +
     "shots + goals: contarías los goles dos veces. Dilo como «N tiros, de los que G fueron " +
     "gol».",

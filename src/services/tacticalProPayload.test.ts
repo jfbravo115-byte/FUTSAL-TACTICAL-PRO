@@ -887,12 +887,17 @@ describe("objetivo 8 · el volumen por zona, declarado", () => {
     expect(l).toMatch(/no significa eficacia, rendimiento ni peligro/);
   });
 
-  it("el payload sigue enviando el total y las categorías, sin campos nuevos", () => {
+  it("el payload sigue enviando el total y las categorías, sin campos sin explicar", () => {
     const md = partido();
     const payload = buildTacticalProPayload(md) as any;
     const celda = payload.tacticalContext.zones.team.zone12.zones.find((z: any) => z.zone === "Z2C");
+    // `throwIns` es el único campo nuevo de la celda, y viaja con su entrada
+    // de glosario: que una banda no es un tiro y no se suma a ellos.
     expect(Object.keys(celda).sort()).toEqual(
-      ["corners", "fouls", "goals", "label", "losses", "recoveries", "shots", "total", "zone"],
+      ["corners", "fouls", "goals", "label", "losses", "recoveries", "shots", "throwIns", "total", "zone"],
+    );
+    expect(payload.tacticalContext.glossary.join(" ")).toMatch(
+      /'throwIns'[\s\S]*NO es un tiro[\s\S]*No sumes 'throwIns' a los tiros/,
     );
     // El glosario es texto: no se ha colado ningún agregado nuevo.
     expect(payload.tacticalContext.zoneBreakdown).toBeUndefined();

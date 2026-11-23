@@ -5500,7 +5500,15 @@ export default function MatchTracker() {
                                     </button>
                                   </div>
                                   {abierta && (
-                                    <div className="px-2 pb-2 space-y-1" data-timeline-sequence-events>
+                                    // Sangrados y bajo un rótulo: son las piezas de
+                                    // ESTA jugada, no jugadas independientes.
+                                    <div
+                                      className="mx-2 mb-2 pl-2 border-l-2 border-violet-500/30 space-y-1 opacity-90"
+                                      data-timeline-sequence-events
+                                    >
+                                      <div className="text-[7px] font-black uppercase tracking-widest text-violet-300/70">
+                                        Eventos de la jugada
+                                      </div>
                                       {item.events.map((x) => filaEvento(x, true))}
                                     </div>
                                   )}

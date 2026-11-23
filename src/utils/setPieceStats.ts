@@ -33,6 +33,8 @@ import { isZone12Id } from "./fieldZones";
 import { isGoalEvent, scoresFor } from "./goalModel";
 import {
   SEQUENCE_OUTCOMES,
+  SEQUENCE_OUTCOME_LABEL,
+  SET_PIECE_MODALITY_LABEL,
   SequenceOutcome,
   SetPieceModality,
   SetPieceRootKind,
@@ -326,4 +328,122 @@ export function setPieceStatsViolations(events: GameEvent[]): string[] {
   }
   for (const [id, n] of remates) if (n > 1) fallos.push(`${id}: ${n} remates en una jugada`);
   return fallos;
+}
+
+// ── FILTRO DE BANDAS PARA LOS MAPAS ─────────────────────────────────────
+
+/** Qué bandas pintar: todas, o solo una modalidad o un desenlace. */
+export type ThrowInFilter = {
+  modality?: SetPieceModality;
+  outcome?: SequenceOutcome;
+};
+
+/**
+ * ¿Entra este evento en el mapa de bandas con este filtro?
+ *
+ * Solo la RAÍZ: el tiro o la pérdida de la jugada tienen su propio mapa. Un
+ * filtro por modalidad o por desenlace deja fuera las bandas sin jugada
+ * registrada, porque de esas no se sabe ni lo uno ni lo otro.
+ */
+export function isThrowInMatching(event: GameEvent, filter: ThrowInFilter = {}): boolean {
+  if (setPieceRootKindOf(event) !== "throw_in") return false;
+  if (filter.modality && modalityOf(event) !== filter.modality) return false;
+  if (filter.outcome && sequenceOutcomeOf(event) !== filter.outcome) return false;
+  return true;
+}
+
+// ── REDACCIÓN ───────────────────────────────────────────────────────────
+
+/** Cómo se llama a un jugador en un texto. Lo decide quien pinta. */
+export type PlayerNamer = (playerId: string) => string;
+
+const pct = (v: number | null) => (v === null ? null : `${v}%`);
+
+/**
+ * Lo común de una reanudación, en frases. Fuente ÚNICA de la redacción:
+ * pantalla, informe y PDF dicen lo mismo con las mismas palabras.
+ *
+ * No hay porcentaje si no hay ninguna registrada —«0 %» diría que se
+ * registraron y no produjeron nada— y un jugador sin identificar no se
+ * nombra: se cuenta como tal.
+ */
+export function describeSetPieceRootStats(
+  s: SetPieceRootStats,
+  nombre: PlayerNamer,
+): string[] {
+  if (s.total === 0) return [];
+  const lineas: string[] = [];
+  const modos = Object.entries(s.byModality)
+    .filter(([, v]) => (v ?? 0) > 0)
+    .map(([k, v]) => `${SET_PIECE_MODALITY_LABEL[k as SetPieceModality].toLowerCase()} ${v}`);
+  lineas.push(
+    `${s.total} en total` +
+      (s.unrecorded > 0 ? ` (${s.unrecorded} sin jugada registrada)` : "") +
+      (modos.length ? ` · ${modos.join(" · ")}` : ""),
+  );
+  if (s.recorded > 0) {
+    const desenlaces = SEQUENCE_OUTCOMES.filter((o) => s.outcomes[o] > 0).map(
+      (o) => `${SEQUENCE_OUTCOME_LABEL[o].toLowerCase()} ${s.outcomes[o]}`,
+    );
+    if (desenlaces.length) lineas.push(`Desenlace: ${desenlaces.join(" · ")}`);
+    const eficacia = [
+      `remates ${s.attempts}${pct(s.attemptRate) ? ` (${pct(s.attemptRate)})` : ""}`,
+      `goles ${s.goals}${pct(s.goalRate) ? ` (${pct(s.goalRate)})` : ""}`,
+      `pérdidas ${s.losses}${pct(s.lossRate) ? ` (${pct(s.lossRate)})` : ""}`,
+    ];
+    lineas.push(`Producción: ${eficacia.join(" · ")}`);
+  }
+  const quien = (lista: PlayerTally[], sinIdentificar: number) =>
+    [
+      ...lista.slice(0, 3).map((t) => `${nombre(t.playerId)} ${t.count}`),
+      ...(sinIdentificar > 0 ? [`no identificado ${sinIdentificar}`] : []),
+    ].join(" · ");
+  if (s.takers.length || s.unidentifiedTakers) {
+    lineas.push(`Sacadores: ${quien(s.takers, s.unidentifiedTakers)}`);
+  }
+  if (s.finishers.length || s.unidentifiedFinishers) {
+    lineas.push(`Finalizadores: ${quien(s.finishers, s.unidentifiedFinishers)}`);
+  }
+  return lineas;
+}
+
+/** Córner: lo común más el lado. */
+export function describeCornerStats(s: CornerStats, nombre: PlayerNamer): string[] {
+  const base = describeSetPieceRootStats(s, nombre);
+  if (!base.length) return base;
+  const lados = [
+    s.bySide.left ? `izquierda ${s.bySide.left}` : "",
+    s.bySide.right ? `derecha ${s.bySide.right}` : "",
+    s.bySide.unknown ? `sin lado ${s.bySide.unknown}` : "",
+  ].filter(Boolean);
+  return [base[0], ...(lados.length ? [`Lado: ${lados.join(" · ")}`] : []), ...base.slice(1)];
+}
+
+/** Falta a favor: lo común más las zonas. */
+export function describeFreeKickStats(s: FreeKickStats, nombre: PlayerNamer): string[] {
+  const base = describeSetPieceRootStats(s, nombre);
+  if (!base.length) return base;
+  const zonas = Object.entries(s.byZone)
+    .sort(([, a], [, b]) => b - a)
+    .map(([z, v]) => `${z === "unknown" ? "sin zona" : z} ${v}`);
+  return [base[0], ...(zonas.length ? [`Zona: ${zonas.join(" · ")}`] : []), ...base.slice(1)];
+}
+
+/** Banda: lo común más lado, sector y las que nacieron de un despeje. */
+export function describeThrowInStats(s: ThrowInStats, nombre: PlayerNamer): string[] {
+  const base = describeSetPieceRootStats(s, nombre);
+  if (!base.length) return base;
+  const lados = [
+    s.bySide.left ? `izquierda ${s.bySide.left}` : "",
+    s.bySide.right ? `derecha ${s.bySide.right}` : "",
+  ].filter(Boolean);
+  const sectores = THROW_IN_SECTORS.filter((z) => s.bySector[z] > 0).map(
+    (z) => `${z} ${s.bySector[z]}`,
+  );
+  const extra = [
+    ...(lados.length ? [`Banda: ${lados.join(" · ")}`] : []),
+    ...(sectores.length ? [`Sector: ${sectores.join(" · ")}`] : []),
+    ...(s.afterDeflect > 0 ? [`Tras despeje del portero: ${s.afterDeflect}`] : []),
+  ];
+  return [base[0], ...extra, ...base.slice(1)];
 }

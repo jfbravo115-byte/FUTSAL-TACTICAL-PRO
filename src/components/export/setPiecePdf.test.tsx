@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import { ActionType, GameEvent, GoalieAction, MatchData, Period, Player, Role } from "../../types/futsal";
 import { buildSequenceSeeds, newSetPieceSequenceId, SetPieceSequenceDraft } from "../../utils/setPieceSequence";
 import { generateMatchReport } from "../../services/matchReportService";
-import { EventsSection, SpecialContextsSection } from "../../services/pdfExportService";
+import { EventsSection, SequenceQuickLines, SpecialContextsSection } from "../../services/pdfExportService";
 import { buildDossierPages } from "../../services/fullDossierPdfService";
 import {
   GOAL_ROW_H,
@@ -206,5 +206,32 @@ describe("cronología y acciones relevantes en los PDF", () => {
       { ...faltaRival[1], metadata: { isOpponent: true } }]);
     expect(claves(conJugadas)).toEqual(claves(sinJugadas));
     expect(claves(conJugadas)).toContain("set-pieces");
+  });
+});
+
+describe("informe resumido · lectura rápida en la portada", () => {
+  it("una línea por equipo, sin sumarlos", () => {
+    const host = pinta(<SequenceQuickLines matchData={conJugadas} />);
+    const linea = (e: string) => host.querySelector(`[data-summary-sequences-side="${e}"]`)!.textContent!;
+    expect(linea("CD MURCIA")).toContain("córner 1 (remates 1 · goles 1 · pérdidas 0)");
+    expect(linea("CD MURCIA")).toContain("banda 1 (remates 1 · goles 0 · pérdidas 0)");
+    expect(linea("CD MURCIA")).not.toContain("falta a favor");
+    expect(linea("JIMBEE")).toContain("falta a favor 1 (remates 1 · goles 1 · pérdidas 0)");
+    expect(linea("JIMBEE")).toContain("banda 1 (remates 0 · goles 0 · pérdidas 1)");
+    expect(host.textContent).toContain("una banda no es un tiro");
+  });
+
+  it("un partido anterior no la imprime", () => {
+    const host = pinta(<SequenceQuickLines matchData={anterior} />);
+    expect(host.querySelector("[data-summary-sequences]")).toBeNull();
+  });
+
+  it("va en la portada del informe resumido y no en la del dossier, que tiene su página", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const resumen = readFileSync(resolve(__dirname, "../../services/pdfExportService.tsx"), "utf-8");
+    const dossier = readFileSync(resolve(__dirname, "../../services/fullDossierPdfService.tsx"), "utf-8");
+    expect(resumen).toContain("<ZonesSection zones={zones} matchData={matchData} withSequences />");
+    expect(dossier).not.toContain("withSequences");
   });
 });

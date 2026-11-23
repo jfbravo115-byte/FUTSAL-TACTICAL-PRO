@@ -72,6 +72,7 @@ import { LEGACY_DISCLAIMER } from "../utils/legacyZoneMap";
 import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperReportService";
 import { safeImageSrc } from "../utils/safeImageSrc";
 import { VisualSummaryBoard } from "../components/export/VisualSummaryBoard";
+import { SetPieceRootStats, SideSetPieceStats, summarizeSetPieceSequences } from "../utils/setPieceStats";
 
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
@@ -456,7 +457,62 @@ function FoulsAgainstLine({ matchData }: { matchData: MatchData }) {
   );
 }
 
-export function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; matchData: MatchData }) {
+/**
+ * Las jugadas a balón parado en DOS líneas, una por equipo.
+ *
+ * Es la lectura rápida del informe resumido, que no tiene página propia de
+ * balón parado: el desglose completo (sacadores, lados, porcentajes) está en
+ * el bloque compartido del dossier y del informe de MatchTracker. No se
+ * pinta si el partido no tiene ninguna jugada: el PDF de un partido anterior
+ * queda igual. Los números salen del motor único; aquí no se suma nada.
+ */
+export function SequenceQuickLines({ matchData }: { matchData: MatchData }) {
+  const stats = summarizeSetPieceSequences(matchData.events || []);
+  const tipos: [keyof SideSetPieceStats, string][] = [
+    ["corner", "córner"],
+    ["freeKick", "falta a favor"],
+    ["throwIn", "banda"],
+  ];
+  const linea = (lado: SideSetPieceStats) =>
+    tipos
+      .filter(([k]) => (lado[k] as SetPieceRootStats).recorded > 0)
+      .map(([k, label]) => {
+        const r = lado[k] as SetPieceRootStats;
+        return `${label} ${r.recorded} (remates ${r.attempts} · goles ${r.goals} · pérdidas ${r.losses})`;
+      })
+      .join("  ·  ");
+  const filas = [
+    { nombre: matchData.teamName, texto: linea(stats.team) },
+    { nombre: matchData.opponentName, texto: linea(stats.opponent) },
+  ].filter((f) => f.texto);
+  if (filas.length === 0) return null;
+  return (
+    <div data-summary-sequences style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.45 }}>
+      <div style={{ fontWeight: 700 }}>
+        Jugadas a balón parado{" "}
+        <span style={{ fontWeight: 400, color: "#6b7280" }}>
+          (lo originado ya está en los totales; una banda no es un tiro)
+        </span>
+      </div>
+      {filas.map((f) => (
+        <div key={f.nombre} data-summary-sequences-side={f.nombre}>
+          <span style={{ fontWeight: 700 }}>{f.nombre}:</span> {f.texto}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ZonesSection({
+  zones,
+  matchData,
+  withSequences = false,
+}: {
+  zones: ZoneDashboard;
+  matchData: MatchData;
+  /** Solo el informe resumido: el dossier tiene su página de balón parado. */
+  withSequences?: boolean;
+}) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
   const shotsFromFreeKick = countShotsFromSetPiece(matchData.events || [], "free_kick", false);
@@ -575,6 +631,8 @@ export function ZonesSection({ zones, matchData }: { zones: ZoneDashboard; match
           </div>
         </div>
       )}
+
+      {withSequences && <SequenceQuickLines matchData={matchData} />}
 
       {zones.ruleDetermined > 0 && (
         <div style={{ fontSize: 9, color: "#6b7280", marginTop: 2 }}>
@@ -979,7 +1037,7 @@ function buildMatchReportPages(
         <ReportHeader matchData={matchData} report={report} />
         <VisualSummaryBoard matchData={matchData} report={report} />
         <SummaryKpis report={report} />
-        <ZonesSection zones={zones} matchData={matchData} />
+        <ZonesSection zones={zones} matchData={matchData} withSequences />
       </>
     ),
   });

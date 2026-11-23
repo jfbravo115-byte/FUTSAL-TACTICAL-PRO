@@ -70,6 +70,7 @@ import {
   tacticalProUnits,
 } from "./pdfExportService";
 import {
+  FLOW_GAP,
   FlowItem,
   FlowItemView,
   FlowPlan,
@@ -106,7 +107,9 @@ const bodyStyle: React.CSSProperties = {
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  gap: 12,
+  // El MISMO hueco que usa la medición: con 12 aquí y 10 al medir, una
+  // página con veinte bloques de Tactical Pro se pasaba 40 px del A4.
+  gap: FLOW_GAP,
   overflow: "hidden",
 };
 
@@ -933,7 +936,19 @@ export function buildDossierInventory(
 
   // ── 2 · PRODUCCIÓN OFENSIVA Y MAPAS ───────────────────────────────────
   seccion({ id: "ofensiva", title: "Producción ofensiva y mapas", team: ambos, kind: "maps" });
-  titulo("ofensiva", "Producción ofensiva y mapas", true);
+  titulo("ofensiva", "Producción ofensiva y mapas");
+  bloque({
+    id: "destinos",
+    section: "ofensiva",
+    kind: "map",
+    team: ambos,
+    node: (
+      <div style={{ display: "grid", gridTemplateColumns: conRival ? "1fr 1fr" : "1fr", gap: 18 }}>
+        <GoalDestinationBoard dashboard={propio} teamName={nombrePropio} opponent={false} />
+        {conRival && <GoalDestinationBoard dashboard={rival} teamName={nombreRival} opponent={true} />}
+      </div>
+    ),
+  });
   bandos.forEach((opponent) => {
     const nombre = opponent ? nombreRival : nombrePropio;
     bloque({
@@ -948,18 +963,6 @@ export function buildDossierInventory(
         </div>
       ),
     });
-  });
-  bloque({
-    id: "destinos",
-    section: "ofensiva",
-    kind: "map",
-    team: ambos,
-    node: (
-      <div style={{ display: "grid", gridTemplateColumns: conRival ? "1fr 1fr" : "1fr", gap: 18 }}>
-        <GoalDestinationBoard dashboard={propio} teamName={nombrePropio} opponent={false} />
-        {conRival && <GoalDestinationBoard dashboard={rival} teamName={nombreRival} opponent={true} />}
-      </div>
-    ),
   });
   if (hasZoneData(propio)) {
     bloque({
@@ -990,22 +993,29 @@ export function buildDossierInventory(
   seccion({ id: "perdidas-fases", title: "Pérdidas, recuperaciones y fases", team: ambos, kind: "maps" });
   titulo("perdidas-fases", "Pérdidas, recuperaciones y fases");
   bloque({ id: "balance", section: "perdidas-fases", kind: "table", team: "team", node: <BalanceTable report={report} /> });
-  bandos.forEach((opponent) => {
-    if (!hasPeriodZoneData(matchData, opponent)) return;
-    const nombre = opponent ? nombreRival : nombrePropio;
+  // Evolución por periodos: con rival, los dos equipos EN COLUMNAS
+  // comparables dentro del mismo bloque; sin rival, nuestro equipo a ancho
+  // completo. Cada columna conserva su propia escala y su propia perspectiva.
+  const conPeriodos = bandos.filter((opponent) => hasPeriodZoneData(matchData, opponent));
+  if (conPeriodos.length > 0) {
+    const columnas = conPeriodos.length;
     bloque({
-      id: `periodos-${opponent ? "rival" : "team"}`,
+      id: "periodos",
       section: "perdidas-fases",
       kind: "map",
-      team: opponent ? "opponent" : "team",
+      team: columnas > 1 ? "both" : conPeriodos[0] ? "opponent" : "team",
       node: (
-        <div>
-          <div style={subtituloStyle}>Evolución por periodos · {nombre}</div>
-          <PeriodZoneMapsBoard matchData={matchData} opponent={opponent} pitchWidth={220} />
+        <div style={{ display: "grid", gridTemplateColumns: columnas > 1 ? "1fr 1fr" : "1fr", gap: 16 }}>
+          {conPeriodos.map((opponent) => (
+            <div key={String(opponent)} data-dossier-periods={opponent ? "rival" : "team"} style={{ minWidth: 0 }}>
+              <div style={subtituloStyle}>Evolución por periodos · {opponent ? nombreRival : nombrePropio}</div>
+              <PeriodZoneMapsBoard matchData={matchData} opponent={opponent} pitchWidth={columnas > 1 ? 165 : 220} />
+            </div>
+          ))}
         </div>
       ),
     });
-  });
+  }
   if (hasPhaseData(matchData)) {
     const periodos = phasePeriods(matchData);
     bloque({
@@ -1023,25 +1033,51 @@ export function buildDossierInventory(
         </div>
       ),
     });
+    // Una métrica = un bloque: el partido completo y cada parte, dos por
+    // línea (cuatro pistas por fila). Los rótulos van en cada celda.
     PHASE_METRICS.forEach((metric) => {
-      const fila = (period: Period | undefined, rotulo: string, primera: boolean) =>
-        bloque({
-          id: `fase-${metric.key}-${period ?? "total"}`,
-          section: "perdidas-fases",
-          kind: "map",
-          team: "team",
-          node: (
-            <div>
-              <div style={{ fontSize: 9, fontWeight: 700, color: metric.color, marginBottom: 2 }}>
-                {primera ? `${metric.title} · ` : ""}
-                {rotulo}
-              </div>
-              <PhaseMetricRow matchData={matchData} metric={metric} period={period} pitchWidth={175} showTitle={false} />
+      const celdas: { period: Period | undefined; rotulo: string }[] = [
+        { period: undefined, rotulo: "Partido completo" },
+        ...periodos.map((period) => ({ period, rotulo: periodLabel(period) })),
+      ];
+      bloque({
+        id: `fase-${metric.key}`,
+        section: "perdidas-fases",
+        kind: "map",
+        team: "team",
+        node: (
+          <div data-dossier-phase={metric.key}>
+            <div style={{ fontSize: 10, fontWeight: 900, color: metric.color, marginBottom: 2 }}>
+              {metric.title}
             </div>
-          ),
-        });
-      fila(undefined, "Partido completo", true);
-      periodos.forEach((period) => fila(period, `${metric.title} · ${periodLabel(period)}`, false));
+            <div
+              style={{
+                display: "grid",
+                // Partido completo y cada parte EN UNA SOLA FILA cuando son
+                // tres (lo normal); con prórrogas, dos por línea.
+                gridTemplateColumns: celdas.length === 3 ? "1fr 1fr 1fr" : "1fr 1fr",
+                gap: "4px 12px",
+              }}
+            >
+              {celdas.map((c) => (
+                <div key={c.rotulo} data-dossier-phase-cell={c.period ?? "total"}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: metric.color, marginBottom: 1 }}>
+                    {c.rotulo}
+                  </div>
+                  <PhaseMetricRow
+                    matchData={matchData}
+                    metric={metric}
+                    period={c.period}
+                    pitchWidth={celdas.length === 3 ? 112 : 165}
+                    showTitle={false}
+                    twoColumns
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ),
+      });
     });
   }
 
@@ -1131,10 +1167,7 @@ export function buildDossierInventory(
         team: gk.isOpponent ? "opponent" : "team",
         node: (
           <div data-dossier-goalkeeper={gk.id}>
-            <div style={subtituloStyle}>
-              {gk.name} · {gk.isOpponent ? nombreRival : nombrePropio}
-            </div>
-            <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={unico} />
+            <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={unico} compact />
           </div>
         ),
       });
@@ -1205,7 +1238,6 @@ export function buildDossierInventory(
       section: "tactical-pro",
       kind: "heading",
       keepWithNext: true,
-      breakBefore: true,
       node: (
         <div>
           <Titulo>Tactical Pro</Titulo>

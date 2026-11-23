@@ -84,6 +84,7 @@ export function PhaseMetricRow({
   pitchWidth = 300,
   theme = "light",
   showTitle = true,
+  twoColumns = false,
 }: {
   matchData: MatchData;
   metric: PhaseMetric;
@@ -91,13 +92,18 @@ export function PhaseMetricRow({
   pitchWidth?: number;
   theme?: "light" | "dark";
   showTitle?: boolean;
+  /**
+   * Fuerza las dos fases en pareja aunque el contenedor sea estrecho: el
+   * dossier pone dos periodos por línea y cuatro pistas por fila.
+   */
+  twoColumns?: boolean;
 }) {
   const split = phaseSplit(matchData, metric, period);
   const escala = phaseSharedMax(split);
   const otras = otherPhaseDetail(split);
 
   return (
-    <div data-phase-row={metric.key} style={{ marginBottom: 12 }}>
+    <div data-phase-row={metric.key} style={{ marginBottom: twoColumns ? 4 : 12 }}>
       {showTitle && (
         <div
           style={{
@@ -129,8 +135,8 @@ export function PhaseMetricRow({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 14,
+          gridTemplateColumns: twoColumns ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: twoColumns ? 8 : 14,
         }}
       >
         {[split.a, split.b].map((grupo) => (

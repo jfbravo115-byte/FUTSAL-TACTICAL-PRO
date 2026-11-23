@@ -465,9 +465,11 @@ describe("3 · 18-23 · todos los mapas", () => {
 
   it("21 · pérdidas, recuperaciones y tiros por periodo, también del rival", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    expect(seccionesDe(ns)).toContain("periodos-team");
-    expect(seccionesDe(ns)).toContain("periodos-rival");
-    const periodos = [bloque(ns, "periodos-team")!, bloque(ns, "periodos-rival")!];
+    // Los dos equipos en columnas comparables dentro del MISMO bloque.
+    const caja = bloque(ns, "periodos")!;
+    expect(caja).toBeTruthy();
+    const periodos = Array.from(caja.querySelectorAll<HTMLElement>("[data-dossier-periods]"));
+    expect(periodos.map((p) => p.getAttribute("data-dossier-periods"))).toEqual(["team", "rival"]);
     for (const p of periodos) {
       const t = p.textContent || "";
       expect(t).toContain("Pérdidas");
@@ -480,12 +482,18 @@ describe("3 · 18-23 · todos los mapas", () => {
     const ns = await dossier(DENSO, partidoDenso());
     // pérdidas, recuperaciones, tiros, tiros rivales: total y cada parte
     for (const metrica of ["losses", "recoveries", "shots", "rivalShots"]) {
-      const total = bloque(ns, `fase-${metrica}-total`);
-      expect(total, metrica).toBeTruthy();
-      expect(total!.textContent).toContain("Partido completo");
-      expect(total!.textContent).toContain("Cobertura de fase");
-      expect(bloque(ns, `fase-${metrica}-${Period.FIRST}`)!.textContent).toContain("1ª parte");
-      expect(bloque(ns, `fase-${metrica}-${Period.SECOND}`)!.textContent).toContain("2ª parte");
+      const caja = bloque(ns, `fase-${metrica}`);
+      expect(caja, metrica).toBeTruthy();
+      // Un bloque por métrica con el partido completo y cada parte: nunca
+      // se parte (es un mapa) y sus tres celdas van juntas.
+      expect(caja!.getAttribute("data-flow-kind")).toBe("map");
+      const celdas = Array.from(caja!.querySelectorAll("[data-dossier-phase-cell]")).map((c) => c.getAttribute("data-dossier-phase-cell"));
+      expect(celdas).toEqual(["total", String(Period.FIRST), String(Period.SECOND)]);
+      const t = caja!.textContent ?? "";
+      expect(t).toContain("Partido completo");
+      expect(t).toContain("1ª parte");
+      expect(t).toContain("2ª parte");
+      expect(t).toContain("Cobertura de fase");
     }
     expect(bloque(ns, "fases-nota")!.textContent).toContain("La fase es SIEMPRE la de CD MURCIA");
   }, TIEMPO);

@@ -60,6 +60,12 @@ export type FlowItem = {
   keepWithNext?: boolean;
   /** Empieza página nueva (salvo que la actual esté vacía). */
   breakBefore?: boolean;
+  /**
+   * Alto aproximado para cuando NO hay motor de maquetación (jsdom). El
+   * navegador siempre mide; esto solo evita que, en pruebas, una fila de
+   * pistas puestas en horizontal se estime como si fueran apiladas.
+   */
+  estimate?: number;
 };
 
 /** Lo que el reparto necesita saber de cada bloque: cuánto mide. */
@@ -80,6 +86,12 @@ export type FlowPlan = {
   pages: Placement[][];
   /** Bloques que por sí solos miden más que una página. */
   oversize: string[];
+  /**
+   * Títulos que no caben con lo que introducen ni en una página vacía (el
+   * bloque siguiente ocupa casi una hoja). Es imposible no separarlos; se
+   * declara en vez de fallar.
+   */
+  unavoidable?: string[];
 };
 
 // ── REPARTO (función pura) ──────────────────────────────────────────────
@@ -104,6 +116,7 @@ export function paginateFlow(
 ): FlowPlan {
   const pages: Placement[][] = [];
   const oversize: string[] = [];
+  const unavoidable: string[] = [];
   let actual: Placement[] | null = null;
   let usado = 0;
 
@@ -115,13 +128,29 @@ export function paginateFlow(
   const coste = (h: number) => ((actual as Placement[] | null)?.length ? gap : 0) + h;
   const cabe = (h: number) => usado + coste(h) <= available;
 
-  /** Lo mínimo que tiene que acompañar a un título para no dejarlo colgado. */
+  /** Lo mínimo de un bloque que tiene que acompañar a su título. */
   const arranque = (siguiente: MeasuredItem | undefined): number => {
     if (!siguiente) return 0;
     if (siguiente.rowHeights && siguiente.rowHeights.length) {
-      return gap + (siguiente.rowsHead ?? 0) + siguiente.rowHeights[0];
+      return (siguiente.rowsHead ?? 0) + siguiente.rowHeights[0];
     }
-    return gap + siguiente.height;
+    return siguiente.height;
+  };
+
+  /**
+   * Lo que tiene que caber JUNTO a partir del título `i`: la cadena de
+   * títulos seguidos (p. ej. «Tactical Pro» y «1. Lectura del partido») y el
+   * arranque del primer bloque que introducen.
+   */
+  const grupoDesde = (i: number): number => {
+    let total = 0;
+    let j = i;
+    while (j < items.length && items[j].keepWithNext) {
+      total += (j > i ? gap : 0) + items[j].height;
+      j++;
+    }
+    if (j < items.length) total += gap + arranque(items[j]);
+    return total;
   };
 
   items.forEach((item, i) => {
@@ -159,20 +188,18 @@ export function paginateFlow(
     }
 
     // ── Bloque entero ──
-    let necesita = item.height;
-    if (item.keepWithNext) {
-      const extra = arranque(items[i + 1]);
-      // Si ni en una página vacía cabe el título con lo que introduce, al
-      // menos se exige sitio para el título y un margen visible.
-      necesita = item.height + extra <= available ? item.height + extra : item.height + gap + 40;
-    }
+    // Un título se coloca solo si en lo que queda de página cabe con todo lo
+    // que introduce. Si no, baja: lo que introduce también bajaría, y el
+    // título se quedaría solo al pie.
+    const necesita = item.keepWithNext ? grupoDesde(i) : item.height;
+    if (item.keepWithNext && necesita > available) unavoidable.push(item.id);
     if (actual!.length && !cabe(necesita)) nueva();
     if (item.height > available) oversize.push(item.id);
     usado += coste(item.height);
     actual!.push({ id: item.id });
   });
 
-  return { pages: pages.filter((p) => p.length > 0), oversize };
+  return { pages: pages.filter((p) => p.length > 0), oversize, unavoidable };
 }
 
 /**
@@ -212,7 +239,7 @@ export function auditPlan(plan: FlowPlan, items: FlowItem[]): string[] {
     if (pagina.length === 0) fallos.push(`página ${i + 1} vacía`);
     const ultimo = pagina[pagina.length - 1];
     const it = ultimo && porId.get(ultimo.id);
-    if (it?.keepWithNext && i < plan.pages.length - 1) {
+    if (it?.keepWithNext && i < plan.pages.length - 1 && !(plan.unavoidable ?? []).includes(it.id)) {
       fallos.push(`título «${it.id}» solo al final de la página ${i + 1}`);
     }
   });
@@ -332,7 +359,7 @@ export function measureRenderedItems(container: HTMLElement, items: FlowItem[]):
     const el = porId.get(it.id);
     const base: MeasuredItem = {
       id: it.id,
-      height: el ? Math.ceil(altoDe(el, real)) : 0,
+      height: el ? Math.ceil(!real && it.estimate !== undefined ? it.estimate : altoDe(el, real)) : 0,
       keepWithNext: it.keepWithNext,
       breakBefore: it.breakBefore,
     };
@@ -357,7 +384,11 @@ export function measureRenderedItems(container: HTMLElement, items: FlowItem[]):
 /** Separación vertical entre bloques, igual al medir que al pintar. */
 export const FLOW_GAP = 10;
 
-const itemWrapStyle: React.CSSProperties = { display: "flow-root", minWidth: 0 };
+/**
+ * `flowShrink: 0`: dentro del cuerpo (una columna flex de alto fijo) un
+ * bloque NUNCA se encoge para caber; si no cabe, se ve en la auditoría.
+ */
+const itemWrapStyle: React.CSSProperties = { display: "flow-root", minWidth: 0, flexShrink: 0 };
 
 /** Un bloque tal cual se va a imprimir. */
 export function FlowItemView({ item, placement }: { item: FlowItem; placement?: Placement }) {
@@ -378,16 +409,23 @@ export function FlowItemView({ item, placement }: { item: FlowItem; placement?: 
   );
 }
 
-/** El árbol de medición: todos los bloques, uno debajo de otro, al ancho útil. */
-function MeasureTree({ items, width }: { items: FlowItem[]; width: number }) {
+/**
+ * Los bloques para medir, tal cual irían en el cuerpo de una página.
+ *
+ * Se pintan DENTRO del marco real (`renderProbe`): misma anchura, misma
+ * tipografía heredada y mismo hueco. Medidos fuera del marco heredaban la
+ * fuente de la aplicación y no la del PDF, y un bloque se pintaba hasta
+ * 32 px más alto de lo medido.
+ */
+function MeasureItems({ items }: { items: FlowItem[] }) {
   return (
-    <div style={{ width, display: "flex", flexDirection: "column", gap: FLOW_GAP }}>
+    <>
       {items.map((it) => (
         <div key={it.id} data-flow-measure={it.id} style={itemWrapStyle}>
           {it.rows ? it.rows.render(0, it.rows.count) : it.node}
         </div>
       ))}
-    </div>
+    </>
   );
 }
 
@@ -415,8 +453,6 @@ export type FlowProgress = {
 
 export type FlowDocumentArgs = {
   items: FlowItem[];
-  /** Ancho útil del cuerpo de página. */
-  bodyWidth: number;
   /** Alto útil si no se puede medir (jsdom). En el navegador se mide. */
   fallbackBodyHeight: number;
   /**
@@ -424,8 +460,11 @@ export type FlowDocumentArgs = {
    * páginas. Cada página lleva `data-flow-page` y su cuerpo `data-flow-body`.
    */
   renderDocument: (plan: FlowPlan) => React.ReactElement;
-  /** Una página vacía con su marco, para medir el alto útil real. */
-  renderProbe: () => React.ReactElement;
+  /**
+   * Una página con su marco y `children` en el cuerpo: vacía, mide el alto
+   * útil; con los bloques dentro, mide cada bloque en su contexto real.
+   */
+  renderProbe: (children: React.ReactNode) => React.ReactElement;
   /** Se llama con las páginas pintadas y ya auditadas, antes de capturar. */
   onReady: (pages: HTMLElement[], plan: FlowPlan) => Promise<void>;
 };
@@ -454,14 +493,14 @@ export async function runFlowDocument(args: FlowDocumentArgs): Promise<void> {
   const root = createRoot(container);
   try {
     // 1 · Alto útil real de una página.
-    pintar(root, args.renderProbe());
+    pintar(root, args.renderProbe(null));
     await asentar();
     const cuerpo = container.querySelector<HTMLElement>("[data-flow-body]");
     const medido = cuerpo?.getBoundingClientRect().height ?? 0;
     let disponible = (medido > 0 ? Math.floor(medido) : args.fallbackBodyHeight) - MARGEN;
 
     // 2 · Medir cada bloque.
-    pintar(root, <MeasureTree items={args.items} width={args.bodyWidth} />);
+    pintar(root, args.renderProbe(<MeasureItems items={args.items} />));
     await asentar();
     const medidos = measureRenderedItems(container, args.items);
 

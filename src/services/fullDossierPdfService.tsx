@@ -871,7 +871,7 @@ export function BalanceTable({ report }: { report: MatchReport }) {
             </tr>
           ))}
           <tr>
-            <td style={{ ...td, textAlign: "left", fontWeight: 900 }}>Partido</td>
+            <td style={{ ...td, textAlign: "left", fontWeight: 900 }}>Total del informe</td>
             <td style={{ ...td, fontWeight: 900 }}>{t.shots}</td>
             <td style={{ ...td, fontWeight: 900 }}>{t.goals}</td>
             <td style={{ ...td, fontWeight: 900 }}>{t.recoveries}</td>
@@ -881,8 +881,10 @@ export function BalanceTable({ report }: { report: MatchReport }) {
         </tbody>
       </table>
       <div style={{ ...noteStyle, marginTop: 3 }}>
-        Producción propia por parte. «Partido» es el total del informe; los mapas de pérdidas
-        y recuperaciones están en «Producción ofensiva y mapas».
+        Las partes cuentan las acciones registradas en cada una; «Total del informe» es la cifra
+        del resumen (estadísticas por jugador). Si no coinciden, hay acciones sin jugador
+        identificado: no se reparte ni se estima nada. Los mapas de pérdidas y recuperaciones
+        están en «Producción ofensiva y mapas».
       </div>
     </div>
   );
@@ -941,6 +943,7 @@ export function buildDossierInventory(
     id: "destinos",
     section: "ofensiva",
     kind: "map",
+    estimate: 280,
     team: ambos,
     node: (
       <div style={{ display: "grid", gridTemplateColumns: conRival ? "1fr 1fr" : "1fr", gap: 18 }}>
@@ -955,6 +958,7 @@ export function buildDossierInventory(
       id: `mapas-${opponent ? "rival" : "team"}`,
       section: "ofensiva",
       kind: "map",
+      estimate: 440,
       team: opponent ? "opponent" : "team",
       node: (
         <div>
@@ -979,6 +983,7 @@ export function buildDossierInventory(
       id: `tiros-parte-${opponent ? "rival" : "team"}`,
       section: "ofensiva",
       kind: "map",
+      estimate: 260,
       team: opponent ? "opponent" : "team",
       node: (
         <div>
@@ -1003,6 +1008,7 @@ export function buildDossierInventory(
       id: "periodos",
       section: "perdidas-fases",
       kind: "map",
+      estimate: 520,
       team: columnas > 1 ? "both" : conPeriodos[0] ? "opponent" : "team",
       node: (
         <div style={{ display: "grid", gridTemplateColumns: columnas > 1 ? "1fr 1fr" : "1fr", gap: 16 }}>
@@ -1044,6 +1050,7 @@ export function buildDossierInventory(
         id: `fase-${metric.key}`,
         section: "perdidas-fases",
         kind: "map",
+        estimate: 60 + Math.ceil((periodos.length + 1) / 3) * 190,
         team: "team",
         node: (
           <div data-dossier-phase={metric.key}>
@@ -1164,6 +1171,7 @@ export function buildDossierInventory(
         id: `portero-${gk.id}`,
         section: "porteros",
         kind: "card",
+        estimate: 440,
         team: gk.isOpponent ? "opponent" : "team",
         node: (
           <div data-dossier-goalkeeper={gk.id}>
@@ -1263,8 +1271,6 @@ export function buildDossierInventory(
 
 // ── MONTAJE ─────────────────────────────────────────────────────────────
 
-/** Ancho útil del cuerpo: A4 menos el relleno lateral. */
-export const DOSSIER_BODY_WIDTH = PAGE_WIDTH - 56;
 /** Alto útil de reserva cuando no se puede medir (jsdom). */
 export const DOSSIER_FALLBACK_BODY_HEIGHT = PAGE_HEIGHT - 56 - 30;
 
@@ -1363,11 +1369,19 @@ export function DossierDocument({
   );
 }
 
-/** Una página vacía con su marco: sirve para medir el alto útil real. */
-function DossierProbe({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
+/** Una página con su marco: mide el alto útil real y, con bloques, cada bloque. */
+function DossierProbe({
+  matchData,
+  report,
+  children,
+}: {
+  matchData: MatchData;
+  report: MatchReport;
+  children: React.ReactNode;
+}) {
   return (
     <DossierPageFrame matchData={matchData} report={report} section="—" pageNumber={1} totalPages={1}>
-      {null}
+      {children}
     </DossierPageFrame>
   );
 }
@@ -1560,9 +1574,8 @@ export async function exportFullMatchDossierPdf(
 
   await runFlowDocument({
     items: inventory.items,
-    bodyWidth: DOSSIER_BODY_WIDTH,
     fallbackBodyHeight: DOSSIER_FALLBACK_BODY_HEIGHT,
-    renderProbe: () => <DossierProbe matchData={matchData} report={report} />,
+    renderProbe: (children) => <DossierProbe matchData={matchData} report={report}>{children}</DossierProbe>,
     renderDocument: (plan) => (
       <DossierDocument
         matchData={matchData}

@@ -1575,11 +1575,10 @@ export async function exportMatchReportPdf(
 
   await runFlowDocument({
     items,
-    bodyWidth: PAGE_WIDTH - 64,
     fallbackBodyHeight: SUMMARY_PAGE_HEIGHT - 64 - 90 - 30,
-    renderProbe: () => (
+    renderProbe: (children) => (
       <SummaryPageFrame matchData={matchData} report={report} pageNumber={1} totalPages={1}>
-        {null}
+        {children}
       </SummaryPageFrame>
     ),
     renderDocument: (plan: FlowPlan) => (

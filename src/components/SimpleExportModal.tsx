@@ -102,9 +102,29 @@ export function SimpleExportModal({ isOpen, onClose, matchData }: Props) {
             <h2 id="export-modal-title" className="text-white font-black uppercase italic flex items-center gap-2"><Download size={18} className="text-blue-400" /> Exportar</h2>
             <p className="text-[10px] text-slate-500 uppercase mt-1">Dossier, informe, jugadores, acciones o respaldo</p>
           </div>
-          <button onClick={onClose} disabled={busy} aria-label="Cerrar" className="p-3 rounded-full hover:bg-white/10 disabled:opacity-40"><X size={18} /></button>
+          <button onClick={onClose} disabled={busy} aria-label="Cerrar" className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full hover:bg-white/10 disabled:opacity-40"><X size={18} /></button>
         </div>
         <div className="p-5 grid gap-3">
+          {/* Estado ARRIBA: en un móvil la lista de botones no cabe entera y
+              el progreso o el error quedarían bajo el pliegue. */}
+          {busy && progress && (
+            <div data-export-progress role="status" aria-live="polite" className="text-center text-xs font-black uppercase text-violet-200 bg-violet-500/10 border border-violet-500/25 rounded-xl p-3">
+              {progressLabel(progress.documento, progress.p)}
+            </div>
+          )}
+          {error && (
+            <div data-export-error role="alert" className="text-xs font-bold text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl p-3 grid gap-2">
+              <span>No se pudo exportar: {error}</span>
+              <button
+                data-export-retry
+                onClick={() => ultima.current && run(ultima.current)}
+                className="min-h-[44px] rounded-xl bg-red-500/20 border border-red-500/40 text-white font-black uppercase text-xs flex items-center justify-center gap-2"
+              >
+                <RotateCcw size={14} /> Reintentar
+              </button>
+            </div>
+          )}
+          {message && <div className="text-center text-xs font-black text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-3">{message}</div>}
           {/* INCLUIR EQUIPO RIVAL. Afecta solo a los dos PDF de análisis. */}
           <button
             type="button"
@@ -160,24 +180,6 @@ export function SimpleExportModal({ isOpen, onClose, matchData }: Props) {
             <FileJson className="text-amber-400 shrink-0" />
             <div><div className="font-black text-white uppercase text-sm">JSON de respaldo</div><div className="text-[10px] text-slate-500">MatchData completo y recuperable</div></div>
           </button>
-          {busy && progress && (
-            <div data-export-progress role="status" aria-live="polite" className="text-center text-xs font-black uppercase text-violet-200 bg-violet-500/10 border border-violet-500/25 rounded-xl p-3">
-              {progressLabel(progress.documento, progress.p)}
-            </div>
-          )}
-          {error && (
-            <div data-export-error role="alert" className="text-xs font-bold text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl p-3 grid gap-2">
-              <span>No se pudo exportar: {error}</span>
-              <button
-                data-export-retry
-                onClick={() => ultima.current && run(ultima.current)}
-                className="min-h-[44px] rounded-xl bg-red-500/20 border border-red-500/40 text-white font-black uppercase text-xs flex items-center justify-center gap-2"
-              >
-                <RotateCcw size={14} /> Reintentar
-              </button>
-            </div>
-          )}
-          {message && <div className="text-center text-xs font-black text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-3">{message}</div>}
         </div>
       </div>
     </div>

@@ -480,3 +480,20 @@ describe("informe resumido con y sin rival", () => {
     expect(pasos[pasos.length - 1]).toMatch(/^save:/);
   }, TIEMPO);
 });
+
+describe("la comprobación final busca el dato, no su formato", () => {
+  it("un Tactical Pro con enlaces, negritas y tablas no rompe la exportación", async () => {
+    const raro = partido({
+      tactical: "1. **Lectura** del [partido](https://ejemplo.invalid)\n\n| Zona | Tiros |\n|---|---|\n| Z4 | 7 |\n\n> Cita con _énfasis_ y `código`.",
+    });
+    pdfSaveMock.mockClear();
+    await expect(exportFullMatchDossierPdf(raro)).resolves.toBeUndefined();
+    expect(pdfSaveMock).toHaveBeenCalledTimes(1);
+  }, TIEMPO);
+
+  it("pero sigue fallando si el dato de verdad no está", () => {
+    const vacio = document.createElement("div");
+    vacio.textContent = "nada que ver";
+    expect(failedChecks(verifyDossierAgainstReport([vacio], A)).length).toBeGreaterThan(0);
+  });
+});

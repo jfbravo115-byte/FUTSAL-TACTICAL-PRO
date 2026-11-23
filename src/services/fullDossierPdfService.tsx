@@ -1455,11 +1455,27 @@ export type DossierCheck = { etiqueta: string; esperado: string; ok: boolean };
  * Devuelve una lista, no un booleano: lo útil es saber QUÉ no cuadra. No
  * corrige nada ni rellena nada; solo mira.
  */
+/**
+ * Forma comparable de un texto: solo letras y dígitos, en minúscula. La
+ * comprobación busca el DATO, no su formato: un enlace, una negrita, una
+ * tabla o un guion de markdown no pueden hacer fallar una exportación cuyo
+ * contenido sí está.
+ */
+export function comparableText(texto: string): string {
+  return texto.normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+}
+
 /** El texto visible de una unidad de Tactical Pro, sin marcas de markdown. */
 export function tacticalUnitProbe(unit: string): string {
   const primera = unit
     .split("\n")
-    .map((l) => l.replace(/^\s*(?:[-*+]|\d+\.)\s+/, "").replace(/[*_`#>]/g, "").trim())
+    .map((l) =>
+      l
+        .replace(/^\s*(?:[-*+]|\d+\.)\s+/, "")
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/[*_`#>|]/g, "")
+        .trim(),
+    )
     .find((l) => l.length > 0) ?? "";
   return primera.replace(/\s+/g, " ").slice(0, 40).trim();
 }
@@ -1471,14 +1487,14 @@ export function verifyDossierAgainstReport(
   options: DossierOptions = {},
 ): DossierCheck[] {
   const conRival = options.includeOpponent !== false;
-  const texto = pages.map((p) => p?.textContent ?? "").join("\n").replace(/\s+/g, " ");
+  const texto = comparableText(pages.map((p) => p?.textContent ?? "").join("\n"));
   const propio = buildZoneDashboard(matchData, false);
   const rival = buildZoneDashboard(matchData, true);
   const porteros = buildGoalkeeperReports(matchData);
   const comprobar = (etiqueta: string, esperado: string | number): DossierCheck => ({
     etiqueta,
     esperado: String(esperado),
-    ok: texto.includes(String(esperado)),
+    ok: texto.includes(comparableText(String(esperado))),
   });
 
   const checks: DossierCheck[] = [

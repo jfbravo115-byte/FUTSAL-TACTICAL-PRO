@@ -27,6 +27,8 @@ import { summarizeCorners } from "./cornerModel";
 import { summarizeTeamShots } from "./shotModel";
 import { goalsFor, scoreOf } from "./goalModel";
 import { generateMatchReport } from "../services/matchReportService";
+import { SET_PIECE_ORIGINS, setPieceOriginOf } from "./setPieceModel";
+import { buildGoalSequence } from "./goalSequence";
 
 let n = 0;
 const PORTERO = { team: "lgk", opponent: "rgk" };
@@ -432,5 +434,22 @@ describe("la redacción no inventa", () => {
       originGrid: "Z4C", shot: { finisherId: "l7" } });
     expect(describeFreeKickStats(summarizeSetPieceSequences(ev).team.freeKick, nombre).join(" | "))
       .toContain("Zona: Z4C 1");
+  });
+});
+
+// ── LA PROCEDENCIA DEL REMATE TRAS BANDA ───────────────────────────────
+
+describe("un remate tras banda dice que viene de banda", () => {
+  it("su procedencia se reconoce, no queda como «no registrada»", () => {
+    const ev = jugada({ root: "throw_in", isOpponent: false, modality: "prepared", outcome: "goal",
+      throwInSide: "left", throwInSector: "Z4", takerId: "l7", shot: { finisherId: "l10" } });
+    const gol = ev.find((e) => e.type === ActionType.GOAL)!;
+    expect(setPieceOriginOf(gol)).toBe("throw_in");
+    const secuencia = buildGoalSequence(partido(ev));
+    expect(secuencia[0].sourceLabel).toBe("Banda");
+  });
+
+  it("y el selector del tiro normal NO ofrece banda: eso se registra en su ventana", () => {
+    expect(SET_PIECE_ORIGINS).not.toContain("throw_in");
   });
 });

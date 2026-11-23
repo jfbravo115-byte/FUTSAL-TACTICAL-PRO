@@ -71,7 +71,7 @@ export function describeRegisteredAction(
   const secuencia = sequenceIdOf(event);
   if (secuencia && matchData.events) {
     const card = describeSequence(matchData.events, secuencia);
-    if (card) return describeSequenceCard(card, matchData.players, nombres);
+    if (card) return describeSequenceCard(card, captureNamer(matchData.players), nombres);
   }
   const equipoAutor = sideName(actorSide(event), nombres);
   const quien = describeActor(event, matchData.players);
@@ -124,21 +124,17 @@ export function deservesConfirmation(event: GameEvent): boolean {
  *
  * Sacador y finalizador se nombran por separado aunque sean el mismo
  * jugador: decir «saca y remata #7» es un dato, no una redundancia.
+ *
+ * Quién NOMBRA lo decide quien llama: la captura usa la jerarquía nombre /
+ * dorsal de `playerDisplayIdentity`, y el informe y las exportaciones su
+ * contrato de siempre, «#dorsal nombre». La frase es la misma.
  */
 export function describeSequenceCard(
   card: SequenceCard,
-  players: Player[],
+  nombrar: (playerId: string) => string,
   nombres: ActionSummaryNames,
 ): string {
-  const etiqueta = (id: string | null) => {
-    if (!id) return "no identificado";
-    const p = players.find((x) => x.id === id);
-    if (!p) return "no identificado";
-    const ident = playerDisplayIdentity(p, { players, maxCaracteres: 22 });
-    return ident.kind === "nombre"
-      ? `#${ident.dorsal} ${ident.nombreCompleto}`
-      : `#${ident.dorsal} ${ident.etiquetaProvisional}`;
-  };
+  const etiqueta = (id: string | null) => (id ? nombrar(id) : "no identificado");
   const partes = [
     `${card.rootLabel} (${card.isOpponent ? nombres.opponentName : nombres.teamName})`,
   ];
@@ -152,4 +148,16 @@ export function describeSequenceCard(
   }
   if (card.outcomeLabel) partes.push(card.outcomeLabel);
   return partes.join(" · ");
+}
+
+/** El nombre de la captura: la jerarquía nombre / dorsal. */
+export function captureNamer(players: Player[]): (playerId: string) => string {
+  return (id) => {
+    const p = players.find((x) => x.id === id);
+    if (!p) return "no identificado";
+    const ident = playerDisplayIdentity(p, { players, maxCaracteres: 22 });
+    return ident.kind === "nombre"
+      ? `#${ident.dorsal} ${ident.nombreCompleto}`
+      : `#${ident.dorsal} ${ident.etiquetaProvisional}`;
+  };
 }

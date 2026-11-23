@@ -120,9 +120,17 @@ export type SetPieceOrigin =
   | "free_kick"
   | "corner"
   | "penalty"
-  | "double_penalty";
+  | "double_penalty"
+  | "throw_in";
 
-/** Orden de presentación en la captura. `normal` es el valor por defecto. */
+/**
+ * Orden de presentación en el selector del TIRO NORMAL. `normal` es el valor
+ * por defecto.
+ *
+ * `throw_in` no está aquí a propósito: un remate tras banda se registra en
+ * la ventana de la jugada, enlazado a su banda. Ofrecerlo suelto produciría
+ * tiros «de banda» sin banda, que es justo lo que la jugada vino a evitar.
+ */
 export const SET_PIECE_ORIGINS: readonly SetPieceOrigin[] = [
   "normal",
   "free_kick",
@@ -131,12 +139,23 @@ export const SET_PIECE_ORIGINS: readonly SetPieceOrigin[] = [
   "double_penalty",
 ];
 
+/**
+ * Todas las procedencias que un evento guardado puede declarar: las del
+ * selector y `throw_in`, que escribe la jugada de banda en su remate. Sin
+ * esto, un gol tras banda se leía como procedencia «no registrada».
+ */
+export const RECOGNIZED_SET_PIECE_ORIGINS: readonly SetPieceOrigin[] = [
+  ...SET_PIECE_ORIGINS,
+  "throw_in",
+];
+
 export const SET_PIECE_ORIGIN_LABEL: Record<SetPieceOrigin, string> = {
   normal: "Jugada",
   free_kick: "Falta",
   corner: "Córner",
   penalty: "Penalti",
   double_penalty: "Doble penalti",
+  throw_in: "Banda",
 };
 
 /** Etiqueta corta para chips e Historial, donde el ancho manda. */
@@ -146,10 +165,11 @@ export const SET_PIECE_ORIGIN_SHORT_LABEL: Record<SetPieceOrigin, string> = {
   corner: "Córner",
   penalty: "Penalti",
   double_penalty: "Doble P.",
+  throw_in: "Banda",
 };
 
 export function isSetPieceOrigin(raw: unknown): raw is SetPieceOrigin {
-  return typeof raw === "string" && (SET_PIECE_ORIGINS as readonly string[]).includes(raw);
+  return typeof raw === "string" && (RECOGNIZED_SET_PIECE_ORIGINS as readonly string[]).includes(raw);
 }
 
 /**

@@ -237,6 +237,7 @@ const SET_PIECE_ORIGIN_ICON: Record<SetPieceOrigin, string> = {
   corner: "🚩",
   penalty: "🥅",
   double_penalty: "🔴",
+  throw_in: "↔️",
 };
 
 

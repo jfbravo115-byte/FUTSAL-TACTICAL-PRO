@@ -39,6 +39,7 @@ export type GoalSource =
   | "double_penalty"
   | "free_kick"
   | "corner"
+  | "throw_in"
   | "unknown";
 
 export const GOAL_SOURCE_LABEL: Record<GoalSource, string> = {

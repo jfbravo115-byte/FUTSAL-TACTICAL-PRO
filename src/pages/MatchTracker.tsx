@@ -201,7 +201,12 @@ import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterve
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
-import { paginateContextReport, teamReportPageCount } from "../utils/reportPagination";
+import {
+  GOAL_ROW_H,
+  GOAL_ROW_WITH_NOTE_H,
+  paginateContextReport,
+  teamReportPageCount,
+} from "../utils/reportPagination";
 import { MatchContextBoard } from "../components/export/MatchContextBoard";
 import { TacticalProBoard } from "../components/export/TacticalProBoard";
 import { capturePagesToPdf, splitTacticalProIntoPages } from "../services/pdfExportService";
@@ -1315,7 +1320,14 @@ export default function MatchTracker() {
   const pdfReport = useMemo(() => generateMatchReport(matchData), [matchData]);
   /** Reparto en páginas sin cortar ninguna tarjeta. Vacío = ninguna página. */
   const contextPages = useMemo(
-    () => paginateContextReport(pdfReport.matchContexts, pdfReport.goalSequence),
+    () =>
+      paginateContextReport(
+        pdfReport.matchContexts,
+        pdfReport.goalSequence,
+        undefined,
+        // Un gol nacido de una jugada lleva una segunda línea que lo dice.
+        (g) => (pdfReport.setPieces.sequenceNotes[g.eventId] ? GOAL_ROW_WITH_NOTE_H : GOAL_ROW_H),
+      ),
     [pdfReport],
   );
   /**
@@ -4471,6 +4483,7 @@ export default function MatchTracker() {
                     opponentName={matchData.opponentName}
                     opensContexts={pagina.opensContexts}
                     opensGoals={pagina.opensGoals}
+                    goalNotes={pdfReport.setPieces.sequenceNotes}
                   />
                 </div>
                 <Footer page={contextPage(i)} total={totalPages} />

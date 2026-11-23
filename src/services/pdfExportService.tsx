@@ -721,6 +721,12 @@ export function SpecialContextsSection({ report }: { report: MatchReport }) {
                   {g.secondsSinceOpponentPreviousGoal !== null
                     ? ` · ${g.scoringTeam === "opponent" ? "respuesta rival" : "respuesta propia"} ${g.secondsSinceOpponentPreviousGoal} s`
                     : ""}
+                  {/* El gol es UNO: la nota dice de qué jugada nació. */}
+                  {report.setPieces.sequenceNotes[g.eventId] && (
+                    <span data-goal-set-piece-note style={{ display: "block", fontSize: 10, color: "#6b7280" }}>
+                      Jugada: {report.setPieces.sequenceNotes[g.eventId]}
+                    </span>
+                  )}
                 </span>
               </div>
             ))}
@@ -740,7 +746,14 @@ export function EventsSection({ report }: { report: MatchReport }) {
         {report.relevantEvents.map((e, i) => (
           <div key={i} style={{ fontSize: 11, display: "flex", gap: 8 }}>
             <span style={{ color: "#6b7280", minWidth: 40 }}>{e.timeLabel}</span>
-            <span>{e.isOpponent ? report.opponentName : report.teamName} — {e.type}{e.playerName ? ` · ${e.playerName}` : ""}</span>
+            <span>
+              {e.isOpponent ? report.opponentName : report.teamName} — {e.type}{e.playerName ? ` · ${e.playerName}` : ""}
+              {e.setPieceNote && (
+                <span data-event-set-piece-note style={{ display: "block", fontSize: 10, color: "#6b7280" }}>
+                  Jugada: {e.setPieceNote}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>

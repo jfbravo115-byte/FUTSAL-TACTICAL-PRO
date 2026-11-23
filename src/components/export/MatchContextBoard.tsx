@@ -173,10 +173,13 @@ export function GoalSequenceRow({
   goal,
   teamName,
   opponentName,
+  setPieceNote,
 }: {
   goal: GoalSequenceEntry;
   teamName: string;
   opponentName: string;
+  /** La jugada a balón parado de la que nació el gol, si la hubo. */
+  setPieceNote?: string;
 }) {
   const equipo = goal.scoringTeam === "team" ? teamName : opponentName;
   const quien = goal.playerName
@@ -199,6 +202,7 @@ export function GoalSequenceRow({
         padding: "4px 0",
         borderBottom: "0.5px solid #f1f5f9",
         breakInside: "avoid",
+        flexWrap: "wrap",
       }}
     >
       <span style={{ color: "#94a3b8", minWidth: 96 }}>
@@ -213,6 +217,16 @@ export function GoalSequenceRow({
       </span>
       <span style={{ color: "#475569", minWidth: 84, textAlign: "right" }}>{goal.sourceLabel}</span>
       <span style={{ color: "#94a3b8", minWidth: 132, textAlign: "right" }}>{respuesta ?? ""}</span>
+      {/* Segunda línea, solo si el gol nació de una jugada registrada. El
+          gol es UNO: la nota dice de dónde vino, no añade otro. */}
+      {setPieceNote && (
+        <span
+          data-goal-set-piece-note
+          style={{ flexBasis: "100%", paddingLeft: 146, fontSize: 9, color: "#475569" }}
+        >
+          Jugada: {setPieceNote}
+        </span>
+      )}
     </div>
   );
 }
@@ -231,6 +245,7 @@ export function MatchContextBoard({
   opponentName,
   opensContexts = true,
   opensGoals = true,
+  goalNotes,
 }: {
   contexts: MatchContext[];
   goals: GoalSequenceEntry[];
@@ -238,6 +253,8 @@ export function MatchContextBoard({
   opponentName: string;
   opensContexts?: boolean;
   opensGoals?: boolean;
+  /** `report.setPieces.sequenceNotes`: id de evento → jugada de origen. */
+  goalNotes?: Record<string, string>;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -266,6 +283,7 @@ export function MatchContextBoard({
                 goal={g}
                 teamName={teamName}
                 opponentName={opponentName}
+                setPieceNote={goalNotes?.[g.eventId]}
               />
             ))}
           </div>

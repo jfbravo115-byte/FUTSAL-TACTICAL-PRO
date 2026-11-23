@@ -311,9 +311,12 @@ describe("el PDF no calcula nada: consume MatchReport", () => {
       "utf-8",
     );
     expect(plantilla).toContain("const pdfReport = useMemo(() => generateMatchReport(matchData)");
-    expect(plantilla).toContain(
-      "paginateContextReport(pdfReport.matchContexts, pdfReport.goalSequence)",
+    // Las mismas dos listas del informe; detrás puede ir el alto de cada fila
+    // de gol (las nacidas de una jugada a balón parado llevan nota).
+    expect(plantilla).toMatch(
+      /paginateContextReport\(\s*pdfReport\.matchContexts,\s*pdfReport\.goalSequence\b/,
     );
+    expect(plantilla).toContain("pdfReport.setPieces.sequenceNotes[g.eventId] ? GOAL_ROW_WITH_NOTE_H : GOAL_ROW_H");
   });
 });
 

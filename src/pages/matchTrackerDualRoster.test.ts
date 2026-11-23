@@ -102,8 +102,11 @@ describe("1-3 · el equipo lo decide el jugador, no el panel", () => {
     expect(barra).toContain("lanzarConJugador(ActionType.GOAL)");
     expect(barra).toContain("lanzarConJugador(ActionType.SHOT)");
     expect(barra).toContain("handleFoul(!bandoDeAccion(), actorDeAccion())");
-    expect(barra).toContain("handleFreeKickPlay(bandoDeAccion(), actorDeAccion())");
-    expect(barra).toContain("setPendingCorner({ isOpponent: bandoDeAccion() })");
+    // Córner, falta a favor y banda abren la ventana única con el MISMO
+    // resolutor de bando y de actor que el resto de botones.
+    expect(barra).toContain('openSetPiece("free_kick", bandoDeAccion(), actorDeAccion())');
+    expect(barra).toContain('openSetPiece("corner", bandoDeAccion(), actorDeAccion())');
+    expect(barra).toContain('openSetPiece("throw_in", bandoDeAccion(), actorDeAccion())');
     expect(barra).toContain("lanzarConJugador(ActionType.STEAL)");
     expect(barra).toContain("lanzarConJugador(ActionType.LOSS)");
     expect(barra).not.toContain("pitchView === 'opponent'");
@@ -188,7 +191,7 @@ describe("11-12 · el modo es una preferencia, no un dato", () => {
   it("11 · ninguno de los dos modos cambia cómo se construye el evento", () => {
     // `handleAction` no sabe que el experimento existe: recibe tipo, jugador
     // y bando, exactamente igual en los dos modos.
-    const handleAction = trozo("const handleAction = (", "const handleFreeKickPlay = (");
+    const handleAction = trozo("const handleAction = (", "const openSetPiece = (");
     expect(handleAction).not.toContain("captureMode");
     expect(handleAction).not.toContain("dualActive");
     expect(handleAction).not.toContain("selectedActor");

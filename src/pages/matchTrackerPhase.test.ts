@@ -17,12 +17,20 @@ import { resolve } from "node:path";
 
 const fuente = readFileSync(resolve(__dirname, "./MatchTracker.tsx"), "utf-8");
 
-/** El cuerpo de `handleAction`, de su firma al siguiente handler. */
+/**
+ * El código que construye y registra una acción: `buildActionEvent`,
+ * `applyActionToState` y `handleAction`, que van seguidos.
+ *
+ * Desde que la jugada a balón parado necesita construir varios eventos con
+ * las MISMAS reglas, la construcción vive en `buildActionEvent` y
+ * `handleAction` la invoca. Las garantías de este archivo se exigen sobre
+ * los tres juntos.
+ */
 const handleAction = (() => {
-  const ini = fuente.indexOf("const handleAction = (");
-  const fin = fuente.indexOf("const handleSetPieceRestart", ini) > -1
-    ? fuente.indexOf("const handleSetPieceRestart", ini)
-    : fuente.indexOf("\n  /**\n   * Jugada de falta", ini);
+  const ini = fuente.indexOf("const buildActionEvent = (");
+  // Termina donde empieza la maquinaria de la jugada a balón parado, que
+  // va justo detrás de `handleAction`.
+  const fin = fuente.indexOf("const openSetPiece = (", ini);
   expect(ini).toBeGreaterThan(-1);
   expect(fin).toBeGreaterThan(ini);
   return fuente.slice(ini, fin);
@@ -44,10 +52,18 @@ describe("7 · el ref es el autoritativo", () => {
 
 describe("6 · el orden del estampado", () => {
   it("se lee la fase ANTES de construir el evento", () => {
-    const lectura = handleAction.indexOf("const phaseAtTap = phaseOfPlayRef.current;");
-    const evento = handleAction.indexOf("const newEvent: GameEvent = {");
+    // `handleAction` lee el ref y DESPUÉS llama a quien construye.
+    const soloHandle = handleAction.slice(handleAction.indexOf("const handleAction = ("));
+    const lectura = soloHandle.indexOf("const phaseAtTap = phaseOfPlayRef.current;");
+    const construccion = soloHandle.indexOf("buildActionEvent(");
     expect(lectura).toBeGreaterThan(-1);
-    expect(lectura).toBeLessThan(evento);
+    expect(lectura).toBeLessThan(construccion);
+    // Y quien construye NO lee el ref por su cuenta: recibe la fase ya leída.
+    // Si lo leyera dentro, una jugada de varios eventos podría estampar fases
+    // distintas en eventos de la misma jugada.
+    const constructor = handleAction.slice(0, handleAction.indexOf("const applyActionToState = ("));
+    expect(constructor).toContain("phaseAtTap: PhaseOfPlay | undefined,");
+    expect(constructor).not.toContain("phaseOfPlayRef");
   });
 
   it("el evento se queda con phaseAtTap", () => {

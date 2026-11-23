@@ -69,6 +69,16 @@ export function formatEventTypeLabel(event: GameEvent): string {
   if (type === ActionType.FOUL) return "⚠️ Falta";
   // Reanudación ejecutada. El usuario nunca lee SET_PIECE ni free_kick.
   if (type === ActionType.SET_PIECE) return `▶️ ${SET_PIECE_RESTART_LABEL}`;
+  // Banda y sector solo si constan, desde la perspectiva de quien saca.
+  if (type === ActionType.THROW_IN) {
+    const lado = event.metadata?.throwInSide;
+    const sector = event.metadata?.throwInSector;
+    const donde =
+      (lado === "left" || lado === "right") && typeof sector === "string"
+        ? ` · ${lado === "left" ? "izquierda" : "derecha"} ${sector}`
+        : "";
+    return `↔️ Saque de banda${donde}`;
+  }
 
   if (type === GoalieAction.EXIT) return `🧤 ${formatExit(event)}`;
   if (SAVE_TYPES.includes(type)) return `🧤 ${formatGoalieAction(type)}`;

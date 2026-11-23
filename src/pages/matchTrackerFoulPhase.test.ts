@@ -43,8 +43,10 @@ const handleFoul = (() => {
 
 /** El cuerpo de `handleAction`, para exigir que los dos usen el MISMO patrón. */
 const handleAction = (() => {
-  const ini = fuente.indexOf("const handleAction = (");
-  const fin = fuente.indexOf("const handleFreeKickPlay = (", ini);
+  // Desde `buildActionEvent`, que es donde se construye el evento y donde
+  // vive la línea de estampado que aquí se compara.
+  const ini = fuente.indexOf("const buildActionEvent = (");
+  const fin = fuente.indexOf("const openSetPiece = (", ini);
   expect(ini).toBeGreaterThan(-1);
   expect(fin).toBeGreaterThan(ini);
   return fuente.slice(ini, fin);

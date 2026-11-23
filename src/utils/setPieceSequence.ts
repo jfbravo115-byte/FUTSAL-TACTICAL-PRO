@@ -630,3 +630,54 @@ export function eventIdsToDeleteWith(events: GameEvent[], eventId: string): stri
   if (!id) return [eventId];
   return eventsOfSequence(events, id).map((e) => e.id);
 }
+
+// ── DESPEJE: CÓMO SIGUE ─────────────────────────────────────────────────
+
+/**
+ * Qué pasa con el balón después de un despeje del portero.
+ *
+ * Solo DESCRIBE. Un despeje que sale de banda para el rival no es una
+ * pérdida, y uno que sale de banda para nosotros no es una recuperación:
+ * la posesión cambia por reglamento, no por una acción de nadie. Inventar
+ * cualquiera de las dos inflaría pérdidas y recuperaciones con balones que
+ * nadie perdió ni ganó.
+ */
+export type DeflectOutcome = "in_play" | "goal_line" | "throw_in_team" | "throw_in_opponent";
+
+export const DEFLECT_OUTCOMES: readonly DeflectOutcome[] = [
+  "in_play",
+  "goal_line",
+  "throw_in_team",
+  "throw_in_opponent",
+];
+
+export const DEFLECT_OUTCOME_LABEL: Record<DeflectOutcome, string> = {
+  in_play: "Sigue en juego",
+  goal_line: "Sale por línea de fondo",
+  throw_in_team: "Banda para nuestro equipo",
+  throw_in_opponent: "Banda para el rival",
+};
+
+export function isDeflectOutcome(raw: unknown): raw is DeflectOutcome {
+  return DEFLECT_OUTCOMES.includes(raw as DeflectOutcome);
+}
+
+/** ¿Este desenlace del despeje da lugar a un saque de banda? */
+export function deflectOutcomeLeadsToThrowIn(outcome: DeflectOutcome): boolean {
+  return outcome === "throw_in_team" || outcome === "throw_in_opponent";
+}
+
+/**
+ * Quién saca la banda que nace del despeje. Es ABSOLUTO —nuestro equipo o el
+ * rival—, no relativo al portero que despejó: así lo dice el botón.
+ */
+export function throwInTakerIsOpponent(outcome: DeflectOutcome): boolean {
+  return outcome === "throw_in_opponent";
+}
+
+/** La raíz de jugada que corresponde a cada tipo de evento reanudable. */
+export const ROOT_KIND_BY_ACTION: Partial<Record<string, SetPieceRootKind>> = {
+  [ActionType.CORNER]: "corner",
+  [ActionType.SET_PIECE]: "free_kick",
+  [ActionType.THROW_IN]: "throw_in",
+};

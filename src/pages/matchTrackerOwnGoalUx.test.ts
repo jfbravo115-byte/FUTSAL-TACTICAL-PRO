@@ -77,13 +77,18 @@ describe("1 · ni un recuento de goles a mano", () => {
 
   it("la pantalla, el evento y el plus/minus usan goalModel", () => {
     expect(codigo).toContain("scoreOf(matchData?.events)");
-    expect(codigo).toContain("scoreAfterAdding(matchData.events,");
+    // El marcador tras el evento lo calcula goalModel contra el historial
+    // base, y `handleAction` le pasa el del partido.
+    expect(codigo).toContain("scoreAfterAdding(eventosBase,");
+    expect(codigo).toMatch(/buildActionEvent\([\s\S]{0,160}matchData\.events,/);
     expect(codigo).toContain("beneficiarySide(esteGol)");
     expect(codigo).toContain('from "../utils/goalModel"');
   });
 
   it("el plus/minus se revierte con el MISMO criterio con el que se sumó", () => {
-    const borrar = trozo("const handleDeleteEvent = (", "const executeSwap");
+    // El borrado de un evento vive en `revertEventFromState`, que
+    // `handleDeleteEvent` aplica a cada evento de la jugada.
+    const borrar = trozo("const revertEventFromState = (", "const executeSwap");
     expect(borrar).toContain("isGoalEvent(event)");
     expect(borrar).toContain('beneficiarySide(event) === "team"');
     // Ya no se decide por el tipo del evento, que era lo que fallaba.
@@ -248,12 +253,12 @@ describe("5 · las acciones rápidas van al equipo que anuncian", () => {
       "applyPhaseOfPlay(nextPhaseAfterEvent(type, isOpponentEvent, phaseAtTap));",
     );
     expect(codigo).not.toContain("nextPhaseAfterEvent(type, pitchView");
-    const handleAction = trozo("const handleAction = (", "const handleFreeKickPlay = (");
+    const handleAction = trozo("const handleAction = (", "const openSetPiece = (");
     expect(handleAction).not.toContain("pitchView");
   });
 
   it("y el bando del evento no se deriva del equipo desplegado", () => {
-    const handleAction = trozo("const handleAction = (", "const handleFreeKickPlay = (");
+    const handleAction = trozo("const handleAction = (", "const openSetPiece = (");
     expect(handleAction).toContain("const isOpponentEvent =");
     expect(handleAction).toContain("metadata?.metadata?.isOpponent ??");
   });

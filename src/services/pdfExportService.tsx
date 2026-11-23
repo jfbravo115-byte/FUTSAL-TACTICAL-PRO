@@ -1473,7 +1473,10 @@ export function buildSummaryReportItems(
       : { node: <PlayersTable report={report} /> }),
   });
 
-  goalkeepers.forEach((gk) => {
+  // Porteros: empiezan en hoja nueva y comparten página de dos en dos con
+  // la ficha compacta (mismo contenido), en vez de media hoja en blanco por
+  // portero.
+  goalkeepers.forEach((gk, i) => {
     const isOnlyRelevantGoalkeeper =
       goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
     items.push({
@@ -1481,11 +1484,11 @@ export function buildSummaryReportItems(
       section: "goalkeepers",
       kind: "card",
       team: gk.isOpponent ? "opponent" : "team",
-      breakBefore: true,
+      breakBefore: i === 0,
       node: (
         <div data-summary-goalkeeper={gk.id}>
-          <div style={sectionTitleStyle}>Portero</div>
-          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} />
+          {i === 0 && <div style={sectionTitleStyle}>Porteros</div>}
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact />
         </div>
       ),
     });
@@ -1548,7 +1551,6 @@ export function buildSummaryReportItems(
       id: "events",
       section: "events",
       kind: "table",
-      breakBefore: true,
       rows: { count: report.relevantEvents.length, render: (from, to) => <EventsSection report={report} from={from} to={to} /> },
     });
   }

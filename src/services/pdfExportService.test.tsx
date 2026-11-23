@@ -186,9 +186,11 @@ describe("exportMatchReportPdf", () => {
     await exportMatchReportPdf(md);
     expect(pdfSaveMock).toHaveBeenCalledTimes(1);
     expect(pdfSaveMock.mock.calls[0][0]).toMatch(/^informe_Mi_Equipo_\d+\.pdf$/);
-    // resumen/zonas + evolución por periodos + jugadores + situaciones
-    // especiales + eventos. La de periodos aparece porque el gol lleva sector.
-    expect(toJpegMock).toHaveBeenCalledTimes(6);
+    // resumen/zonas + evolución por periodos + jugadores + portero +
+    // secuencia de goles con los eventos relevantes A CONTINUACIÓN (ya no
+    // estrenan hoja: caben debajo). La de periodos aparece porque el gol
+    // lleva sector.
+    expect(toJpegMock).toHaveBeenCalledTimes(5);
     const titulos = toJpegMock.mock.calls.map((c) => (c[0] as HTMLElement).textContent || "");
     expect(titulos.some((t) => t.includes("Evolución por periodos"))).toBe(true);
   });
@@ -485,7 +487,7 @@ describe("GoalkeeperOriginMap recibe el conjunto completo de eventos (problema 1
 // C. informe con 2 porteros genera páginas independientes (ninguna se
 // amontona: cada portero + cada bloque de Tactical Pro es una página).
 describe("paginación dinámica — punto 2 de la revisión", () => {
-  it("C: informe COMPLETO con 2 porteros genera una página por portero, sin amontonar", async () => {
+  it("C: con 2 porteros, cada ficha sale UNA vez, entera, y empiezan en hoja nueva", async () => {
     const md = matchData({
       players: [
         player(),
@@ -494,8 +496,16 @@ describe("paginación dinámica — punto 2 de la revisión", () => {
       ],
     });
     await exportMatchReportPdf(md);
-    // resumen/zonas + jugadores + gk1 + gk2 = 4 páginas (sin Tactical, sin eventos)
-    expect(toJpegMock).toHaveBeenCalledTimes(4);
+    // resumen/zonas + jugadores + porteros. Las dos fichas compactas
+    // comparten hoja cuando caben: ya no hay media página en blanco por
+    // portero, y ninguna se parte ni se repite.
+    const paginas = toJpegMock.mock.calls.map((c) => c[0] as HTMLElement);
+    const fichas = paginas.flatMap((n) => Array.from(n.querySelectorAll("[data-summary-goalkeeper]")));
+    expect(fichas.map((f) => f.getAttribute("data-summary-goalkeeper")).sort()).toEqual(["gk1", "gk2"]);
+    const primera = paginas.findIndex((n) => n.querySelector('[data-summary-goalkeeper="gk1"]'));
+    const jugadores = paginas.findIndex((n) => n.querySelector('[data-flow-item="players"]'));
+    expect(primera).toBeGreaterThan(jugadores);
+    expect(toJpegMock).toHaveBeenCalledTimes(3);
   });
 
   it("sin porteros, sin Tactical, sin eventos: exactamente 2 páginas (resumen + jugadores)", async () => {
@@ -521,7 +531,7 @@ describe("paginación dinámica — punto 2 de la revisión", () => {
     expect(toJpegMock).toHaveBeenCalledTimes(3);
   });
 
-  it("2 porteros + Tactical Pro corto: 5 páginas (resumen+jugadores+gk1+gk2+tactical)", async () => {
+  it("2 porteros + Tactical Pro corto: 4 páginas (resumen+jugadores+porteros+tactical)", async () => {
     const md = matchData({
       players: [
         player(),
@@ -531,7 +541,7 @@ describe("paginación dinámica — punto 2 de la revisión", () => {
       tacticalAnalysis: "Análisis breve.",
     });
     await exportMatchReportPdf(md);
-    expect(toJpegMock).toHaveBeenCalledTimes(5);
+    expect(toJpegMock).toHaveBeenCalledTimes(4);
   });
 
   // E. Tactical Pro largo no se trunca silenciosamente: se reparte en

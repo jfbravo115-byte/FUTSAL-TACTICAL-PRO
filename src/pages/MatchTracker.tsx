@@ -2433,14 +2433,6 @@ export default function MatchTracker() {
       try {
         await new Promise(r => setTimeout(r, 600));
 
-        const captureOpts = {
-          cacheBust: true,
-          pixelRatio: 1.5,
-        quality: 0.82,
-          backgroundColor: "#ffffff",
-          style: { opacity: "1", visibility: "visible" },
-        };
-
         const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref, pdfPage9Ref];
         // Las de contexto táctico van al final y son tantas como haga falta:
         // cero en un partido sin situaciones especiales ni goles.
@@ -2450,28 +2442,11 @@ export default function MatchTracker() {
           // El análisis interpretativo cierra el informe.
           ...pdfTacticalRefs.current.filter(Boolean),
         ];
-        const images: string[] = [];
-
-        for (const node of nodes) {
-          const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });
-          if (url && url.length > 1000) images.push(url);
-        }
-
-        if (images.length === 0) throw new Error("No pages generated");
-
-        const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-        const pdfW = pdf.internal.pageSize.getWidth();   // 210mm
-        const pdfH = pdf.internal.pageSize.getHeight();  // 297mm
-
-        for (let i = 0; i < images.length; i++) {
-          if (i > 0) pdf.addPage();
-          const img = new Image();
-          img.src = images[i];
-          await new Promise(r => { img.onload = r; });
-          const imgAspect = img.height / img.width;
-          const imgH = Math.min(pdfH, pdfW * imgAspect);
-          pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
-        }
+        // La captura y el ensamblado son los COMPARTIDOS: fuentes reunidas una
+        // vez, manejadores de imagen antes de `src` y ninguna página
+        // deformada. Esta plantilla tenía su propia copia del bucle, que
+        // aplastaba en vertical cualquier página más alta que un A4.
+        const pdf = await capturePagesToPdf(nodes);
 
         const fileName = `informe_${matchData.teamName.replace(/\s+/g, "_")}_${Date.now()}.pdf`;
         pdf.save(fileName);
@@ -4147,15 +4122,17 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {totalPages}</span>
                     </div>
-                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
-                      <div key={item.label} style={{ marginBottom: 16 }}>
+                    <div data-pdf-item-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 18 }}>{ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 12, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
                         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
-                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', whiteSpace: 'nowrap' }}>#{formatJerseyNumber(p)}</div></div>); })}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 4 }}>Cada barra es un jugador, por dorsal; el nombre de cada dorsal está en la tabla de estadísticas.</div>
                     <Footer page={2} total={totalPages} />
                   </>
                 );
@@ -4296,15 +4273,17 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {totalPages}</span>
                     </div>
-                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
-                      <div key={item.label} style={{ marginBottom: 16 }}>
+                    <div data-pdf-item-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 18 }}>{ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 12, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
                         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
-                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', whiteSpace: 'nowrap' }}>#{formatJerseyNumber(p)}</div></div>); })}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 4 }}>Cada barra es un jugador, por dorsal; el nombre de cada dorsal está en la tabla de estadísticas.</div>
                     <Footer page={5} total={totalPages} />
                   </>
                 );
@@ -4319,6 +4298,12 @@ export default function MatchTracker() {
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + tiros(p).shots), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
                 const W = 140, H = 140, cx = 70, cy = 70, R = 50;
+                // La rejilla crece en columnas, no en filas: con 14 fichas a
+                // tres columnas la página medía 1400 px y la captura la
+                // encogía. El radar conserva su geometría (viewBox) y solo
+                // cambia el tamaño impreso.
+                const radarCols = team.players.length <= 9 ? 3 : team.players.length <= 16 ? 4 : 5;
+                const radarSize = radarCols === 3 ? W : radarCols === 4 ? 112 : 96;
                 const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
                 const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
                 return (
@@ -4327,7 +4312,7 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {totalPages}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${radarCols}, 1fr)`, gap: radarCols > 3 ? 8 : 12 }}>
                       {team.players.map(p => {
                         const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
                         const dataR = normV.map(v => (v / 5) * R);
@@ -4340,7 +4325,7 @@ export default function MatchTracker() {
                         return (
                           <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{formatJerseyNumber(p)}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
-                            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+                            <svg width={radarSize} height={radarSize} viewBox={`0 0 ${W} ${H}`}>
                               {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               <polygon points={dataPts} fill="rgba(239,68,68,0.1)" stroke="#ef4444" strokeWidth="1.5"/>

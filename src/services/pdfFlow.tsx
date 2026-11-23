@@ -246,6 +246,8 @@ export type RenderedPageAudit = {
   overflow: number;
   empty: boolean;
   footer: string | null;
+  /** Bloques que contiene, para poder decir DÓNDE está el problema. */
+  items: string[];
 };
 
 /**
@@ -265,6 +267,9 @@ export function auditRenderedPages(pages: HTMLElement[]): RenderedPageAudit[] {
       overflow,
       empty: !texto && !grafico,
       footer: page.querySelector("[data-flow-page-number]")?.textContent ?? null,
+      items: Array.from(cuerpo.querySelectorAll("[data-flow-item]")).map(
+        (e) => e.getAttribute("data-flow-item") ?? "",
+      ),
     };
   });
 }
@@ -274,7 +279,9 @@ export function renderedPageProblems(audit: RenderedPageAudit[]): string[] {
   const fallos: string[] = [];
   const total = audit.length;
   audit.forEach((a) => {
-    if (a.overflow > 1) fallos.push(`página ${a.page}: ${a.overflow} px fuera del A4`);
+    if (a.overflow > 1) {
+      fallos.push(`página ${a.page} (${a.items.join(", ")}): ${a.overflow} px fuera del A4`);
+    }
     if (a.empty) fallos.push(`página ${a.page} vacía`);
     if (a.footer !== null && a.footer.trim() !== `Página ${a.page} de ${total}`) {
       fallos.push(`página ${a.page}: pie «${a.footer}» no correlativo`);

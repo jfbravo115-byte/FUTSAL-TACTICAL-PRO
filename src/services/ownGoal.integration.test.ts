@@ -128,7 +128,7 @@ describe("1-2 · el marcador dice lo mismo en todas partes", () => {
     const celdas = fila.split(",").map((c) => c.replace(/^"|"$/g, ""));
     expect(celdas[3]).toBe("CD MURCIA"); // equipo del AUTOR
     expect(celdas[4]).toBe("Pérez"); // jugador
-    expect(celdas[celdas.length - 1]).toBe("PR7"); // gol_para: el BENEFICIARIO
+    expect(celdas[21]).toBe("PR7"); // gol_para: el BENEFICIARIO, por posición fija
     expect(fila).toContain("Gol en propia");
   });
 
@@ -137,7 +137,7 @@ describe("1-2 · el marcador dice lo mismo en todas partes", () => {
     const fila = csv.replace(/^﻿/, "").split("\n").find((l) => l.includes('"GOAL"'))!;
     const celdas = fila.split(",").map((c) => c.replace(/^"|"$/g, ""));
     expect(celdas[3]).toBe("CD MURCIA");
-    expect(celdas[celdas.length - 1]).toBe("CD MURCIA");
+    expect(celdas[21]).toBe("CD MURCIA");
   });
 });
 

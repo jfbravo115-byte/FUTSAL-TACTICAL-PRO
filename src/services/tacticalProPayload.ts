@@ -99,10 +99,15 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "ninguna métrica y no significa eficacia, rendimiento ni peligro. Un volumen alto puede " +
     "ser la zona donde más balones se pierden.",
   "Tiro directo de córner: un evento CORNER con setPieceOutcome 'shot'. Significa que ese " +
-    "córner se ejecutó directamente hacia portería. NO crea ningún tiro ni suma a los tiros.",
+    "córner se ejecutó directamente hacia portería. El propio CORNER NO es un tiro y NO " +
+    "suma a los tiros.",
   "Tiro procedente de córner: un evento SHOT con setPiece 'corner'. Es un tiro que el " +
-    "operador declaró como procedente de un córner. Es un registro INDEPENDIENTE del " +
-    "anterior: no se suman entre sí, ninguno implica al otro y pueden no coincidir.",
+    "operador declaró como procedente de un córner. Cuenta como tiro y nunca como córner.",
+  "metadata.sequenceId: cuando un CORNER y un SHOT (o un GOAL) llevan el MISMO valor, son " +
+    "las dos mitades de UNA jugada: el córner se lanzó directo y ese fue el remate. Cuéntalos " +
+    "una vez cada uno en su agregado —el córner en córners, el remate en tiros— y NO los " +
+    "sumes como si fueran dos acciones distintas al describir la jugada. Sin sequenceId son " +
+    "dos registros independientes que pueden no tener ninguna relación entre sí.",
   "FOUL: infracción COMETIDA por el equipo indicado en el evento. Las faltas recibidas son " +
     "las que comete el rival. Una falta no describe cómo se reanudó el juego.",
   // CUATRO CIFRAS DE FALTAS CONVIVEN AQUÍ Y MIDEN COSAS DISTINTAS.

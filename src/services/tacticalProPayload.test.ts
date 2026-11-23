@@ -258,7 +258,18 @@ describe("glosario", () => {
   it("separa las dos métricas de córner", () => {
     expect(texto()).toContain("Tiro directo de córner");
     expect(texto()).toContain("Tiro procedente de córner");
-    expect(texto()).toMatch(/registro INDEPENDIENTE/);
+    // El córner no es un tiro y el tiro no es un córner: cada uno suma en su
+    // agregado y ninguno de los dos se cuenta dos veces.
+    expect(texto()).toMatch(/El propio CORNER NO es un tiro/);
+    expect(texto()).toMatch(/Cuenta como tiro y nunca como córner/);
+  });
+
+  it("explica el vínculo de una jugada encadenada sin invitar a sumarla dos veces", () => {
+    expect(texto()).toMatch(/metadata\.sequenceId/);
+    expect(texto()).toMatch(/dos mitades de UNA jugada/);
+    expect(texto()).toMatch(/una vez cada uno en su agregado/);
+    // Y la ausencia del vínculo sigue significando lo de siempre.
+    expect(texto()).toMatch(/Sin sequenceId son dos registros independientes/);
   });
 
   it("separa infracción, reanudación y tiro de falta", () => {

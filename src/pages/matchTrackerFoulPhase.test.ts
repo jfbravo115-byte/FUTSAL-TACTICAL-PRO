@@ -280,15 +280,17 @@ const falta = (n: number, opp: boolean, extra: Partial<GameEvent> = {}): GameEve
 });
 
 /**
- * La columna "fase" se lee desde el final.
+ * La columna "fase" se lee por POSICIÓN FIJA.
  *
- * Dejó de ser la última cuando el gol en propia añadió «gol_para» detrás: lo
- * que no cambia es que las columnas nuevas se añaden al final y las viejas no
- * se mueven, así que la fase es la penúltima.
+ * Se leía desde el final, y dejó de valer en cuanto detrás aparecieron otras
+ * columnas —«gol_para» primero, «secuencia» después—. Lo que el contrato
+ * garantiza no es que la fase sea la última, sino que las columnas ya
+ * existentes no se mueven: la fase está y seguirá estando en la 21ª.
  */
+const COLUMNA_FASE = 20;
 const columnaFase = (fila: string) => {
   const celdas = fila.split(",");
-  return celdas[celdas.length - 2].replace(/^"|"$/g, "");
+  return celdas[COLUMNA_FASE].replace(/^"|"$/g, "");
 };
 
 describe("13-14 · la fase de la falta llega hasta el CSV", () => {
@@ -298,7 +300,7 @@ describe("13-14 · la fase de la falta llega hasta el CSV", () => {
     );
     const [cabecera, fila] = csv.replace(/^﻿/, "").split("\n");
     const columnas = cabecera.split(",").map((c) => c.replace(/^"|"$/g, ""));
-    expect(columnas[columnas.length - 2]).toBe("fase");
+    expect(columnas[COLUMNA_FASE]).toBe("fase");
     expect(columnaFase(fila)).toBe("Defensa organizada");
   });
 

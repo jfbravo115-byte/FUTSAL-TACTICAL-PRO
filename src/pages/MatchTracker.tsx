@@ -108,6 +108,15 @@ import {
 } from "../utils/jerseyNumber";
 import { playerDisplayIdentity } from "../utils/playerIdentity";
 import {
+  cornerOfSequence,
+  describeCornerSequence,
+  finisherOfSequence,
+  isSequencedCorner,
+  newCornerSequenceId,
+  sequenceIdOf,
+  sequenceOf,
+} from "../utils/cornerSequence";
+import {
   DEFAULT_PITCH_METRICS,
   TeamSide,
   defendedGoalSide,
@@ -117,6 +126,7 @@ import {
   sharedPitchViability,
 } from "../utils/sharedPitch";
 import {
+  describeActor,
   describeRegisteredAction,
   deservesConfirmation,
 } from "../utils/actionSummary";
@@ -163,7 +173,12 @@ import {
   isZone12Id,
 } from "../utils/fieldZones";
 import { attackDirection } from "../utils/attackDirection";
-import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
+import {
+  cornerOriginGrid,
+  CornerSide,
+  formatCornerLabel,
+  formatCornerSideLabel,
+} from "../utils/cornerModel";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import {
   applyFoulToCounters,
@@ -1934,6 +1949,16 @@ export default function MatchTracker() {
      * uno obligaría a volver atrás. Al elegir, el bando se deriva del jugador.
      */
     anyTeam?: boolean;
+    /**
+     * EL CÓRNER QUE TODAVÍA NO EXISTE.
+     *
+     * Cuando se elige «Tiro directo», el córner NO se guarda: se queda aquí,
+     * descrito, y viaja con el flujo del tiro hasta que el tiro se confirma.
+     * Entonces se crean los dos juntos. Si el operador cancela en cualquier
+     * paso —jugador, zona, desenlace—, este objeto se va con el resto del
+     * estado y no queda ningún córner a medias en el partido.
+     */
+    corner?: { side: CornerSide; sequenceId: string };
   } | null>(null);
   const pitchRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -2730,6 +2755,30 @@ export default function MatchTracker() {
   ) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
     setPendingCorner(null);
+
+    // TIRO DIRECTO · la jugada no ha terminado.
+    //
+    // Antes esto guardaba el córner y cerraba el flujo: quedaba registrado
+    // que un córner se había lanzado a portería, pero no quién lo lanzaba ni
+    // en qué acabó, y el analista tenía que registrar el remate aparte.
+    //
+    // Ahora continúa por el MISMO flujo del tiro normal —jugador, zona,
+    // desenlace, portero, gol—, sin una segunda pantalla parecida. El córner
+    // se crea al final, junto al remate y con el mismo `sequenceId`.
+    if (outcome === "shot") {
+      setPendingAction({
+        type: ActionType.SHOT,
+        isOpponent,
+        setPiece: "corner",
+        // Siempre por el jugador, también en el rival: el encargo pide saber
+        // quién saca. El flujo normal se lo salta para el rival porque un
+        // tiro suyo se apunta al equipo; aquí hay un ejecutor concreto.
+        step: "player",
+        corner: { side, sequenceId: newCornerSequenceId() },
+      });
+      return;
+    }
+
     handleAction(ActionType.CORNER, undefined, {
       originGrid: cornerOriginGrid(side),
       metadata: {
@@ -2771,23 +2820,39 @@ export default function MatchTracker() {
     // guarda sector aunque el operador hubiera elegido uno antes de declarar
     // el tipo de lanzamiento — sería un dato falso.
     const origenReglamentario = isRuleDeterminedOrigin(current.setPiece ?? null);
-    handleAction(current.type, current.playerId, {
-      ...(origenReglamentario ? {} : { originGrid: current.originGrid }),
-      ...(!opts.blocked && destinationGrid ? { destinationGrid } : {}),
-      metadata: {
-        isOpponent: current.isOpponent,
-        setPiece: current.setPiece || "normal",
-        ...(goalieResponse ? { goalieResponse } : {}),
-        ...(opts.blocked ? blockedShotMetadata() : {}),
-        ...(opts.extraMetadata ?? {}),
+    handleAction(
+      current.type,
+      current.playerId,
+      {
+        ...(origenReglamentario ? {} : { originGrid: current.originGrid }),
+        ...(!opts.blocked && destinationGrid ? { destinationGrid } : {}),
+        metadata: {
+          isOpponent: current.isOpponent,
+          setPiece: current.setPiece || "normal",
+          ...(goalieResponse ? { goalieResponse } : {}),
+          ...(opts.blocked ? blockedShotMetadata() : {}),
+          ...(opts.extraMetadata ?? {}),
+        },
       },
-    });
+      // El córner viaja hasta aquí sin existir todavía. Es ESTE punto —el
+      // único por el que se materializa un tiro— el que crea los dos.
+      current.corner,
+    );
   };
 
   const handleAction = (
     type: ActionType | GoalieAction,
     playerId?: string,
     metadata?: any,
+    /**
+     * Córner que se guarda JUNTO a esta acción, como una sola operación.
+     *
+     * Solo lo usa el córner lanzado directo. Los dos eventos nacen en el
+     * mismo `setMatchData`, comparten `sequenceId` y provocan UNA sola
+     * transición de fase —la que gobierna el remate—, porque la jugada fue
+     * una y la fase no puede moverse dos veces por ella.
+     */
+    secuenciaCorner?: { side: CornerSide; sequenceId: string },
   ) => {
     if (matchData.period === Period.FINISHED || isDataLocked) return;
     const actingPlayer = playerId
@@ -2921,9 +2986,48 @@ export default function MatchTracker() {
         ...(targetGoalieId && eventTargetsOpposingGoalie(type)
           ? { targetGoalkeeperId: targetGoalieId }
           : {}),
+        // El vínculo con su córner. Un solo campo, el mismo en los dos
+        // eventos: ni padre/hijo ni un segundo campo que diga lo mismo al
+        // revés. Ausente = tiro suelto, como todos los de siempre.
+        ...(secuenciaCorner ? { sequenceId: secuenciaCorner.sequenceId } : {}),
       },
       scoreAtEvent: marcadorTrasEvento,
     };
+
+    /**
+     * El córner de la jugada, creado AHORA y no antes.
+     *
+     * Comparte periodo, reloj de partido, jugadores en pista, dirección de
+     * ataque y fase con el remate, porque es la misma jugada. Lo único que
+     * se separa a propósito es `wallClock`, un milisegundo antes: el córner
+     * ocurrió primero y el orden cronológico se decide por ahí, no por la
+     * posición en el array.
+     *
+     * `scoreAtEvent` es el marcador ANTERIOR al remate: cuando el córner
+     * acaba en gol, el córner se sacó con el marcador de antes.
+     */
+    const eventoCorner: GameEvent | null = secuenciaCorner
+      ? {
+          id: `event-corner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: matchData.matchClock,
+          wallClock: newEvent.wallClock - 1,
+          period: matchData.period,
+          playerIds: [],
+          onPitchPlayerIds: onPitchIds,
+          type: ActionType.CORNER,
+          gameState,
+          ...(phaseAtTap ? { phaseOfPlay: phaseAtTap } : {}),
+          originGrid: cornerOriginGrid(secuenciaCorner.side),
+          attackDirection: newEvent.attackDirection,
+          metadata: {
+            isOpponent: isOpponentEvent,
+            cornerSide: secuenciaCorner.side,
+            setPieceOutcome: "shot" as SetPieceOutcome,
+            sequenceId: secuenciaCorner.sequenceId,
+          },
+          scoreAtEvent: scoreOf(matchData.events),
+        }
+      : null;
 
     setMatchData((prev) => {
       const nextPlayers = prev.players.map((p) => {
@@ -3006,7 +3110,13 @@ export default function MatchTracker() {
       return {
         ...prev,
         isClockRunning: updatedIsClockRunning,
-        events: [newEvent, ...prev.events],
+        // Los dos a la vez. O entran los dos o no entra ninguno: no hay un
+        // estado intermedio en el que el partido tenga el córner y le falte
+        // el remate. El córner va DESPUÉS en el array porque la lista es
+        // «lo más nuevo primero» y el córner ocurrió antes.
+        events: eventoCorner
+          ? [newEvent, eventoCorner, ...prev.events]
+          : [newEvent, ...prev.events],
         players: nextPlayers,
         timeoutsUsed: nextTimeouts,
       };
@@ -3061,114 +3171,136 @@ export default function MatchTracker() {
     }));
   };
 
+  /**
+   * Borrado de una acción. Si pertenece a una jugada encadenada —hoy, un
+   * córner lanzado directo—, se va ENTERA.
+   *
+   * Media jugada no es un dato más pobre: es un dato falso. Dejar el córner
+   * sin su remate diría que se sacó y no pasó nada; dejar el remate sin su
+   * córner diría que ese tiro salió de una jugada. Por eso aquí no se elige:
+   * el que borra uno borra los dos.
+   *
+   * `sequenceOf` devuelve `[event]` cuando no hay secuencia, así que el
+   * borrado individual de todos los eventos de siempre —y de los córners
+   * antiguos, que no llevan vínculo— se comporta exactamente igual que antes.
+   */
   const handleDeleteEvent = (event: GameEvent) => {
     if (isDataLocked) return;
     setMatchData((prev) => {
+      const aBorrar = sequenceOf(prev.events, event);
+      const idsABorrar = new Set(aBorrar.map((e) => e.id));
+
       const nextPlayers = prev.players.map((p) => {
         let stats = { ...p.stats };
         let pm = p.plusMinus;
 
-        const isEffective = event.playerIds.includes(p.id);
+        for (const event of aBorrar) {
+          const isEffective = event.playerIds.includes(p.id);
 
-        if (isEffective) {
-          const isOpponentEvent = event.metadata?.isOpponent;
-          const isOpposingKeeper = p.role === Role.GOALKEEPER && (
-            (isOpponentEvent ? !p.isOpponent : p.isOpponent)
-          );
+          if (isEffective) {
+            const isOpponentEvent = event.metadata?.isOpponent;
+            const isOpposingKeeper = p.role === Role.GOALKEEPER && (
+              (isOpponentEvent ? !p.isOpponent : p.isOpponent)
+            );
 
-          // Estadisticas de portero: se deshace con la MISMA funcion con la
-          // que se registraron, sobre el portero al que el evento fue
-          // atribuido. Antes se decidia por el rol y el bando ACTUALES.
-          const gkDelta = goalieStatsDelta(event, p);
-          stats.saves = Math.max(0, stats.saves - gkDelta.saves);
-          stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
-          if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
-          if (gkDelta.exitsSuccess) {
-            stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
-          }
+            // Estadisticas de portero: se deshace con la MISMA funcion con la
+            // que se registraron, sobre el portero al que el evento fue
+            // atribuido. Antes se decidia por el rol y el bando ACTUALES.
+            const gkDelta = goalieStatsDelta(event, p);
+            stats.saves = Math.max(0, stats.saves - gkDelta.saves);
+            stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
+            if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
+            if (gkDelta.exitsSuccess) {
+              stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
+            }
 
-          if (event.type === ActionType.GOAL) {
-            if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
-          }
-          if (event.type === ActionType.SHOT) {
-            if (!isOpposingKeeper) {
-              if (event.destinationGrid === "OUT") {
-                stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
-              } else {
-                stats.shots = Math.max(0, stats.shots - 1);
+            if (event.type === ActionType.GOAL) {
+              if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
+            }
+            if (event.type === ActionType.SHOT) {
+              if (!isOpposingKeeper) {
+                if (event.destinationGrid === "OUT") {
+                  stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
+                } else {
+                  stats.shots = Math.max(0, stats.shots - 1);
+                }
               }
             }
-          }
-          if (event.type === ActionType.ASSIST)
-            stats.assists = Math.max(0, stats.assists - 1);
-          if (event.type === ActionType.STEAL) {
-            stats.steals = Math.max(0, stats.steals - 1);
-            if (event.metadata?.subType === 'with_possession') stats.stealsWithPossession = Math.max(0, stats.stealsWithPossession - 1);
-            else if (event.metadata?.subType === 'clearance') stats.stealsClearance = Math.max(0, stats.stealsClearance - 1);
-          }
-          if (event.type === ActionType.INTERCEPTION)
-            stats.interceptions = Math.max(0, stats.interceptions - 1);
-          if (event.type === ActionType.LOSS) {
-            stats.losses = Math.max(0, stats.losses - 1);
-            if (event.metadata?.subType === 'bad_pass') stats.lossesBadPass = Math.max(0, stats.lossesBadPass - 1);
-            else if (event.metadata?.subType === 'bad_dribble') stats.lossesBadDribble = Math.max(0, stats.lossesBadDribble - 1);
-            else if (event.metadata?.subType === 'bad_control') stats.lossesBadControl = Math.max(0, stats.lossesBadControl - 1);
-          }
-          if (event.type === ActionType.UNFORCED_ERROR)
-            stats.errors = Math.max(0, stats.errors - 1);
-          if (event.type === ActionType.YELLOW_CARD) {
-            if (stats.yellowCards >= 2) {
-              stats.redCards = Math.max(0, stats.redCards - 1);
+            if (event.type === ActionType.ASSIST)
+              stats.assists = Math.max(0, stats.assists - 1);
+            if (event.type === ActionType.STEAL) {
+              stats.steals = Math.max(0, stats.steals - 1);
+              if (event.metadata?.subType === 'with_possession') stats.stealsWithPossession = Math.max(0, stats.stealsWithPossession - 1);
+              else if (event.metadata?.subType === 'clearance') stats.stealsClearance = Math.max(0, stats.stealsClearance - 1);
             }
-            stats.yellowCards = Math.max(0, stats.yellowCards - 1);
-          }
-          if (event.type === ActionType.RED_CARD)
-            stats.redCards = Math.max(0, stats.redCards - 1);
-          // Registrar una falta suma en stats.fouls del jugador (ver
-          // handleFoul), pero borrarla solo devolvía el contador del equipo:
-          // la falta individual únicamente podía crecer. Registro y borrado
-          // usan ahora la MISMA función con el signo cambiado, y nunca deja
-          // el contador por debajo de cero.
-          stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
+            if (event.type === ActionType.INTERCEPTION)
+              stats.interceptions = Math.max(0, stats.interceptions - 1);
+            if (event.type === ActionType.LOSS) {
+              stats.losses = Math.max(0, stats.losses - 1);
+              if (event.metadata?.subType === 'bad_pass') stats.lossesBadPass = Math.max(0, stats.lossesBadPass - 1);
+              else if (event.metadata?.subType === 'bad_dribble') stats.lossesBadDribble = Math.max(0, stats.lossesBadDribble - 1);
+              else if (event.metadata?.subType === 'bad_control') stats.lossesBadControl = Math.max(0, stats.lossesBadControl - 1);
+            }
+            if (event.type === ActionType.UNFORCED_ERROR)
+              stats.errors = Math.max(0, stats.errors - 1);
+            if (event.type === ActionType.YELLOW_CARD) {
+              if (stats.yellowCards >= 2) {
+                stats.redCards = Math.max(0, stats.redCards - 1);
+              }
+              stats.yellowCards = Math.max(0, stats.yellowCards - 1);
+            }
+            if (event.type === ActionType.RED_CARD)
+              stats.redCards = Math.max(0, stats.redCards - 1);
+            // Registrar una falta suma en stats.fouls del jugador (ver
+            // handleFoul), pero borrarla solo devolvía el contador del equipo:
+            // la falta individual únicamente podía crecer. Registro y borrado
+            // usan ahora la MISMA función con el signo cambiado, y nunca deja
+            // el contador por debajo de cero.
+            stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
           
-          // Las acciones de portero ya se han deshecho arriba con
-          // goalieStatsDelta; no se duplican aqui.
-        }
+            // Las acciones de portero ya se han deshecho arriba con
+            // goalieStatsDelta; no se duplican aqui.
+          }
 
-        // Revertir el plus/minus con el MISMO criterio con el que se sumó:
-        // el beneficiario del gol, no el bando del evento.
-        if (event.onPitchPlayerIds?.includes(p.id) && isGoalEvent(event)) {
-          pm -= beneficiarySide(event) === "team" ? 1 : -1;
+          // Revertir el plus/minus con el MISMO criterio con el que se sumó:
+          // el beneficiario del gol, no el bando del evento.
+          if (event.onPitchPlayerIds?.includes(p.id) && isGoalEvent(event)) {
+            pm -= beneficiarySide(event) === "team" ? 1 : -1;
+          }
         }
 
         return { ...p, stats, plusMinus: pm };
       });
 
-      // Contador reglamentario del equipo.
-      const nextFouls = applyFoulToCounters(prev.fouls, event, -1);
-
+      // Contadores de equipo: se deshacen uno por uno, con la misma función
+      // y el mismo signo que al registrarlos.
+      let nextFouls = prev.fouls;
       let nextTimeouts = { ...prev.timeoutsUsed };
-      if (event.type === ActionType.TIMEOUT) {
-        const isOpponentEvent = event.metadata?.isOpponent;
-        const teamKey = isOpponentEvent ? "opponent" : "team";
-        const periodKey =
-          event.period === Period.FIRST
-            ? "period1"
-            : event.period === Period.SECOND
-            ? "period2"
-            : null;
+      for (const event of aBorrar) {
+        nextFouls = applyFoulToCounters(nextFouls, event, -1);
 
-        if (periodKey) {
-          nextTimeouts[teamKey] = {
-            ...nextTimeouts[teamKey],
-            [periodKey]: false,
-          };
+        if (event.type === ActionType.TIMEOUT) {
+          const isOpponentEvent = event.metadata?.isOpponent;
+          const teamKey = isOpponentEvent ? "opponent" : "team";
+          const periodKey =
+            event.period === Period.FIRST
+              ? "period1"
+              : event.period === Period.SECOND
+              ? "period2"
+              : null;
+
+          if (periodKey) {
+            nextTimeouts[teamKey] = {
+              ...nextTimeouts[teamKey],
+              [periodKey]: false,
+            };
+          }
         }
       }
 
       return {
         ...prev,
-        events: prev.events.filter((e) => e.id !== event.id),
+        events: prev.events.filter((e) => !idsABorrar.has(e.id)),
         players: nextPlayers,
         fouls: nextFouls,
         timeoutsUsed: nextTimeouts,
@@ -4317,7 +4449,19 @@ export default function MatchTracker() {
                 Registrado
               </div>
               <div className="text-[11px] font-bold text-white leading-tight truncate">
-                {describeRegisteredAction(lastRegistered, matchData)}
+                {/* Una jugada encadenada se confirma como UNA, y por tanto
+                    «Deshacer» deshace esa una: el córner y su remate. */}
+                {(() => {
+                  const seq = sequenceIdOf(lastRegistered);
+                  const corner = seq ? cornerOfSequence(matchData.events, seq) : null;
+                  return corner
+                    ? describeCornerSequence(
+                        corner,
+                        lastRegistered,
+                        describeActor(lastRegistered, matchData.players),
+                      )
+                    : describeRegisteredAction(lastRegistered, matchData);
+                })()}
               </div>
               {lastRegistered.phaseOfPlay && (
                 <div className="text-[8px] uppercase tracking-widest text-slate-500 mt-0.5">
@@ -5120,6 +5264,19 @@ export default function MatchTracker() {
                           
                           {periodEvents
                             .sort((a, b) => b.timestamp - a.timestamp)
+                            /* Una jugada, un renglón. El córner lanzado
+                               directo son dos eventos —y tienen que serlo,
+                               porque uno suma a córners y el otro a tiros—,
+                               pero enseñarlos como dos filas sueltas los hace
+                               parecer dos acciones distintas. Se pinta la del
+                               remate, con la frase compuesta, y se oculta la
+                               del córner SOLO si su remate está en la lista:
+                               si alguna vez quedara huérfano, se vería. */
+                            .filter(
+                              (e) =>
+                                !isSequencedCorner(e) ||
+                                !finisherOfSequence(matchData.events, sequenceIdOf(e)!),
+                            )
                             .map((e) => (
                               <div
                                 key={e.id}
@@ -5154,12 +5311,34 @@ export default function MatchTracker() {
                                       )?.number || "--"}
                                     </div>
                                     <div className="flex flex-col">
-                                      <span className="text-[9px] font-black uppercase truncate text-white">
+                                      <span
+                                        data-timeline-label
+                                        data-sequence={sequenceIdOf(e) ?? undefined}
+                                        className="text-[9px] font-black uppercase truncate text-white"
+                                      >
                                         {/* Fuente única (utils/eventLabels): aquí se
                                             imprimía el código interno para cualquier
                                             tipo sin rama propia, y por eso el córner
-                                            salía como CORNER. */}
-                                        {formatEventTypeLabel(e)}
+                                            salía como CORNER.
+
+                                            Si la acción cierra una jugada encadenada,
+                                            la frase la arma `describeCornerSequence`
+                                            con sus dos mitades: «Córner derecho · tiro
+                                            directo de #7 PÉREZ · a portería». */}
+                                        {(() => {
+                                          const seq = sequenceIdOf(e);
+                                          if (!seq) return formatEventTypeLabel(e);
+                                          const corner = cornerOfSequence(matchData.events, seq);
+                                          const finisher = finisherOfSequence(matchData.events, seq);
+                                          if (!corner || !finisher || finisher.id !== e.id) {
+                                            return formatEventTypeLabel(e);
+                                          }
+                                          return `🚩 ${describeCornerSequence(
+                                            corner,
+                                            finisher,
+                                            describeActor(finisher, matchData.players),
+                                          )}`;
+                                        })()}
                                       </span>
                                       <span className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter">
                                         {matchData.players.find(
@@ -7805,9 +7984,14 @@ export default function MatchTracker() {
                             : "Seguimiento de TIRO"}
                   </h3>
                   <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">
-                    {pendingAction.isOpponent
-                      ? "Analizando Rival"
-                      : "Acción Local"}
+                    {/* De dónde viene la jugada, para que el operador no se
+                        pregunte si el córner se ha guardado ya. No se ha
+                        guardado: se guardará con el remate. */}
+                    {pendingAction.corner
+                      ? `${formatCornerLabel(pendingAction.corner.side)} · tiro directo`
+                      : pendingAction.isOpponent
+                        ? "Analizando Rival"
+                        : "Acción Local"}
                   </p>
                 </div>
                 <button
@@ -7883,8 +8067,29 @@ export default function MatchTracker() {
                   </div>
                 )}
 
-                {/* Set Piece Selector */}
-                {acceptsTarget(pendingAction.type) && (
+                {/* Set Piece Selector.
+
+                    En un córner directo la procedencia NO se elige: el tiro
+                    sale del córner que se está registrando con él. Dejar el
+                    selector abierto permitiría guardar una jugada que dice
+                    «córner» por un lado y «penalti» por el otro, y además
+                    mandaría el tiro a un flujo sin zona de origen. Se enseña
+                    fijada, para que se vea de dónde viene. */}
+                {acceptsTarget(pendingAction.type) && pendingAction.corner && (
+                  <div
+                    data-set-piece-locked="corner"
+                    className="bg-violet-500/10 border border-violet-500/30 p-3 rounded-2xl flex items-center justify-between gap-2"
+                  >
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic">
+                      ¿Acción desde?
+                    </span>
+                    <span className="text-[10px] font-black uppercase text-violet-300">
+                      {SET_PIECE_ORIGIN_ICON.corner} {SET_PIECE_ORIGIN_LABEL.corner} ·{" "}
+                      {formatCornerSideLabel(pendingAction.corner.side)}
+                    </span>
+                  </div>
+                )}
+                {acceptsTarget(pendingAction.type) && !pendingAction.corner && (
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic block mb-2">
                     ¿Acción desde?
@@ -7953,9 +8158,14 @@ export default function MatchTracker() {
                     const currentIdx = steps.indexOf(pendingAction.step);
                     const isActive = i === currentIdx;
                     const isDone = i < currentIdx;
+                    // El tiro normal del rival no pregunta por el autor y
+                    // por eso oculta este paso. El córner directo SÍ lo
+                    // pregunta —hay un ejecutor concreto—, así que ocultarlo
+                    // dejaría el indicador contando un paso de menos.
                     if (
                       pendingAction.isOpponent &&
                       label === "Jugador" &&
+                      !pendingAction.corner &&
                       pendingAction.type !== GoalieAction.GOAL_CONCEDED
                     )
                       return null;
@@ -7996,7 +8206,14 @@ export default function MatchTracker() {
                     confirmar; al hacerlo se limpia la procedencia, que para
                     un gol en propia no significa nada. */}
                 {(pendingAction.type === ActionType.GOAL ||
-                  pendingAction.type === ActionType.OWN_GOAL) && (
+                  pendingAction.type === ActionType.OWN_GOAL) &&
+                  /* Un córner directo no puede ser gol en propia: lo lanza el
+                     equipo atacante hacia la portería contraria. Ofrecer el
+                     conmutador aquí solo permitiría guardar una secuencia sin
+                     remate —un gol en propia no es un intento de tiro— y con
+                     la procedencia borrada. Si alguna vez hiciera falta, se
+                     cancela y se registra como el gol en propia que es. */
+                  !pendingAction.corner && (
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-2">
                       {[
@@ -8073,11 +8290,16 @@ export default function MatchTracker() {
                   {pendingAction.step === "player" && (
                     <div className="w-full space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center block">
-                        {pendingAction.type === GoalieAction.GOAL_CONCEDED
-                          ? "¿Quién encajó el gol?"
-                          : pendingAction.type === ActionType.OWN_GOAL
-                            ? "¿Quién lo introdujo en su propia portería?"
-                            : "¿Quién realizó la acción?"}
+                        {/* En un córner directo el que saca y el que chuta
+                            son el mismo, y el rótulo lo dice para que nadie
+                            busque a un segundo jugador que no existe. */}
+                        {pendingAction.corner
+                          ? "¿Quién saca/chuta?"
+                          : pendingAction.type === GoalieAction.GOAL_CONCEDED
+                            ? "¿Quién encajó el gol?"
+                            : pendingAction.type === ActionType.OWN_GOAL
+                              ? "¿Quién lo introdujo en su propia portería?"
+                              : "¿Quién realizó la acción?"}
                       </label>
                       <PlayerSelector
                         players={matchData.players.filter(p =>
@@ -8350,8 +8572,26 @@ export default function MatchTracker() {
                 </div>
 
                 <div className="flex gap-2">
+                  {/* Atrás desde el primer paso de un córner directo devuelve
+                      a elegir cómo se ejecuta, que es de donde se viene. Sin
+                      esto, corregirse obligaba a cancelar y empezar. */}
+                  {pendingAction.step === "player" && pendingAction.corner && (
+                    <button
+                      data-corner-shot-back
+                      onClick={() => {
+                        const side = pendingAction.corner!.side;
+                        const isOpponent = pendingAction.isOpponent;
+                        setPendingAction(null);
+                        setPendingCorner({ isOpponent, side });
+                      }}
+                      className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-black uppercase transition-all"
+                    >
+                      Atrás
+                    </button>
+                  )}
                   {pendingAction.step !== "player" &&
                     (!pendingAction.isOpponent ||
+                      !!pendingAction.corner ||
                       pendingAction.step !== "origin") && (
                       <button
                         onClick={() =>
@@ -8634,6 +8874,17 @@ export default function MatchTracker() {
                 Esta acción restará las estadísticas del jugador y ajustará el
                 marcador si es necesario.
               </p>
+
+              {/* Una jugada encadenada se va entera, y hay que decirlo ANTES
+                  de confirmar: desde el Historial solo se ve una fila. */}
+              {sequenceIdOf(deleteConfirmEvent) && (
+                <p
+                  data-delete-sequence-warning
+                  className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-[9px] font-black uppercase leading-relaxed text-amber-300"
+                >
+                  Es una jugada encadenada: se eliminarán el córner y su remate.
+                </p>
+              )}
 
               <div className="mb-6 rounded-xl border border-white/5 bg-black/40 p-3 text-left">
                 <div className="mb-1 flex items-center justify-between">
@@ -9564,6 +9815,9 @@ const PlayerSelector = ({
       .map((p) => (
         <button
           key={p.id}
+          /* El mismo gancho que la rejilla agrupada: sin él, la mitad de los
+             selectores de jugador no se podía localizar para comprobarla. */
+          data-pick-player={p.id}
           onClick={() => onSelect(p.id)}
           className={`p-2 rounded-xl border-2 flex flex-col items-center gap-1 transition-all
           ${selectedId === p.id ? "bg-blue-600 border-white" : "bg-white/5 border-white/10 opacity-70 hover:opacity-100"}

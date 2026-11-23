@@ -29,16 +29,22 @@
  *       Vive en el evento SHOT o GOAL. Ya existía para penaltis y faltas;
  *       aquí solo se tipa, se centraliza y se le añade 'corner'.
  *
- * SIN RELACIÓN FÍSICA ENTRE EVENTOS
- * ---------------------------------
- * Un córner ejecutado en tiro y un tiro declarado "desde córner" son DOS
- * declaraciones independientes del operador sobre dos acciones reales
- * distintas. Ninguna crea la otra y ninguna se deduce de la otra:
+ * LA RELACIÓN NO SE DEDUCE: SE REGISTRA O NO EXISTE
+ * -------------------------------------------------
+ * Por defecto, un córner ejecutado en tiro y un tiro declarado "desde
+ * córner" son DOS declaraciones independientes del operador sobre dos
+ * acciones distintas. Ninguna crea la otra y ninguna se deduce de la otra:
  *
- *   - no hay relatedEventId / parentEventId / sequenceId;
- *   - no se relacionan por cercanía temporal;
- *   - por tanto no puede haber doble conteo: el córner suma a córners y el
- *     tiro suma a tiros, cada uno en su agregado.
+ *   - no se relacionan por cercanía temporal, nunca;
+ *   - el córner suma a córners y el tiro suma a tiros, cada uno en SU
+ *     agregado, así que no puede haber doble conteo.
+ *
+ * La ÚNICA excepción es el córner que se lanza directo a portería, que se
+ * captura como una sola jugada: sus dos eventos nacen juntos y llevan el
+ * mismo `metadata.sequenceId`. Eso no cambia nada de lo anterior —siguen
+ * siendo un córner y un remate, cada uno en su agregado—; lo que añade es
+ * poder deshacerlos o borrarlos como la jugada única que fueron. Ver
+ * `utils/cornerSequence.ts`.
  *
  * AUSENCIA = NO REGISTRADO
  * ------------------------

@@ -138,9 +138,10 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
           </tbody>
         </table>
         <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
-          «Tiro directo» indica que el córner se ejecutó directamente hacia portería. «Desde
-          córner», más abajo, contabiliza tiros registrados con procedencia córner. Son registros
-          independientes: ni se suman ni se deducen uno del otro.
+          «Tiro directo» cuenta CÓRNERS ejecutados hacia portería. «Desde córner», más abajo,
+          cuenta TIROS con procedencia córner. Son dos magnitudes distintas y nunca se suman: un
+          córner lanzado directo aparece una vez en cada tabla, porque fue un córner y fue un
+          remate.
         </p>
         <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 4 }}>
           «Sin subtipo registrado» significa que no consta cómo se ejecutó el córner; no es una
@@ -229,8 +230,9 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
           </tbody>
         </table>
         <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
-          Lo declara el propio tiro. No se deduce de ninguna falta ni córner concreto: son
-          acciones distintas y no se relacionan por cercanía temporal.
+          Lo declara el propio tiro, nunca se deduce por cercanía temporal. Un córner lanzado
+          directo sí deja los dos registros a la vez —el córner y su remate—, porque es una
+          jugada que se registró entera, no dos acciones emparejadas a posteriori.
         </p>
       </Section>
     </div>

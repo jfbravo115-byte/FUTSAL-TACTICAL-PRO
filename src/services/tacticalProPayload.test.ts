@@ -117,6 +117,7 @@ describe("payload compartido", () => {
     expect(Object.keys(payload.tacticalContext).sort()).toEqual([
       "glossary",
       "goalkeepers",
+      "setPieceSequences",
       "zones",
     ]);
   });
@@ -912,7 +913,11 @@ describe("objetivo 8 · el volumen por zona, declarado", () => {
     expect(payload.tacticalContext.zonesByPeriod).toBeUndefined();
     expect(payload.tacticalContext.zones.team.byPeriod).toBeUndefined();
     expect(payload.tacticalContext.zones.team.zone12.byPeriod).toBeUndefined();
-    expect(Object.keys(payload.tacticalContext).sort()).toEqual(["glossary", "goalkeepers", "zones"]);
+    // Las jugadas a balón parado llegaron después, con su glosario; el
+    // periodo sigue sin viajar.
+    expect(Object.keys(payload.tacticalContext).sort()).toEqual([
+      "glossary", "goalkeepers", "setPieceSequences", "zones",
+    ]);
     expect(Object.keys(payload.tacticalContext.zones).sort()).toEqual(["opponent", "team"]);
   });
 

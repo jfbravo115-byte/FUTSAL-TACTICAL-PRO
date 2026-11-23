@@ -512,7 +512,14 @@ export function takerIdOf(event: GameEvent): string | null {
  */
 export function finisherIdOf(events: GameEvent[], sequenceId: string): string | null {
   const desenlace = outcomeEventOfSequence(events, sequenceId);
-  const id = desenlace?.playerIds?.[0];
+  if (!desenlace) return null;
+  // La captura añade a `playerIds` de todo tiro o gol el portero que lo
+  // encara. Con el finalizador sin identificar, el primero de la lista ES
+  // ese portero: se descarta, igual que hace `eventActorId`. Todos los
+  // eventos de una jugada son de esta versión y llevan el portero explícito
+  // en `targetGoalkeeperId`, así que no hace falta deducirlo por bando.
+  const portero = desenlace.metadata?.targetGoalkeeperId;
+  const id = (desenlace.playerIds ?? []).find((x) => x !== portero);
   return typeof id === "string" && id ? id : null;
 }
 

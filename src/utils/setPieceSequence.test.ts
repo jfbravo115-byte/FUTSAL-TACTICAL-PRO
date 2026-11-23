@@ -712,3 +712,42 @@ describe("el historial pinta una fila por jugada", () => {
     expect(filas).toHaveLength(3);
   });
 });
+
+// ── EL FINALIZADOR NUNCA ES EL PORTERO OBJETIVO ────────────────────────
+//
+// La captura real añade a `playerIds` de todo tiro o gol el portero que lo
+// encara (ver `buildActionEvent`). Con el finalizador sin identificar,
+// `playerIds` queda como [portero rival] y leer el primero atribuía el
+// remate a quien lo recibió.
+
+describe("finalizador sin identificar en un evento real de captura", () => {
+  it("no devuelve al portero objetivo como finalizador", () => {
+    const { id, eventos } = construir({
+      root: "corner",
+      isOpponent: false,
+      modality: "prepared",
+      outcome: "shot",
+      cornerSide: "left",
+      shot: {},
+    });
+    // Así lo guarda `buildActionEvent`: el portero objetivo dentro de playerIds.
+    const tiro = eventos[1];
+    tiro.playerIds = ["r1"];
+    tiro.metadata = { ...tiro.metadata, targetGoalkeeperId: "r1" };
+    expect(finisherIdOf(eventos, id)).toBeNull();
+  });
+
+  it("y con finalizador identificado lo devuelve aunque vaya el portero detrás", () => {
+    const { id, eventos } = construir({
+      root: "corner",
+      isOpponent: false,
+      modality: "prepared",
+      outcome: "goal",
+      cornerSide: "left",
+      shot: { finisherId: "l2" },
+    });
+    eventos[1].playerIds = ["l2", "r1"];
+    eventos[1].metadata = { ...eventos[1].metadata, targetGoalkeeperId: "r1" };
+    expect(finisherIdOf(eventos, id)).toBe("l2");
+  });
+});

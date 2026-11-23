@@ -81,7 +81,10 @@ export type SetPieceRootStats = {
   /** Quien remató, en las que acabaron en tiro o gol. */
   finishers: PlayerTally[];
   unidentifiedFinishers: number;
-  /** Proporciones sobre `recorded`. null si no hay ninguna registrada. */
+  /**
+   * Porcentajes ENTEROS (0-100, ya redondeados) sobre `recorded`. null si no
+   * hay ninguna registrada: no es un 0 %.
+   */
   attemptRate: number | null;
   goalRate: number | null;
   lossRate: number | null;

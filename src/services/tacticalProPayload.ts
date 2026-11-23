@@ -217,8 +217,9 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "incluye las reanudaciones de partidos anteriores; 'recorded' las que tienen jugada " +
     "registrada y 'unrecorded' las que no: de estas últimas no se sabe el desenlace. " +
     "'attempts' son tiros MÁS goles; 'goals' está INCLUIDO en 'attempts' y ya está en el " +
-    "marcador. 'attemptRate', 'goalRate' y 'lossRate' son proporciones entre 0 y 1 sobre " +
-    "'recorded'; null significa que no hay ninguna registrada, no 0%. 'takers' y 'finishers' " +
+    "marcador. 'attemptRate', 'goalRate' y 'lossRate' son porcentajes ENTEROS entre 0 y 100 " +
+    "(ya multiplicados por 100: 67 es 67%) sobre 'recorded'; null significa que no hay " +
+    "ninguna registrada, no 0%. 'takers' y 'finishers' " +
     "son ids de jugador con su recuento; 'unidentifiedTakers' y 'unidentifiedFinishers', las " +
     "que no se identificaron. 'tacticalContext.setPieceSequences' trae cada jugada por " +
     "separado, en orden, con los ids de sus eventos.",

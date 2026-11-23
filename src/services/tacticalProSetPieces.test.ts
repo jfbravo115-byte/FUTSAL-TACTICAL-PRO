@@ -171,7 +171,14 @@ describe("el glosario lo explica", () => {
   });
 
   it("null en una proporción no es 0%", () => {
-    expect(texto).toMatch(/null significa que no hay ninguna registrada, no 0%/);
+    expect(texto).toMatch(/null significa que no hay\s+ninguna registrada, no 0%/);
+  });
+
+  it("y dice en qué unidad van las proporciones, la misma que produce el motor", () => {
+    expect(texto).toMatch(/porcentajes ENTEROS entre 0 y 100/);
+    const s = JSON.parse(JSON.stringify(buildTacticalProPayload(partido))).deterministicReport
+      .setPieces.sequences.team.corner;
+    expect(s.goalRate).toBe(100); // 1 gol de 1 córner registrado: 100, no 1
   });
 
   it("el único vínculo es el explícito", () => {

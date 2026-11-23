@@ -55,22 +55,29 @@ import { VisualSummaryBoard as SharedVisualSummaryBoard } from "../components/ex
 import { formatPlayerTime } from "../utils/playerClock";
 import { ShotTally, EMPTY_SHOT_TALLY, playerShotTallies } from "../utils/shotModel";
 import {
+  ContextGroupCard,
   EventsSection,
-  FoulsByPeriod,
+  GoalSequenceList,
   PdfPagesRenderer,
-  PlayersTable,
   ReportHeader,
-  SpecialContextsSection,
   SummaryKpis,
-  TacticalProChunk,
+  TacticalProUnit,
   ZonesSection,
   capturePagesToPdf,
-  makeRefs,
-  renderOffscreen,
+  isHeadingUnit,
   safeName,
   sectionTitleStyle,
-  splitTacticalProIntoPages,
+  tacticalProUnits,
 } from "./pdfExportService";
+import {
+  FlowItem,
+  FlowItemView,
+  FlowPlan,
+  FlowProgress,
+  Placement,
+  runFlowDocument,
+  sectionStartPages,
+} from "./pdfFlow";
 
 // ── ESTILOS ─────────────────────────────────────────────────────────────
 //
@@ -274,18 +281,27 @@ export function GoalDestinationBoard({
  * captura: si hay nombre real manda el nombre, y si no, el dorsal o la letra
  * provisional. Esta tabla no inventa una séptima forma de llamar a nadie.
  */
+export function dossierRoster(matchData: MatchData, opponent: boolean): Player[] {
+  return matchData.players.filter(
+    (p) => !!p.isOpponent === opponent && p.role !== Role.COACH && p.role !== Role.DELEGATE,
+  );
+}
+
 export function DossierPlayersTable({
   matchData,
   report,
   opponent,
+  from = 0,
+  to,
 }: {
   matchData: MatchData;
   report: MatchReport;
   opponent: boolean;
+  /** Tramo de filas [from, to): la maquetación parte la tabla por filas. */
+  from?: number;
+  to?: number;
 }) {
-  const plantilla = matchData.players.filter(
-    (p) => !!p.isOpponent === opponent && p.role !== Role.COACH && p.role !== Role.DELEGATE,
-  );
+  const plantilla = dossierRoster(matchData, opponent);
   // Una sola pasada por los eventos, con el contrato único de `shotModel`.
   // Este bloque no clasifica tiros por su cuenta: solo coloca el resultado.
   const tallies = playerShotTallies(matchData.events || [], plantilla);
@@ -329,7 +345,7 @@ export function DossierPlayersTable({
         </tr>
       </thead>
       <tbody>
-        {plantilla.map((p) => {
+        {plantilla.slice(from, to ?? plantilla.length).map((p) => {
           const ident = playerDisplayIdentity(p, { players: matchData.players, maxCaracteres: 22 });
           // `playersUsed` solo cubre nuestra plantilla; para el rival se usan
           // las mismas funciones compartidas, nunca un recuento paralelo.
@@ -339,9 +355,12 @@ export function DossierPlayersTable({
             (p.stats.yellowCards ? `${p.stats.yellowCards}A` : "") +
             (p.stats.redCards ? ` ${p.stats.redCards}R` : "");
           return (
-            <tr key={p.id} data-dossier-player={p.id}>
+            <tr key={p.id} data-dossier-player={p.id} data-flow-row>
               <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>
                 {ident.kind === "nombre" ? ident.nombreCompleto : ident.etiquetaProvisional}
+                {p.role === Role.GOALKEEPER && (
+                  <span style={{ fontSize: 7, color: "#6b7280", fontWeight: 400 }}> · POR</span>
+                )}
               </td>
               <td style={td}>{ident.dorsal}</td>
               <td style={td}>{p.isOnPitch ? "Pista" : "Banquillo"}</td>
@@ -377,45 +396,51 @@ export function hasTacticalAnalysis(matchData: MatchData): boolean {
   return !!matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim().length > 0;
 }
 
+/** La frase discreta de la portada que dice de quién es el análisis. */
+export function rivalScopeLabel(matchData: MatchData, includeOpponent: boolean): string {
+  return includeOpponent
+    ? "Análisis de ambos equipos"
+    : `Análisis centrado en ${matchData.teamName || "nuestro equipo"}`;
+}
+
 export function DossierCover({
   matchData,
   report,
   indice,
+  includeOpponent = true,
 }: {
   matchData: MatchData;
   report: MatchReport;
   indice: { section: string; page: number }[];
+  includeOpponent?: boolean;
 }) {
   const conIa = hasTacticalAnalysis(matchData);
   const periodo =
     matchData.period === Period.FINISHED ? "Finalizado" : periodLabel(matchData.period);
+  const bandera = (activo: boolean): React.CSSProperties => ({
+    border: `1px solid ${activo ? "#65a30d" : "#d1d5db"}`,
+    background: activo ? "#f7fee7" : "#f9fafb",
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 11,
+    fontWeight: 700,
+    color: activo ? "#3f6212" : "#6b7280",
+  });
   return (
     <>
       <ReportHeader matchData={matchData} report={report} />
       <div style={{ fontSize: 20, fontWeight: 900, marginTop: 4 }}>Dossier completo del partido</div>
       <div style={{ fontSize: 10, color: "#6b7280" }}>
-        Informe automático, Tactical Pro y todos los mapas registrados · Periodo: {periodo}
+        {matchData.teamName} – {matchData.opponentName} · Periodo: {periodo}
       </div>
-
-      <div
-        data-dossier-ia-flag
-        style={{
-          marginTop: 6,
-          border: `1px solid ${conIa ? "#65a30d" : "#d1d5db"}`,
-          background: conIa ? "#f7fee7" : "#f9fafb",
-          borderRadius: 8,
-          padding: 8,
-          fontSize: 11,
-          fontWeight: 700,
-          color: conIa ? "#3f6212" : "#6b7280",
-        }}
-      >
-        {conIa ? TACTICAL_INCLUDED_LABEL : TACTICAL_MISSING_LABEL}
+      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <div data-dossier-ia-flag style={bandera(conIa)}>
+          {conIa ? TACTICAL_INCLUDED_LABEL : TACTICAL_MISSING_LABEL}
+        </div>
+        <div data-dossier-scope={includeOpponent ? "both" : "team"} style={bandera(true)}>
+          {rivalScopeLabel(matchData, includeOpponent)}
+        </div>
       </div>
-
-      <div style={sectionTitleStyle}>Resumen ejecutivo</div>
-      <SummaryKpis report={report} />
-
       <div style={sectionTitleStyle}>Índice</div>
       <DossierIndexTable indice={indice} />
     </>
@@ -441,8 +466,10 @@ export function DossierIndexTable({
   indice: { section: string; page: number }[];
 }) {
   const mitad = Math.ceil(indice.length / 2);
+  // Dos columnas en cuanto hay más de cuatro entradas: el índice compacto
+  // cabe siempre en la portada y deja ver todas las secciones de un vistazo.
   const columnas =
-    indice.length > INDEX_ROWS_PER_COLUMN
+    indice.length > Math.min(INDEX_ROWS_PER_COLUMN, 4)
       ? [indice.slice(0, mitad), indice.slice(mitad)]
       : [indice];
   return (
@@ -751,269 +778,476 @@ export function hasZoneData(zones: ZoneDashboard): boolean {
   );
 }
 
-/**
- * Presupuesto de caracteres por página de Tactical Pro EN EL DOSSIER.
- *
- * Menor que el del informe resumido (3200) porque aquí la página gasta alto
- * en el pie, y la primera del bloque gasta además el aviso. Con 3200 se midió
- * en el Deploy Preview un recorte de 127 px en la primera página del análisis
- * y de 85 px en la segunda: texto perdido sin ninguna señal.
- */
-export const DOSSIER_TACTICAL_CHARS_PER_PAGE = 2400;
+// ── INVENTARIO ──────────────────────────────────────────────────────────
+//
+// El dossier ya no se escribe página a página. Se describe como un
+// INVENTARIO de secciones —con id estable, título, equipo y tipo— y cada
+// sección como una lista de bloques con significado (título, mapa, tabla,
+// tarjeta, texto). La maquetación por medición (`pdfFlow`) los reparte en
+// páginas A4; el índice y los pies salen de ese reparto, nunca de números
+// escritos a mano.
+//
+// Las cifras siguen saliendo de los MISMOS servicios: aquí no se filtra ni
+// se cuenta nada.
 
-export function buildDossierPages(matchData: MatchData): DossierPage[] {
+export type DossierOptions = {
+  /**
+   * `false` = análisis centrado en nuestro equipo: fuera las tablas, mapas,
+   * tiempos, porteros y páginas propias del rival. Se conservan los dos
+   * nombres, el marcador, la secuencia completa de goles (autor y
+   * beneficiario), los goles en propia, las faltas por parte, los contextos
+   * 5x4/4x5, las acciones relevantes y Tactical Pro entero.
+   */
+  includeOpponent?: boolean;
+};
+
+export type DossierTeamScope = "team" | "opponent" | "both";
+
+export type DossierSection = {
+  id: string;
+  title: string;
+  team: DossierTeamScope;
+  kind: "summary" | "maps" | "set-pieces" | "players" | "goalkeepers" | "contexts" | "tactical";
+};
+
+export type DossierInventory = {
+  sections: DossierSection[];
+  items: FlowItem[];
+};
+
+/** Ids estables de las secciones, en el orden del documento. */
+export const DOSSIER_SECTION_IDS = [
+  "resumen",
+  "ofensiva",
+  "perdidas-fases",
+  "balon-parado",
+  "jugadores",
+  "porteros",
+  "contextos",
+  "tactical-pro",
+] as const;
+
+const subtituloStyle: React.CSSProperties = { fontSize: 12, fontWeight: 900, marginBottom: 4 };
+
+function Titulo({ children }: { children: React.ReactNode }) {
+  return <div style={{ ...sectionTitleStyle, margin: "2px 0 0" }}>{children}</div>;
+}
+
+/**
+ * Recuperaciones, pérdidas y balance por parte, de `report.periodStats` y
+ * `report.teamTotals`. Ni una cuenta nueva: se colocan.
+ */
+export function BalanceTable({ report }: { report: MatchReport }) {
+  const th: React.CSSProperties = { fontSize: 8, color: "#6b7280", padding: "3px 6px", borderBottom: "1px solid #d1d5db", textAlign: "center" };
+  const td: React.CSSProperties = { fontSize: 10, padding: "3px 6px", borderBottom: "1px solid #f3f4f6", textAlign: "center" };
+  const firma = (n: number) => `${n >= 0 ? "+" : ""}${n}`;
+  const t = report.teamTotals;
+  return (
+    <div data-dossier-balance>
+      <div style={subtituloStyle}>Recuperaciones, pérdidas y balance · {report.teamName}</div>
+      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>Parte</th>
+            <th style={th}>Tiros</th>
+            <th style={th}>Goles</th>
+            <th style={th}>Recuperaciones</th>
+            <th style={th}>Pérdidas + errores</th>
+            <th style={th}>Balance Rec-(P+E)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {report.periodStats.map((p) => (
+            <tr key={p.period}>
+              <td style={{ ...td, textAlign: "left" }}>{p.label}</td>
+              <td style={td}>{p.shots}</td>
+              <td style={td}>{p.goals}</td>
+              <td style={td}>{p.steals}</td>
+              <td style={td}>{p.losses}</td>
+              <td style={td}>{firma(p.steals - p.losses)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td style={{ ...td, textAlign: "left", fontWeight: 900 }}>Partido</td>
+            <td style={{ ...td, fontWeight: 900 }}>{t.shots}</td>
+            <td style={{ ...td, fontWeight: 900 }}>{t.goals}</td>
+            <td style={{ ...td, fontWeight: 900 }}>{t.recoveries}</td>
+            <td style={{ ...td, fontWeight: 900 }}>{t.lossesAndErrors}</td>
+            <td style={{ ...td, fontWeight: 900 }}>{firma(t.recoveryLossBalance)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style={{ ...noteStyle, marginTop: 3 }}>
+        Producción propia por parte. «Partido» es el total del informe; los mapas de pérdidas
+        y recuperaciones están en «Producción ofensiva y mapas».
+      </div>
+    </div>
+  );
+}
+
+/**
+ * El dossier como inventario de secciones y bloques.
+ *
+ * Se decide ANTES de renderizar: qué entra, en qué orden y de quién es. Lo
+ * que no tiene datos no entra —una hoja vacía hace pensar que el dato
+ * existe y es cero—.
+ */
+export function buildDossierInventory(
+  matchData: MatchData,
+  options: DossierOptions = {},
+): DossierInventory {
+  const conRival = options.includeOpponent !== false;
   const report = generateMatchReport(matchData);
   const propio = buildZoneDashboard(matchData, false);
   const rival = buildZoneDashboard(matchData, true);
-  const goalkeepers = buildGoalkeeperReports(matchData);
+  const goalkeepers = buildGoalkeeperReports(matchData).filter((gk) => conRival || !gk.isOpponent);
   const nombrePropio = matchData.teamName || "Equipo local";
   const nombreRival = matchData.opponentName || "Equipo visitante";
+  const bandos: boolean[] = conRival ? [false, true] : [false];
 
-  const pages: DossierPage[] = [];
-  const push = (key: string, section: string, content: React.ReactNode) =>
-    pages.push({ key, section, content });
+  const sections: DossierSection[] = [];
+  const items: FlowItem[] = [];
+  const seccion = (s: DossierSection) => sections.push(s);
+  const bloque = (it: FlowItem) => items.push(it);
+  const titulo = (section: string, texto: string, breakBefore = false) =>
+    bloque({
+      id: `${section}-titulo`,
+      section,
+      kind: "heading",
+      keepWithNext: true,
+      breakBefore,
+      node: <Titulo>{texto}</Titulo>,
+    });
+  const ambos: DossierTeamScope = conRival ? "both" : "team";
 
-  // ── 1 · RESUMEN VISUAL ────────────────────────────────────────────────
-  //
-  // Nada más abrir: el partido de un vistazo, con el lenguaje de la pantalla.
-  //
-  // Ocupa el sitio de la antigua página «Informe automático · datos clave»,
-  // que no aportaba nada: era `SummaryKpis` + `FoulsByPeriod`, exactamente lo
-  // que la PORTADA ya imprime en su resumen ejecutivo —`SummaryKpis` incluye
-  // dentro el desglose de faltas—. Se quita la repetición, no el dato.
-  push("visual-summary", "Resumen visual", <SharedVisualSummaryBoard matchData={matchData} report={report} />);
+  // ── 1 · RESUMEN VISUAL Y CLAVES ───────────────────────────────────────
+  seccion({ id: "resumen", title: "Resumen visual y claves", team: "both", kind: "summary" });
+  bloque({
+    id: "resumen-visual",
+    section: "resumen",
+    kind: "card",
+    breakBefore: true,
+    node: <SharedVisualSummaryBoard matchData={matchData} report={report} />,
+  });
+  bloque({ id: "resumen-claves", section: "resumen", kind: "card", node: <SummaryKpis report={report} /> });
 
-  // «Datos clave» y el bloque de zonas NO caben juntos en una A4 cuando el
-  // partido trae datos de verdad: medido en el Deploy Preview con 30 fichas y
-  // 121 acciones, la página desbordaba 146 px y el marco los recortaba sin
-  // avisar. La de zonas solo existe si hay zonas que contar: una hoja con
-  // «Sin datos registrados» hace pensar que el dato existe y es cero.
-
-  if (hasZoneData(propio)) {
-    push(
-      "report-zones",
-      "Informe automático · mapas y zonas",
-      <ZonesSection zones={propio} matchData={matchData} />,
-    );
-  }
-
-  push(
-    "report-players",
-    "Informe automático · jugadores y rotaciones",
-    <>
-      <div style={sectionTitleStyle}>Jugadores utilizados y rotaciones</div>
-      <PlayersTable report={report} />
-    </>,
-  );
-
-  // ── 2 · JUGADORES Y TIEMPOS, LOS DOS EQUIPOS ──────────────────────────
-  ([false, true] as const).forEach((opponent) => {
+  // ── 2 · PRODUCCIÓN OFENSIVA Y MAPAS ───────────────────────────────────
+  seccion({ id: "ofensiva", title: "Producción ofensiva y mapas", team: ambos, kind: "maps" });
+  titulo("ofensiva", "Producción ofensiva y mapas", true);
+  bandos.forEach((opponent) => {
     const nombre = opponent ? nombreRival : nombrePropio;
-    push(
-      `players-${opponent ? "rival" : "team"}`,
-      `Jugadores y tiempos · ${nombre}`,
-      <>
-        <div style={sectionTitleStyle}>Jugadores y tiempos · {nombre}</div>
-        <DossierPlayersTable matchData={matchData} report={report} opponent={opponent} />
-        <div style={noteStyle}>
-          TOT = tiempo total jugado · ROT = tiempo desde la última entrada a pista. «Tiros»
-          incluye los goles. El dorsal es el registrado; «?» significa que todavía no se conoce.
+    bloque({
+      id: `mapas-${opponent ? "rival" : "team"}`,
+      section: "ofensiva",
+      kind: "map",
+      team: opponent ? "opponent" : "team",
+      node: (
+        <div>
+          <div style={subtituloStyle}>Mapas de acciones · {nombre}</div>
+          <GlobalMapsBoard matchData={matchData} dashboard={opponent ? rival : propio} opponent={opponent} />
         </div>
-      </>,
-    );
+      ),
+    });
   });
-
-  // ── 3 · MAPAS GLOBALES, LOS SEIS FILTROS, LOS DOS EQUIPOS ─────────────
-  ([false, true] as const).forEach((opponent) => {
-    const nombre = opponent ? nombreRival : nombrePropio;
-    push(
-      `maps-${opponent ? "rival" : "team"}`,
-      `Mapas de acciones · ${nombre}`,
-      <>
-        <div style={sectionTitleStyle}>Mapas de acciones · {nombre}</div>
-        <GlobalMapsBoard
-          matchData={matchData}
-          dashboard={opponent ? rival : propio}
-          opponent={opponent}
-        />
-      </>,
-    );
-  });
-
-  // ── 4 · DESTINO DE LOS TIROS ──────────────────────────────────────────
-  push(
-    "destinations",
-    "Destino de los tiros",
-    <>
-      <div style={sectionTitleStyle}>Destino de los tiros</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+  bloque({
+    id: "destinos",
+    section: "ofensiva",
+    kind: "map",
+    team: ambos,
+    node: (
+      <div style={{ display: "grid", gridTemplateColumns: conRival ? "1fr 1fr" : "1fr", gap: 18 }}>
         <GoalDestinationBoard dashboard={propio} teamName={nombrePropio} opponent={false} />
-        <GoalDestinationBoard dashboard={rival} teamName={nombreRival} opponent={true} />
+        {conRival && <GoalDestinationBoard dashboard={rival} teamName={nombreRival} opponent={true} />}
       </div>
-    </>,
-  );
+    ),
+  });
+  if (hasZoneData(propio)) {
+    bloque({
+      id: "zonas-detalle",
+      section: "ofensiva",
+      kind: "card",
+      team: "team",
+      node: <ZonesSection zones={propio} matchData={matchData} withMaps={false} withSetPieceLines={false} />,
+    });
+  }
+  bandos.forEach((opponent) => {
+    const nombre = opponent ? nombreRival : nombrePropio;
+    bloque({
+      id: `tiros-parte-${opponent ? "rival" : "team"}`,
+      section: "ofensiva",
+      kind: "map",
+      team: opponent ? "opponent" : "team",
+      node: (
+        <div>
+          <div style={subtituloStyle}>Tiros por parte · {nombre}</div>
+          <PeriodShotMapsBoard events={matchData.events || []} opponent={opponent} pitchWidth={240} />
+        </div>
+      ),
+    });
+  });
 
-  // ── 5 · MAPAS POR PERIODO ─────────────────────────────────────────────
-  ([false, true] as const).forEach((opponent) => {
+  // ── 3 · PÉRDIDAS, RECUPERACIONES Y FASES ──────────────────────────────
+  seccion({ id: "perdidas-fases", title: "Pérdidas, recuperaciones y fases", team: ambos, kind: "maps" });
+  titulo("perdidas-fases", "Pérdidas, recuperaciones y fases");
+  bloque({ id: "balance", section: "perdidas-fases", kind: "table", team: "team", node: <BalanceTable report={report} /> });
+  bandos.forEach((opponent) => {
     if (!hasPeriodZoneData(matchData, opponent)) return;
     const nombre = opponent ? nombreRival : nombrePropio;
-    push(
-      `periods-${opponent ? "rival" : "team"}`,
-      `Evolución por periodos · ${nombre}`,
-      <>
-        <div style={sectionTitleStyle}>Evolución por periodos · {nombre}</div>
-        <PeriodZoneMapsBoard matchData={matchData} opponent={opponent} pitchWidth={280} />
-      </>,
-    );
+    bloque({
+      id: `periodos-${opponent ? "rival" : "team"}`,
+      section: "perdidas-fases",
+      kind: "map",
+      team: opponent ? "opponent" : "team",
+      node: (
+        <div>
+          <div style={subtituloStyle}>Evolución por periodos · {nombre}</div>
+          <PeriodZoneMapsBoard matchData={matchData} opponent={opponent} pitchWidth={220} />
+        </div>
+      ),
+    });
   });
-
-  // ── 6 · TIROS POR PARTE ───────────────────────────────────────────────
-  ([false, true] as const).forEach((opponent) => {
-    const nombre = opponent ? nombreRival : nombrePropio;
-    push(
-      `shots-periods-${opponent ? "rival" : "team"}`,
-      `Tiros por parte · ${nombre}`,
-      <>
-        <div style={sectionTitleStyle}>Tiros por parte · {nombre}</div>
-        <PeriodShotMapsBoard events={matchData.events || []} opponent={opponent} />
-      </>,
-    );
-  });
-
-  // ── 7 · FASES DE JUEGO ────────────────────────────────────────────────
-  //
-  // Una página por métrica: el total del partido y después cada parte. Un
-  // histórico sin fase no entra aquí —`hasPhaseData` lo descarta— y una
-  // prórroga sin datos tampoco gana fila, porque `phasePeriods` solo ofrece
-  // las partes que el partido jugó.
   if (hasPhaseData(matchData)) {
     const periodos = phasePeriods(matchData);
+    bloque({
+      id: "fases-nota",
+      section: "perdidas-fases",
+      kind: "heading",
+      keepWithNext: true,
+      node: (
+        <div>
+          <div style={subtituloStyle}>Fases de juego</div>
+          <div style={noteStyle}>
+            La fase es SIEMPRE la de {nombrePropio}, también cuando la acción es del rival: los
+            tiros rivales se leen desde lo que nuestro equipo estaba haciendo.
+          </div>
+        </div>
+      ),
+    });
     PHASE_METRICS.forEach((metric) => {
-      push(
-        `phase-${metric.key}`,
-        `Fases de juego · ${metric.title}`,
-        <>
-          <div style={sectionTitleStyle}>Fases de juego · {metric.title}</div>
-          <div style={{ ...noteStyle, marginBottom: 4 }}>
-            La fase es SIEMPRE la de {nombrePropio}, también cuando la acción es del rival.
-          </div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: metric.color, marginBottom: 2 }}>
-            Partido completo
-          </div>
-          <PhaseMetricRow
-            matchData={matchData}
-            metric={metric}
-            pitchWidth={215}
-            showTitle={false}
-          />
-          {periodos.map((period) => (
-            <div key={period}>
+      const fila = (period: Period | undefined, rotulo: string, primera: boolean) =>
+        bloque({
+          id: `fase-${metric.key}-${period ?? "total"}`,
+          section: "perdidas-fases",
+          kind: "map",
+          team: "team",
+          node: (
+            <div>
               <div style={{ fontSize: 9, fontWeight: 700, color: metric.color, marginBottom: 2 }}>
-                {periodLabel(period)}
+                {primera ? `${metric.title} · ` : ""}
+                {rotulo}
               </div>
-              <PhaseMetricRow
-                matchData={matchData}
-                metric={metric}
-                period={period}
-                pitchWidth={215}
-                showTitle={false}
-              />
+              <PhaseMetricRow matchData={matchData} metric={metric} period={period} pitchWidth={175} showTitle={false} />
             </div>
-          ))}
-        </>,
-      );
+          ),
+        });
+      fila(undefined, "Partido completo", true);
+      periodos.forEach((period) => fila(period, `${metric.title} · ${periodLabel(period)}`, false));
     });
   }
 
-  // ── 8 · BALÓN PARADO ──────────────────────────────────────────────────
-  push(
-    "set-pieces",
-    "Balón parado",
-    <>
-      <div style={sectionTitleStyle}>Balón parado</div>
-      <SetPieceSummaryBoard matchData={matchData} />
-    </>,
-  );
-
-  // ── 9 · PORTEROS ──────────────────────────────────────────────────────
-  goalkeepers.forEach((gk) => {
-    const unico = goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
-    push(
-      `gk-${gk.id}`,
-      `Portero · ${gk.name}`,
-      <>
-        <div style={sectionTitleStyle}>
-          Portero · {gk.isOpponent ? nombreRival : nombrePropio}
-        </div>
-        <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={unico} />
-      </>,
-    );
+  // ── 4 · BALÓN PARADO ──────────────────────────────────────────────────
+  seccion({ id: "balon-parado", title: "Balón parado", team: ambos, kind: "set-pieces" });
+  titulo("balon-parado", "Balón parado");
+  bloque({
+    id: "balon-parado-tabla",
+    section: "balon-parado",
+    kind: "card",
+    team: ambos,
+    node: <SetPieceSummaryBoard matchData={matchData} includeOpponent={conRival} />,
   });
 
-  // ── 10 · CONTEXTOS Y EVENTOS ──────────────────────────────────────────
-  if (report.matchContextGroups.length > 0 || report.goalSequence.length > 0) {
-    push(
-      "contexts",
-      "Contextos especiales y secuencia de goles",
-      <>
-        <SpecialContextsSection report={report} />
-      </>,
-    );
-  }
+  // ── 5 · JUGADORES, TIEMPOS Y ROTACIONES ───────────────────────────────
+  seccion({ id: "jugadores", title: "Jugadores, tiempos y rotaciones", team: ambos, kind: "players" });
+  titulo("jugadores", "Jugadores, tiempos y rotaciones");
+  const rot = report.rotationSummary;
+  bloque({
+    id: "rotaciones",
+    section: "jugadores",
+    kind: "text",
+    team: "team",
+    node: (
+      <div style={{ fontSize: 10 }}>
+        Rotaciones totales registradas ({nombrePropio}): <b>{rot.totalRotationsCount}</b>
+        {rot.avgRotLabel ? ` · ROT medio en pista: ${rot.avgRotLabel} · ROT máximo: ${rot.maxRotLabel}` : ""}
+      </div>
+    ),
+  });
+  bandos.forEach((opponent) => {
+    const nombre = opponent ? nombreRival : nombrePropio;
+    const cuantos = dossierRoster(matchData, opponent).length;
+    bloque({
+      id: `jugadores-${opponent ? "rival" : "team"}`,
+      section: "jugadores",
+      kind: "table",
+      team: opponent ? "opponent" : "team",
+      ...(cuantos > 0
+        ? {
+            rows: {
+              count: cuantos,
+              render: (from: number, to: number) => (
+                <div>
+                  <div style={subtituloStyle}>
+                    {nombre}
+                    {from > 0 ? " (continuación)" : ""}
+                  </div>
+                  <DossierPlayersTable matchData={matchData} report={report} opponent={opponent} from={from} to={to} />
+                </div>
+              ),
+            },
+          }
+        : {
+            node: (
+              <div>
+                <div style={subtituloStyle}>{nombre}</div>
+                <DossierPlayersTable matchData={matchData} report={report} opponent={opponent} />
+              </div>
+            ),
+          }),
+    });
+  });
+  bloque({
+    id: "jugadores-nota",
+    section: "jugadores",
+    kind: "text",
+    node: (
+      <div style={noteStyle}>
+        TOT = tiempo total jugado · ROT = tiempo desde la última entrada a pista · Rot. = entradas
+        registradas. «Tiros» incluye los goles. El dorsal es el registrado; «?» significa que
+        todavía no se conoce.
+      </div>
+    ),
+  });
 
-  if (report.relevantEvents.length > 0) {
-    push(
-      "events",
-      "Acciones relevantes",
-      <>
-        <EventsSection report={report} />
-      </>,
-    );
-  }
-
-  // ── 11 · TACTICAL PRO ─────────────────────────────────────────────────
-  //
-  // Lo último, y SOLO si ya existe. Nunca se pide aquí: exportar no genera
-  // análisis ni consume saldo. Si no hay, no se crea ninguna página vacía —
-  // la portada ya lo declara.
-  if (hasTacticalAnalysis(matchData)) {
-    const chunks = splitTacticalProIntoPages(
-      matchData.tacticalAnalysis!,
-      DOSSIER_TACTICAL_CHARS_PER_PAGE,
-    );
-    chunks.forEach((chunk, i) => {
-      push(
-        `tactical-${i}`,
-        `Tactical Pro${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`,
-        <>
-          {/* El aviso va en la PRIMERA página del bloque y sale de la misma
-              constante que usa el informe de MatchTracker: una segunda
-              redacción del mismo matiz acabaría diciendo otra cosa. */}
-          {i === 0 && (
-            <div data-dossier-ia-caveat style={{ ...noteStyle, marginBottom: 2 }}>
-              {TACTICAL_PRO_CAVEAT}
+  // ── 6 · PORTEROS ──────────────────────────────────────────────────────
+  if (goalkeepers.length > 0) {
+    seccion({ id: "porteros", title: "Porteros", team: ambos, kind: "goalkeepers" });
+    titulo("porteros", "Porteros");
+    goalkeepers.forEach((gk) => {
+      const unico = goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
+      bloque({
+        id: `portero-${gk.id}`,
+        section: "porteros",
+        kind: "card",
+        team: gk.isOpponent ? "opponent" : "team",
+        node: (
+          <div data-dossier-goalkeeper={gk.id}>
+            <div style={subtituloStyle}>
+              {gk.name} · {gk.isOpponent ? nombreRival : nombrePropio}
             </div>
-          )}
-          <TacticalProChunk chunk={chunk} index={i} total={chunks.length} />
-        </>,
-      );
+            <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={unico} />
+          </div>
+        ),
+      });
     });
   }
 
-  return pages;
+  // ── 7 · CONTEXTOS Y SECUENCIA ─────────────────────────────────────────
+  const hayContextos =
+    report.goalSequence.length > 0 ||
+    report.matchContextGroups.length > 0 ||
+    report.relevantEvents.length > 0;
+  if (hayContextos) {
+    seccion({ id: "contextos", title: "Contextos y secuencia de goles", team: "both", kind: "contexts" });
+    titulo("contextos", "Contextos y secuencia de goles");
+    if (report.goalSequence.length > 0) {
+      bloque({
+        id: "goles",
+        section: "contextos",
+        kind: "table",
+        team: "both",
+        rows: {
+          count: report.goalSequence.length,
+          render: (from, to) => <GoalSequenceList report={report} from={from} to={to} />,
+        },
+      });
+    }
+    if (report.matchContextGroups.length > 0) {
+      bloque({
+        id: "contextos-titulo-situaciones",
+        section: "contextos",
+        kind: "heading",
+        keepWithNext: true,
+        node: <div style={sectionTitleStyle}>Situaciones especiales</div>,
+      });
+      report.matchContextGroups.forEach((g) =>
+        bloque({
+          id: `contexto-${g.type}-${g.side}`,
+          section: "contextos",
+          kind: "card",
+          team: "both",
+          node: <ContextGroupCard report={report} group={g} />,
+        }),
+      );
+    }
+    if (report.relevantEvents.length > 0) {
+      bloque({
+        id: "eventos",
+        section: "contextos",
+        kind: "table",
+        team: "both",
+        rows: {
+          count: report.relevantEvents.length,
+          render: (from, to) => <EventsSection report={report} from={from} to={to} />,
+        },
+      });
+    }
+  }
+
+  // ── 8 · TACTICAL PRO ──────────────────────────────────────────────────
+  //
+  // Entero, sin regenerar ni resumir. Se reparte por UNIDADES con sentido
+  // —apartado, párrafo, lista— y un apartado numerado va siempre con su
+  // primer párrafo.
+  if (hasTacticalAnalysis(matchData)) {
+    seccion({ id: "tactical-pro", title: "Tactical Pro", team: "both", kind: "tactical" });
+    bloque({
+      id: "tactical-pro-titulo",
+      section: "tactical-pro",
+      kind: "heading",
+      keepWithNext: true,
+      breakBefore: true,
+      node: (
+        <div>
+          <Titulo>Tactical Pro</Titulo>
+          <div data-dossier-ia-caveat style={{ ...noteStyle, marginTop: 2 }}>
+            {TACTICAL_PRO_CAVEAT}
+          </div>
+        </div>
+      ),
+    });
+    tacticalProUnits(matchData.tacticalAnalysis!).forEach((unit, i) =>
+      bloque({
+        id: `tactical-pro-${i}`,
+        section: "tactical-pro",
+        kind: isHeadingUnit(unit) ? "heading" : "text",
+        keepWithNext: isHeadingUnit(unit),
+        node: <TacticalProUnit unit={unit} />,
+      }),
+    );
+  }
+
+  return { sections, items };
 }
 
 // ── MONTAJE ─────────────────────────────────────────────────────────────
 
+/** Ancho útil del cuerpo: A4 menos el relleno lateral. */
+export const DOSSIER_BODY_WIDTH = PAGE_WIDTH - 56;
+/** Alto útil de reserva cuando no se puede medir (jsdom). */
+export const DOSSIER_FALLBACK_BODY_HEIGHT = PAGE_HEIGHT - 56 - 30;
+
 /**
- * El índice: una entrada por SECCIÓN, con la página en la que empieza.
- *
- * Las páginas del mismo bloque de Tactical Pro no se repiten como entradas
- * distintas; se agrupan por su nombre de sección, que ya lleva (1/3).
+ * El índice: una entrada por SECCIÓN, con la página en la que empieza según
+ * el reparto real. La portada es la página 1.
  */
-export function buildDossierIndex(pages: DossierPage[]): { section: string; page: number }[] {
-  // La portada es la página 1, así que el cuerpo empieza en la 2.
-  return pages.map((p, i) => ({ section: p.section, page: i + 2 }));
+export function buildDossierIndex(
+  inventory: DossierInventory,
+  plan: FlowPlan,
+): { id: string; section: string; page: number }[] {
+  const inicio = sectionStartPages(plan, inventory.items, 2);
+  return inventory.sections
+    .filter((s) => inicio[s.id] !== undefined)
+    .map((s) => ({ id: s.id, section: s.title, page: inicio[s.id] }));
 }
 
 export function DossierPageFrame({
@@ -1023,6 +1257,7 @@ export function DossierPageFrame({
   pageNumber,
   totalPages,
   children,
+  cover = false,
 }: {
   matchData: MatchData;
   report: MatchReport;
@@ -1030,17 +1265,20 @@ export function DossierPageFrame({
   pageNumber: number;
   totalPages: number;
   children: React.ReactNode;
+  cover?: boolean;
 }) {
   return (
-    <div style={dossierPageStyle}>
-      <div style={bodyStyle}>{children}</div>
+    <div style={dossierPageStyle} data-flow-page {...(cover ? { "data-dossier-cover": "" } : {})}>
+      <div style={bodyStyle} data-flow-body>
+        {children}
+      </div>
       <div style={footerStyle} data-dossier-footer>
         <span>
           {matchData.teamName} {report.score.team} – {report.score.opponent} {matchData.opponentName}
           {" · "}
           {section}
         </span>
-        <span data-dossier-page-number>
+        <span data-dossier-page-number data-flow-page-number>
           Página {pageNumber} de {totalPages}
         </span>
       </div>
@@ -1048,47 +1286,57 @@ export function DossierPageFrame({
   );
 }
 
-function DossierRenderer({
+/** Sección (título) de una página: la del primer bloque que contiene. */
+function seccionDePagina(inventory: DossierInventory, pagina: Placement[]): string {
+  const item = inventory.items.find((it) => it.id === pagina[0]?.id);
+  return inventory.sections.find((s) => s.id === item?.section)?.title ?? "";
+}
+
+export function DossierDocument({
   matchData,
   report,
-  pages,
-  refs,
+  inventory,
+  plan,
+  includeOpponent,
 }: {
   matchData: MatchData;
   report: MatchReport;
-  pages: DossierPage[];
-  refs: React.RefObject<HTMLDivElement>[];
+  inventory: DossierInventory;
+  plan: FlowPlan;
+  includeOpponent: boolean;
 }) {
-  const indice = buildDossierIndex(pages);
-  const total = pages.length + 1;
+  const porId = Object.fromEntries(inventory.items.map((it) => [it.id, it]));
+  const indice = buildDossierIndex(inventory, plan);
+  const total = plan.pages.length + 1;
   return (
     <>
-      <div ref={refs[0]} style={dossierPageStyle} data-dossier-cover>
-        <div style={bodyStyle}>
-          <DossierCover matchData={matchData} report={report} indice={indice} />
-        </div>
-        <div style={footerStyle} data-dossier-footer>
-          <span>
-            {matchData.teamName} {report.score.team} – {report.score.opponent}{" "}
-            {matchData.opponentName} · Portada
-          </span>
-          <span data-dossier-page-number>Página 1 de {total}</span>
-        </div>
-      </div>
-      {pages.map((p, i) => (
-        <div key={p.key} ref={refs[i + 1]} data-dossier-section={p.key}>
-          <DossierPageFrame
-            matchData={matchData}
-            report={report}
-            section={p.section}
-            pageNumber={i + 2}
-            totalPages={total}
-          >
-            {p.content}
-          </DossierPageFrame>
-        </div>
+      <DossierPageFrame matchData={matchData} report={report} section="Portada" pageNumber={1} totalPages={total} cover>
+        <DossierCover matchData={matchData} report={report} indice={indice} includeOpponent={includeOpponent} />
+      </DossierPageFrame>
+      {plan.pages.map((pagina, i) => (
+        <DossierPageFrame
+          key={i}
+          matchData={matchData}
+          report={report}
+          section={seccionDePagina(inventory, pagina)}
+          pageNumber={i + 2}
+          totalPages={total}
+        >
+          {pagina.map((p) => (
+            <FlowItemView key={`${p.id}-${p.from ?? ""}`} item={porId[p.id]} placement={p} />
+          ))}
+        </DossierPageFrame>
       ))}
     </>
+  );
+}
+
+/** Una página vacía con su marco: sirve para medir el alto útil real. */
+function DossierProbe({ matchData, report }: { matchData: MatchData; report: MatchReport }) {
+  return (
+    <DossierPageFrame matchData={matchData} report={report} section="—" pageNumber={1} totalPages={1}>
+      {null}
+    </DossierPageFrame>
   );
 }
 
@@ -1161,12 +1409,23 @@ export type DossierCheck = { etiqueta: string; esperado: string; ok: boolean };
  * Devuelve una lista, no un booleano: lo útil es saber QUÉ no cuadra. No
  * corrige nada ni rellena nada; solo mira.
  */
+/** El texto visible de una unidad de Tactical Pro, sin marcas de markdown. */
+export function tacticalUnitProbe(unit: string): string {
+  const primera = unit
+    .split("\n")
+    .map((l) => l.replace(/^\s*(?:[-*+]|\d+\.)\s+/, "").replace(/[*_`#>]/g, "").trim())
+    .find((l) => l.length > 0) ?? "";
+  return primera.replace(/\s+/g, " ").slice(0, 40).trim();
+}
+
 export function verifyDossierAgainstReport(
   pages: (HTMLElement | null | undefined)[],
   matchData: MatchData,
   report: MatchReport = generateMatchReport(matchData),
+  options: DossierOptions = {},
 ): DossierCheck[] {
-  const texto = pages.map((p) => p?.textContent ?? "").join("\n");
+  const conRival = options.includeOpponent !== false;
+  const texto = pages.map((p) => p?.textContent ?? "").join("\n").replace(/\s+/g, " ");
   const propio = buildZoneDashboard(matchData, false);
   const rival = buildZoneDashboard(matchData, true);
   const porteros = buildGoalkeeperReports(matchData);
@@ -1182,7 +1441,7 @@ export function verifyDossierAgainstReport(
     comprobar("marcador propio", report.score.team),
     comprobar("marcador rival", report.score.opponent),
     comprobar("tiros propios", propio.totals.attempts),
-    comprobar("tiros rivales", rival.totals.attempts),
+    ...(conRival ? [comprobar("tiros rivales", rival.totals.attempts)] : []),
     comprobar("recuperaciones propias", propio.totals.recoveries),
     comprobar("pérdidas propias", propio.totals.losses),
   ];
@@ -1200,8 +1459,24 @@ export function verifyDossierAgainstReport(
       ),
     );
   }
-  // Y cada portero relevante, de los dos equipos.
-  for (const gk of porteros) checks.push(comprobar(`portero ${gk.name}`, gk.name));
+  // Cada portero relevante —los rivales solo si el rival se incluye—.
+  for (const gk of porteros) {
+    if (gk.isOpponent && !conRival) continue;
+    checks.push(comprobar(`portero ${gk.name}`, gk.name));
+  }
+  // Todos los goleadores, no solo el máximo.
+  for (const g of report.highlights.scorers) checks.push(comprobar(`goleador ${g.name}`, g.name));
+  // Los contextos 5x4/4x5, con su rótulo.
+  for (const c of report.matchContextGroups) checks.push(comprobar(`contexto ${c.label}`, c.label));
+  // Balón parado: el total de córners propios que el motor único cuenta.
+  checks.push(comprobar("balón parado", "Balón parado"));
+  // Tactical Pro ENTERO: el arranque visible de cada unidad.
+  if (hasTacticalAnalysis(matchData)) {
+    tacticalProUnits(matchData.tacticalAnalysis!).forEach((u, i) => {
+      const muestra = tacticalUnitProbe(u);
+      if (muestra) checks.push(comprobar(`tactical pro ${i + 1}`, muestra));
+    });
+  }
   // La secuencia de goles, uno por uno, por el marcador que dejó: dos goles
   // del mismo minuto no se confunden, y el orden queda fijado.
   report.goalSequence.forEach((g, i) =>
@@ -1226,34 +1501,62 @@ export function dossierFileName(matchData: MatchData): string {
   return `dossier_completo_${safeName(matchData.teamName)}_${safeName(matchData.opponentName)}_${iso}.pdf`;
 }
 
+export type DossierExportOptions = DossierOptions & {
+  onProgress?: (p: FlowProgress) => void;
+};
+
 /**
  * Exporta el DOSSIER COMPLETO. Número de páginas dinámico.
  *
- * Igual que el informe resumido: se renderiza fuera de pantalla, se captura y
- * se descarga directamente. Sin ventanas emergentes y sin dejar nunca el
- * contenedor temporal en el DOM —`renderOffscreen` lo limpia en su `finally`,
- * también si `toJpeg` o `pdf.save` lanzan—.
+ * Mide, reparte y audita antes de capturar (`pdfFlow`): ninguna página se
+ * aplasta ni se recorta. Comprueba que lo renderizado es ESTE partido y que
+ * sus cifras son las del informe, y solo entonces guarda: si algo falla no
+ * queda ninguna descarga a medias. El contenedor temporal se limpia siempre.
  */
-export async function exportFullMatchDossierPdf(match: MatchData): Promise<void> {
+export async function exportFullMatchDossierPdf(
+  match: MatchData,
+  options: DossierExportOptions = {},
+): Promise<void> {
   // El partido llega por parámetro y es la ÚNICA fuente de todo lo que sigue.
   // No se lee de ningún almacén, ni de un estado de módulo, ni de un fixture:
   // dos exportaciones seguidas de partidos distintos no comparten nada.
   const matchData = match;
+  const includeOpponent = options.includeOpponent !== false;
   const report = generateMatchReport(matchData);
-  const pages = buildDossierPages(matchData);
-  const refs = makeRefs(pages.length + 1);
+  const inventory = buildDossierInventory(matchData, { includeOpponent });
+  options.onProgress?.({ phase: "layout", page: 0, total: 0 });
 
-  await renderOffscreen(
-    <DossierRenderer matchData={matchData} report={report} pages={pages} refs={refs} />,
-    refs,
-    async () => {
-      // Antes de capturar nada: lo renderizado tiene que ser este partido.
-      assertDossierSource(refs[0].current, matchData, report);
-      const nodes = refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n);
-      const pdf = await capturePagesToPdf(nodes);
+  await runFlowDocument({
+    items: inventory.items,
+    bodyWidth: DOSSIER_BODY_WIDTH,
+    fallbackBodyHeight: DOSSIER_FALLBACK_BODY_HEIGHT,
+    renderProbe: () => <DossierProbe matchData={matchData} report={report} />,
+    renderDocument: (plan) => (
+      <DossierDocument
+        matchData={matchData}
+        report={report}
+        inventory={inventory}
+        plan={plan}
+        includeOpponent={includeOpponent}
+      />
+    ),
+    onReady: async (paginas) => {
+      // Antes de capturar nada: lo renderizado tiene que ser este partido…
+      assertDossierSource(paginas[0], matchData, report);
+      // …y decir lo mismo que el informe.
+      const fallos = failedChecks(verifyDossierAgainstReport(paginas, matchData, report, { includeOpponent }));
+      if (fallos.length) {
+        throw new Error(
+          `El dossier no cuadra con el informe: ${fallos.map((f) => `${f.etiqueta} «${f.esperado}»`).join(" · ")}`,
+        );
+      }
+      const pdf = await capturePagesToPdf(paginas, (page, total) =>
+        options.onProgress?.({ phase: "capture", page, total }),
+      );
+      options.onProgress?.({ phase: "save", page: paginas.length, total: paginas.length });
       pdf.save(dossierFileName(matchData));
     },
-  );
+  });
 }
 
 export { PdfPagesRenderer };

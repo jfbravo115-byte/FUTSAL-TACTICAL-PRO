@@ -164,9 +164,15 @@ function hayJugadas(lado: SideSetPieceStats): boolean {
   return lado.corner.recorded + lado.freeKick.recorded + lado.throwIn.total > 0;
 }
 
-function SequenceSection({ matchData }: { matchData: MatchData }) {
+function SequenceSection({
+  matchData,
+  includeOpponent = true,
+}: {
+  matchData: MatchData;
+  includeOpponent?: boolean;
+}) {
   const stats = summarizeSetPieceSequences(matchData.events || []);
-  if (!hayJugadas(stats.team) && !hayJugadas(stats.opponent)) return null;
+  if (!hayJugadas(stats.team) && !(includeOpponent && hayJugadas(stats.opponent))) return null;
   // El contrato de los informes: «#dorsal nombre». Sin identificar, se dice.
   const nombre = (id: string) => {
     const p = matchData.players.find((x) => x.id === id);
@@ -179,7 +185,7 @@ function SequenceSection({ matchData }: { matchData: MatchData }) {
   };
   const bandos = [
     { label: matchData.teamName, lado: stats.team },
-    { label: matchData.opponentName, lado: stats.opponent },
+    ...(includeOpponent ? [{ label: matchData.opponentName, lado: stats.opponent }] : []),
   ];
   const filas = bandos.flatMap(({ label, lado }) =>
     TIPOS.filter(({ key }) => lado[key].total > 0).map(({ key, label: tipo }) => ({
@@ -249,13 +255,26 @@ function SequenceSection({ matchData }: { matchData: MatchData }) {
   );
 }
 
-export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
+/**
+ * `includeOpponent = false` (exportación centrada en nuestro equipo) quita
+ * las filas del rival de córners, jugadas de falta, tiros de balón parado y
+ * jugadas registradas. La tabla de FALTAS conserva los dos equipos: las
+ * recibidas son las que comete el rival, y sin ellas no se lee el contexto
+ * reglamentario del partido.
+ */
+export function SetPieceSummaryBoard({
+  matchData,
+  includeOpponent = true,
+}: {
+  matchData: MatchData;
+  includeOpponent?: boolean;
+}) {
   const events = matchData.events || [];
   const propio = buildSetPieceSummary(events, false);
   const rival = buildSetPieceSummary(events, true);
   const columnas = [
     { label: matchData.teamName, data: propio },
-    { label: matchData.opponentName, data: rival },
+    ...(includeOpponent ? [{ label: matchData.opponentName, data: rival }] : []),
   ];
 
   return (
@@ -384,7 +403,7 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
         </p>
       </Section>
 
-      <SequenceSection matchData={matchData} />
+      <SequenceSection matchData={matchData} includeOpponent={includeOpponent} />
     </div>
   );
 }

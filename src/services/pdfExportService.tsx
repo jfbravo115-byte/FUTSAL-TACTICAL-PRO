@@ -73,6 +73,7 @@ import { buildGoalkeeperReports, GoalkeeperReportEntry } from "./goalkeeperRepor
 import { safeImageSrc } from "../utils/safeImageSrc";
 import { VisualSummaryBoard } from "../components/export/VisualSummaryBoard";
 import { SetPieceRootStats, SideSetPieceStats, summarizeSetPieceSequences } from "../utils/setPieceStats";
+import { FLOW_GAP, FlowItem, FlowItemView, FlowPlan, FlowProgress, runFlowDocument } from "./pdfFlow";
 
 // ── Estilos de página (impresión/PDF: fondo claro, coherente con el
 // informe HTML existente en matchExportService.ts) ─────────────────────
@@ -507,11 +508,21 @@ export function ZonesSection({
   zones,
   matchData,
   withSequences = false,
+  withMaps = true,
+  withSetPieceLines = true,
 }: {
   zones: ZoneDashboard;
   matchData: MatchData;
   /** Solo el informe resumido: el dossier tiene su página de balón parado. */
   withSequences?: boolean;
+  /**
+   * El dossier ya imprime el mapa de volumen y el destino de los tiros en
+   * su bloque de producción ofensiva: aquí, sin repetirlos, queda el detalle
+   * por zona.
+   */
+  withMaps?: boolean;
+  /** Las líneas de córner y tiros de balón parado, que el dossier lleva en su sección. */
+  withSetPieceLines?: boolean;
 }) {
   const bucket = primaryBucket(zones);
   // Mismo modelo compartido que usa el bloque del informe de MatchTracker.
@@ -529,7 +540,8 @@ export function ZonesSection({
 
   return (
     <div>
-      <div style={sectionTitleStyle}>Mapas / Zonas</div>
+      <div style={sectionTitleStyle}>{withMaps ? "Mapas / Zonas" : `Detalle por zonas · ${matchData.teamName}`}</div>
+      {withMaps && (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
           {/* El título dice de QUIÉN es el mapa. El dashboard se construye con
@@ -586,6 +598,7 @@ export function ZonesSection({
           </div>
         </div>
       </div>
+      )}
 
       {/* La zona más activa va AQUÍ, pegada a los mapas: es la lectura de un
           segundo. La matriz queda debajo como respaldo, no como lo primero
@@ -600,7 +613,7 @@ export function ZonesSection({
           versión en prosa. */}
       {!isLegacy && <FoulsAgainstLine matchData={matchData} />}
 
-      {describeCorners(zones.corners) && (
+      {withSetPieceLines && describeCorners(zones.corners) && (
         <div style={{ fontSize: 10, color: "#374151", marginTop: 4, fontWeight: 700 }}>
           {describeCorners(zones.corners)}
         </div>
@@ -610,7 +623,7 @@ export function ZonesSection({
           MISMO que usa el informe de MatchTracker (SetPieceSummaryBoard).
           Aquí solo queda la lectura rápida de ejecución del córner, que
           acompaña al lado. */}
-      {describeSetPieceOutcomes(zones.setPieces.corners) && (
+      {withSetPieceLines && describeSetPieceOutcomes(zones.setPieces.corners) && (
         <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
           <div style={{ fontWeight: 700 }}>Córners · ejecución</div>
           <div>{describeSetPieceOutcomes(zones.setPieces.corners)}</div>
@@ -619,7 +632,7 @@ export function ZonesSection({
 
       {/* Tiros que el PROPIO tiro declara procedentes de balón parado. No son
           las faltas cometidas: esas son infracciones y se cuentan arriba. */}
-      {shotsFromFreeKick + shotsFromCorner > 0 && (
+      {withSetPieceLines && shotsFromFreeKick + shotsFromCorner > 0 && (
         <div style={{ fontSize: 9, color: "#374151", marginTop: 4, lineHeight: 1.5 }}>
           <div style={{ fontWeight: 700 }}>Tiros procedentes de balón parado</div>
           <div>
@@ -653,10 +666,19 @@ export function ZonesSection({
   );
 }
 
-export function PlayersTable({ report }: { report: MatchReport }) {
+export function PlayersTable({
+  report,
+  from = 0,
+  to,
+}: {
+  report: MatchReport;
+  from?: number;
+  to?: number;
+}) {
+  const filas = report.playersUsed.slice(from, to ?? report.playersUsed.length);
   return (
     <div>
-      <div style={sectionTitleStyle}>Jugadores</div>
+      <div style={sectionTitleStyle}>{from > 0 ? "Jugadores (continuación)" : "Jugadores"}</div>
       {report.playersUsed.length === 0 ? (
         <div style={{ fontSize: 11, color: "#9ca3af" }}>Sin datos registrados.</div>
       ) : (
@@ -669,8 +691,8 @@ export function PlayersTable({ report }: { report: MatchReport }) {
             </tr>
           </thead>
           <tbody>
-            {report.playersUsed.map((p) => (
-              <tr key={p.id}>
+            {filas.map((p) => (
+              <tr key={p.id} data-flow-row>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.number}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.name}</td>
                 <td style={{ borderBottom: "1px solid #e5e7eb", padding: 5 }}>{p.role}</td>
@@ -707,6 +729,122 @@ export function PlayersTable({ report }: { report: MatchReport }) {
  * Ninguna se estima. Una ventana sin cierre declarado dice «duración no
  * disponible», y un gol cuya procedencia nadie registró dice «No registrado».
  */
+/**
+ * Una situación especial (5x4, 4x5…) en su tarjeta: los dos bandos por
+ * separado, nunca sumados, y la dirección de los goles dicha con letras.
+ */
+export function ContextGroupCard({
+  report,
+  group: g,
+}: {
+  report: MatchReport;
+  group: MatchReport["matchContextGroups"][number];
+}) {
+  const nombres = { teamName: report.teamName, opponentName: report.opponentName };
+  return (
+    <div data-context-card={`${g.type}-${g.side}`} style={{ ...cardStyle, padding: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700 }}>
+        {g.label}
+        {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
+      </div>
+      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+        Duración:{" "}
+        {g.totalDuration !== null ? fmtDuration(g.totalDuration) : UNKNOWN_DURATION_LABEL}
+      </div>
+      {/* Dos bandos, dos bloques. No se suman ni se mezclan: el que tiene el
+          portero-jugador y el que se aprovecha. */}
+      {([
+        [productionLabel(g, nombres), g.production, "#0f172a"],
+        [concededLabel(g, nombres), g.conceded, "#b91c1c"],
+      ] as const).map(([rotulo, t, color]) => (
+        <div key={rotulo} style={{ marginTop: 3 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color }}>{rotulo}</div>
+          <div style={{ fontSize: 11 }}>
+            Tiros {t.shots} · a portería {t.onTarget} · fuera {t.offTarget} ·
+            bloqueados {t.blocked} · goles {t.goalsBenefiting}
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280" }}>
+            Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas{" "}
+            {t.fouls} · córners {t.corners}
+          </div>
+        </div>
+      ))}
+      {/* La dirección de los goles, dicha con todas las letras. */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", marginTop: 3 }}>
+        {concededGoalsNote(g, nombres)}
+      </div>
+    </div>
+  );
+}
+
+/** Rótulo de una lista que continúa en otra página. */
+function rotuloContinuado(titulo: string, from: number) {
+  return from > 0 ? `${titulo} (continuación)` : titulo;
+}
+
+/**
+ * La secuencia de goles, o un tramo de ella.
+ *
+ * Cada fila lleva `data-flow-row` para que la maquetación pueda partirla por
+ * filas sin cortar ninguna; el tramo que continúa en otra página se rotula.
+ */
+export function GoalSequenceList({
+  report,
+  from = 0,
+  to,
+}: {
+  report: MatchReport;
+  from?: number;
+  to?: number;
+}) {
+  const filas = report.goalSequence.slice(from, to ?? report.goalSequence.length);
+  if (filas.length === 0) return null;
+  return (
+    <div>
+      <div style={sectionTitleStyle}>{rotuloContinuado("Secuencia de goles", from)}</div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {filas.map((g) => (
+          <div
+            key={g.eventId}
+            data-flow-row
+            data-goal-row={g.eventId}
+            style={{ fontSize: 11, display: "flex", gap: 8, padding: "1.5px 0" }}
+          >
+            <span style={{ color: "#6b7280", minWidth: 42 }}>{g.matchTimeLabel}</span>
+            <span style={{ fontWeight: 700, minWidth: 30 }}>
+              {g.scoreAfter.team}-{g.scoreAfter.opponent}
+            </span>
+            <span>
+              {g.playerName ?? (g.scoringTeam === "team" ? report.teamName : report.opponentName)}
+              {" · "}
+              {g.sourceLabel}
+              {g.secondsSinceOpponentPreviousGoal !== null
+                ? ` · ${g.scoringTeam === "opponent" ? "respuesta rival" : "respuesta propia"} ${g.secondsSinceOpponentPreviousGoal} s`
+                : ""}
+              {/* El gol es UNO: la nota dice de qué jugada nació. */}
+              {report.setPieces.sequenceNotes[g.eventId] && (
+                <span data-goal-set-piece-note style={{ display: "block", fontSize: 10, color: "#6b7280" }}>
+                  Jugada: {report.setPieces.sequenceNotes[g.eventId]}
+                </span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Situaciones especiales y secuencia de goles.
+ *
+ * Dos lecturas que el informe no daba y que el cuerpo técnico pedía: qué se
+ * hizo mientras se jugaba con ventaja o en desventaja, y cuánto tardó cada
+ * equipo en responder a un gol.
+ *
+ * Ninguna se estima. Una ventana sin cierre declarado dice «duración no
+ * disponible», y un gol cuya procedencia nadie registró dice «No registrado».
+ */
 export function SpecialContextsSection({ report }: { report: MatchReport }) {
   if (report.matchContextGroups.length === 0 && report.goalSequence.length === 0) return null;
   return (
@@ -715,94 +853,35 @@ export function SpecialContextsSection({ report }: { report: MatchReport }) {
         <div>
           <div style={sectionTitleStyle}>Situaciones especiales</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {report.matchContextGroups.map((g) => {
-              const nombres = {
-                teamName: report.teamName,
-                opponentName: report.opponentName,
-              };
-              return (
-                <div key={`${g.type}-${g.side}`} style={{ ...cardStyle, padding: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700 }}>
-                    {g.label}
-                    {g.windows.length > 1 ? ` · ${g.windows.length} tramos` : ""}
-                  </div>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
-                    Duración:{" "}
-                    {g.totalDuration !== null
-                      ? fmtDuration(g.totalDuration)
-                      : UNKNOWN_DURATION_LABEL}
-                  </div>
-                  {/* Dos bandos, dos bloques. No se suman ni se mezclan: el
-                      que tiene el portero-jugador y el que se aprovecha. */}
-                  {([
-                    [productionLabel(g, nombres), g.production, "#0f172a"],
-                    [concededLabel(g, nombres), g.conceded, "#b91c1c"],
-                  ] as const).map(([rotulo, t, color]) => (
-                    <div key={rotulo} style={{ marginTop: 3 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color }}>{rotulo}</div>
-                      <div style={{ fontSize: 11 }}>
-                        Tiros {t.shots} · a portería {t.onTarget} · fuera {t.offTarget} ·
-                        bloqueados {t.blocked} · goles {t.goalsBenefiting}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>
-                        Recuperaciones {t.recoveries} · pérdidas {t.turnovers} · faltas{" "}
-                        {t.fouls} · córners {t.corners}
-                      </div>
-                    </div>
-                  ))}
-                  {/* La dirección de los goles, dicha con todas las letras. */}
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", marginTop: 3 }}>
-                    {concededGoalsNote(g, nombres)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {report.goalSequence.length > 0 && (
-        <div>
-          <div style={sectionTitleStyle}>Secuencia de goles</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {report.goalSequence.map((g) => (
-              <div key={g.eventId} style={{ fontSize: 11, display: "flex", gap: 8 }}>
-                <span style={{ color: "#6b7280", minWidth: 42 }}>{g.matchTimeLabel}</span>
-                <span style={{ fontWeight: 700, minWidth: 30 }}>
-                  {g.scoreAfter.team}-{g.scoreAfter.opponent}
-                </span>
-                <span>
-                  {g.playerName ??
-                    (g.scoringTeam === "team" ? report.teamName : report.opponentName)}
-                  {" · "}
-                  {g.sourceLabel}
-                  {g.secondsSinceOpponentPreviousGoal !== null
-                    ? ` · ${g.scoringTeam === "opponent" ? "respuesta rival" : "respuesta propia"} ${g.secondsSinceOpponentPreviousGoal} s`
-                    : ""}
-                  {/* El gol es UNO: la nota dice de qué jugada nació. */}
-                  {report.setPieces.sequenceNotes[g.eventId] && (
-                    <span data-goal-set-piece-note style={{ display: "block", fontSize: 10, color: "#6b7280" }}>
-                      Jugada: {report.setPieces.sequenceNotes[g.eventId]}
-                    </span>
-                  )}
-                </span>
-              </div>
+            {report.matchContextGroups.map((g) => (
+              <ContextGroupCard key={`${g.type}-${g.side}`} report={report} group={g} />
             ))}
           </div>
         </div>
       )}
+      <GoalSequenceList report={report} />
     </div>
   );
 }
 
-export function EventsSection({ report }: { report: MatchReport }) {
-  if (report.relevantEvents.length === 0) return null;
+/** Las acciones relevantes, o un tramo de ellas (filas partibles). */
+export function EventsSection({
+  report,
+  from = 0,
+  to,
+}: {
+  report: MatchReport;
+  from?: number;
+  to?: number;
+}) {
+  const filas = report.relevantEvents.slice(from, to ?? report.relevantEvents.length);
+  if (filas.length === 0) return null;
   return (
     <div>
-      <div style={sectionTitleStyle}>Eventos relevantes</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {report.relevantEvents.map((e, i) => (
-          <div key={i} style={{ fontSize: 11, display: "flex", gap: 8 }}>
+      <div style={sectionTitleStyle}>{rotuloContinuado("Eventos relevantes", from)}</div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {filas.map((e, i) => (
+          <div key={from + i} data-flow-row style={{ fontSize: 11, display: "flex", gap: 8, padding: "1.5px 0" }}>
             <span style={{ color: "#6b7280", minWidth: 40 }}>{e.timeLabel}</span>
             <span>
               {e.isOpponent ? report.opponentName : report.teamName} — {e.type}{e.playerName ? ` · ${e.playerName}` : ""}
@@ -1005,6 +1084,33 @@ const MARKDOWN_COMPONENTS = {
   li: ({ node: _node, ...props }: any) => <li style={{ margin: "1px 0" }} {...props} />,
 };
 
+/**
+ * El análisis en UNIDADES con sentido: un apartado, un párrafo, una lista.
+ *
+ * Es lo que la maquetación por medición coloca una a una —nunca parte una—.
+ * Un párrafo enorme se trocea por frases (nunca a mitad de palabra) para que
+ * ninguna unidad mida más que una página. Unir las unidades con una línea en
+ * blanco devuelve exactamente el texto original cuando nada se ha troceado.
+ */
+export const TACTICAL_UNIT_MAX_CHARS = 1400;
+
+export function tacticalProUnits(markdown: string, maxChars = TACTICAL_UNIT_MAX_CHARS): string[] {
+  return markdown
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .flatMap((p) => (p.length > maxChars ? splitLongTextIntoChunks(p, maxChars) : [p]));
+}
+
+/** Una unidad del análisis, con la misma tipografía que el resto. */
+export function TacticalProUnit({ unit }: { unit: string }) {
+  return (
+    <div data-tactical-unit style={{ fontSize: 11, lineHeight: 1.5 }}>
+      <Markdown components={MARKDOWN_COMPONENTS}>{inlineHeadingNumbers(unit)}</Markdown>
+    </div>
+  );
+}
+
 export function TacticalProChunk({ chunk, index, total }: { chunk: string; index: number; total: number }) {
   return (
     <div>
@@ -1014,150 +1120,6 @@ export function TacticalProChunk({ chunk, index, total }: { chunk: string; index
       </div>
     </div>
   );
-}
-
-// ── Páginas del INFORME COMPLETO: número de páginas DINÁMICO ────────────
-// 1 resumen/zonas + 1 jugadores (fijas) + 1 por portero + N por Tactical
-// Pro (dividido en bloques, nunca amontonado) + 1 de eventos si existen.
-// Nunca se agrupan varios porteros ni Tactical Pro largo en una sola
-// página — evita que capturePagesToPdf tenga que escalar contenido
-// desbordado a un tamaño ilegible.
-function buildMatchReportPages(
-  matchData: MatchData,
-  report: MatchReport,
-  zones: ZoneDashboard,
-  goalkeepers: GoalkeeperReportEntry[],
-): { key: string; content: React.ReactNode }[] {
-  const pages: { key: string; content: React.ReactNode }[] = [];
-
-  pages.push({
-    key: "summary",
-    content: (
-      <>
-        <ReportHeader matchData={matchData} report={report} />
-        <VisualSummaryBoard matchData={matchData} report={report} />
-        <SummaryKpis report={report} />
-        <ZonesSection zones={zones} matchData={matchData} withSequences />
-      </>
-    ),
-  });
-
-  // ── EVOLUCIÓN POR PERIODOS ────────────────────────────────────────
-  //
-  // Página propia, DESPUÉS de la portada y sin tocarla: la de PR #22 va con
-  // 4 px libres en un partido denso y no admite ni una línea más.
-  //
-  // No se dibuja en un partido histórico de 9 celdas —su perspectiva no se
-  // registró— ni en uno sin ninguna de las tres acciones ubicadas, porque
-  // seis pistas vacías no informan de nada.
-  if (hasPeriodZoneData(matchData)) {
-    pages.push({
-      key: "periods",
-      content: (
-        <>
-          <ReportHeader matchData={matchData} report={report} />
-          <div style={sectionTitleStyle}>
-            Evolución por periodos · {matchData.teamName}
-          </div>
-          <PeriodZoneMapsBoard matchData={matchData} />
-        </>
-      ),
-    });
-  }
-
-  // ── FASES DE JUEGO ────────────────────────────────────────────────
-  //
-  // Dos páginas propias, después de la evolución por periodos y sin tocar ni
-  // la portada ni aquella: las dos van con su presupuesto de alto ajustado.
-  //
-  // Solo existen si el partido trae la fase registrada. Un histórico anterior
-  // a PR #24A no la tiene —y `phaseOfPlay` ausente no se rellena nunca—, así
-  // que no gana ninguna página: dos hojas de pistas vacías no informan de
-  // nada y harían pensar que el dato existe y es cero.
-  if (hasPhaseData(matchData)) {
-    PHASE_PAGES.forEach((pagina) => {
-      pages.push({
-        key: pagina.key,
-        content: (
-          <>
-            <ReportHeader matchData={matchData} report={report} />
-            <div style={sectionTitleStyle}>
-              Fases de juego · {pagina.title} · {matchData.teamName}
-            </div>
-            <PhaseZoneMapsBoard matchData={matchData} metrics={pagina.metrics} />
-          </>
-        ),
-      });
-    });
-  }
-
-  pages.push({
-    key: "players",
-    content: (
-      <>
-        <ReportHeader matchData={matchData} report={report} />
-        <PlayersTable report={report} />
-      </>
-    ),
-  });
-
-  goalkeepers.forEach((gk) => {
-    // ¿Es este el único portero relevante de SU equipo? (mismo isOpponent)
-    // Sin ambigüedad posible → se permite el fallback legacy en el mapa de origen.
-    const isOnlyRelevantGoalkeeper =
-      goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
-    pages.push({
-      key: `gk-${gk.id}`,
-      content: (
-        <>
-          <ReportHeader matchData={matchData} report={report} />
-          <div style={sectionTitleStyle}>Portero</div>
-          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} />
-        </>
-      ),
-    });
-  });
-
-  if (matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim()) {
-    const chunks = splitTacticalProIntoPages(matchData.tacticalAnalysis);
-    chunks.forEach((chunk, i) => {
-      pages.push({
-        key: `tactical-${i}`,
-        content: (
-          <>
-            <ReportHeader matchData={matchData} report={report} />
-            <TacticalProChunk chunk={chunk} index={i} total={chunks.length} />
-          </>
-        ),
-      });
-    });
-  }
-
-  if (report.matchContextGroups.length > 0 || report.goalSequence.length > 0) {
-    pages.push({
-      key: "contexts",
-      content: (
-        <>
-          <ReportHeader matchData={matchData} report={report} />
-          <SpecialContextsSection report={report} />
-        </>
-      ),
-    });
-  }
-
-  if (report.relevantEvents.length > 0) {
-    pages.push({
-      key: "events",
-      content: (
-        <>
-          <ReportHeader matchData={matchData} report={report} />
-          <EventsSection report={report} />
-        </>
-      ),
-    });
-  }
-
-  return pages;
 }
 
 // ── Páginas del INFORME DE PORTEROS: una por portero + N de Tactical Pro
@@ -1291,11 +1253,18 @@ export async function embedCssDelDocumento(node: HTMLElement): Promise<string> {
   }
 }
 
-export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF> {
+export type CaptureProgress = (page: number, total: number) => void;
+
+export async function capturePagesToPdf(
+  nodes: HTMLDivElement[] | HTMLElement[],
+  onProgress?: CaptureProgress,
+): Promise<jsPDF> {
   const images: string[] = [];
   const fontEmbedCSS = nodes.length ? await embedCssDelDocumento(nodes[0]) : SIN_FUENTES_CSS;
-  for (const node of nodes) {
-    const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth, fontEmbedCSS });
+  for (let n = 0; n < nodes.length; n++) {
+    const node = nodes[n];
+    onProgress?.(n + 1, nodes.length);
+    const url = await toJpeg(node as HTMLElement, { ...captureOpts, width: node.offsetWidth, fontEmbedCSS });
     if (url && url.length > 1000) images.push(url);
   }
   if (images.length === 0) throw new Error("No se pudo generar ninguna página del PDF.");
@@ -1319,8 +1288,17 @@ export async function capturePagesToPdf(nodes: HTMLDivElement[]): Promise<jsPDF>
       img.src = images[i];
       if (img.complete) resolve();
     });
-    const imgH = Math.min(pdfH, pdfW * (img.height / img.width));
-    pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
+    // Nunca se deforma: si una captura fuera más alta que un A4 (no debería,
+    // la maquetación lo audita antes), se reduce ENTERA conservando sus
+    // proporciones en vez de aplastarla en vertical.
+    const proporcion = img.height / img.width || 1;
+    let w = pdfW;
+    let h = pdfW * proporcion;
+    if (h > pdfH) {
+      h = pdfH;
+      w = pdfH / proporcion;
+    }
+    pdf.addImage(images[i], "JPEG", (pdfW - w) / 2, 0, w, h);
   }
   return pdf;
 }
@@ -1362,30 +1340,265 @@ export function makeRefs(count: number): React.RefObject<HTMLDivElement>[] {
   return Array.from({ length: count }, () => React.createRef<HTMLDivElement>());
 }
 
-/**
- * Exporta el INFORME COMPLETO como PDF. Número de páginas DINÁMICO (ver
- * buildMatchReportPages): 2 páginas fijas (resumen/zonas + jugadores) +
- * 1 por portero + N por Tactical Pro (si existe, dividido en bloques) +
- * 1 de eventos (si hay eventos relevantes). Sin popup, sin llamada a IA
- * (usa exclusivamente matchData.tacticalAnalysis si ya existe). Descarga
- * directa vía pdf.save().
- */
-export async function exportMatchReportPdf(matchData: MatchData): Promise<void> {
+// ── INFORME RESUMIDO POR MEDICIÓN ───────────────────────────────────────
+//
+// La primera página del informe resumido medía 2289 px y se aplastaba en un
+// A4. Ahora el informe se describe como bloques (los mismos de siempre, en el
+// mismo orden) y `pdfFlow` los reparte midiendo: lo que no cabe en una página
+// pasa entero a la siguiente, con la cabecera del partido repetida arriba y
+// el pie numerado abajo. Las antiguas páginas fijas conservan su salto: cada
+// una sigue empezando en hoja nueva.
+
+export type SummaryReportOptions = {
+  /** `false` = sin las fichas de los porteros rivales. */
+  includeOpponent?: boolean;
+  onProgress?: (p: FlowProgress) => void;
+};
+
+const SUMMARY_PAGE_HEIGHT = 1123;
+const summaryFrameStyle: React.CSSProperties = {
+  ...pageStyle,
+  minHeight: undefined,
+  height: SUMMARY_PAGE_HEIGHT,
+  gap: 10,
+  overflow: "hidden",
+};
+const summaryBodyStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: FLOW_GAP,
+  overflow: "hidden",
+};
+const summaryFooterStyle: React.CSSProperties = {
+  borderTop: "1px solid #e5e7eb",
+  paddingTop: 5,
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 8,
+  color: "#6b7280",
+};
+
+export function SummaryPageFrame({
+  matchData,
+  report,
+  pageNumber,
+  totalPages,
+  children,
+}: {
+  matchData: MatchData;
+  report: MatchReport;
+  pageNumber: number;
+  totalPages: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={summaryFrameStyle} data-flow-page data-summary-page={pageNumber}>
+      <ReportHeader matchData={matchData} report={report} />
+      <div style={summaryBodyStyle} data-flow-body>
+        {children}
+      </div>
+      <div style={summaryFooterStyle}>
+        <span>
+          {matchData.teamName} {report.score.team} – {report.score.opponent} {matchData.opponentName} · Informe resumido
+        </span>
+        <span data-flow-page-number>
+          Página {pageNumber} de {totalPages}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Los bloques del informe resumido, en su orden de siempre. */
+export function buildSummaryReportItems(
+  matchData: MatchData,
+  options: { includeOpponent?: boolean } = {},
+): FlowItem[] {
+  const conRival = options.includeOpponent !== false;
   const report = generateMatchReport(matchData);
   const zones = buildZoneDashboard(matchData, false);
-  const goalkeepers = buildGoalkeeperReports(matchData);
-  const pages = buildMatchReportPages(matchData, report, zones, goalkeepers);
-  const refs = makeRefs(pages.length);
+  const goalkeepers = buildGoalkeeperReports(matchData).filter((gk) => conRival || !gk.isOpponent);
+  const items: FlowItem[] = [];
 
-  await renderOffscreen(
-    <PdfPagesRenderer pages={pages} refs={refs} />,
-    refs,
-    async () => {
-      const nodes = refs.map((r) => r.current).filter((n): n is HTMLDivElement => !!n);
-      const pdf = await capturePagesToPdf(nodes);
+  items.push({ id: "visual", section: "summary", kind: "card", node: <VisualSummaryBoard matchData={matchData} report={report} /> });
+  items.push({ id: "kpis", section: "summary", kind: "card", node: <SummaryKpis report={report} /> });
+  items.push({ id: "zones", section: "summary", kind: "card", node: <ZonesSection zones={zones} matchData={matchData} withSequences /> });
+
+  if (hasPeriodZoneData(matchData)) {
+    items.push({
+      id: "periods",
+      section: "periods",
+      kind: "map",
+      team: "team",
+      breakBefore: true,
+      node: (
+        <div>
+          <div style={sectionTitleStyle}>Evolución por periodos · {matchData.teamName}</div>
+          <PeriodZoneMapsBoard matchData={matchData} />
+        </div>
+      ),
+    });
+  }
+
+  if (hasPhaseData(matchData)) {
+    PHASE_PAGES.forEach((pagina) => {
+      items.push({
+        id: pagina.key,
+        section: "phases",
+        kind: "map",
+        team: "team",
+        breakBefore: true,
+        node: (
+          <div>
+            <div style={sectionTitleStyle}>
+              Fases de juego · {pagina.title} · {matchData.teamName}
+            </div>
+            <PhaseZoneMapsBoard matchData={matchData} metrics={pagina.metrics} />
+          </div>
+        ),
+      });
+    });
+  }
+
+  items.push({
+    id: "players",
+    section: "players",
+    kind: "table",
+    team: "team",
+    breakBefore: true,
+    ...(report.playersUsed.length > 0
+      ? { rows: { count: report.playersUsed.length, render: (from: number, to: number) => <PlayersTable report={report} from={from} to={to} /> } }
+      : { node: <PlayersTable report={report} /> }),
+  });
+
+  goalkeepers.forEach((gk) => {
+    const isOnlyRelevantGoalkeeper =
+      goalkeepers.filter((g) => g.isOpponent === gk.isOpponent).length <= 1;
+    items.push({
+      id: `gk-${gk.id}`,
+      section: "goalkeepers",
+      kind: "card",
+      team: gk.isOpponent ? "opponent" : "team",
+      breakBefore: true,
+      node: (
+        <div data-summary-goalkeeper={gk.id}>
+          <div style={sectionTitleStyle}>Portero</div>
+          <GoalkeeperCard gk={gk} allEvents={matchData.events} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} />
+        </div>
+      ),
+    });
+  });
+
+  if (matchData.tacticalAnalysis && matchData.tacticalAnalysis.trim()) {
+    items.push({
+      id: "tactical-titulo",
+      section: "tactical",
+      kind: "heading",
+      keepWithNext: true,
+      breakBefore: true,
+      node: <div style={sectionTitleStyle}>Tactical Pro</div>,
+    });
+    tacticalProUnits(matchData.tacticalAnalysis).forEach((unit, i) =>
+      items.push({
+        id: `tactical-${i}`,
+        section: "tactical",
+        kind: isHeadingUnit(unit) ? "heading" : "text",
+        keepWithNext: isHeadingUnit(unit),
+        node: <TacticalProUnit unit={unit} />,
+      }),
+    );
+  }
+
+  if (report.matchContextGroups.length > 0 || report.goalSequence.length > 0) {
+    let primero = true;
+    if (report.matchContextGroups.length > 0) {
+      items.push({
+        id: "contexts-titulo",
+        section: "contexts",
+        kind: "heading",
+        keepWithNext: true,
+        breakBefore: true,
+        node: <div style={sectionTitleStyle}>Situaciones especiales</div>,
+      });
+      primero = false;
+      report.matchContextGroups.forEach((g) =>
+        items.push({
+          id: `context-${g.type}-${g.side}`,
+          section: "contexts",
+          kind: "card",
+          node: <ContextGroupCard report={report} group={g} />,
+        }),
+      );
+    }
+    if (report.goalSequence.length > 0) {
+      items.push({
+        id: "goals",
+        section: "contexts",
+        kind: "table",
+        breakBefore: primero,
+        rows: { count: report.goalSequence.length, render: (from, to) => <GoalSequenceList report={report} from={from} to={to} /> },
+      });
+    }
+  }
+
+  if (report.relevantEvents.length > 0) {
+    items.push({
+      id: "events",
+      section: "events",
+      kind: "table",
+      breakBefore: true,
+      rows: { count: report.relevantEvents.length, render: (from, to) => <EventsSection report={report} from={from} to={to} /> },
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Exporta el INFORME RESUMIDO como PDF. Número de páginas DINÁMICO: lo
+ * decide la medición, nunca una página que se estira. Sin popup y sin
+ * llamada a IA (usa exclusivamente `matchData.tacticalAnalysis` si ya
+ * existe). Descarga directa vía `pdf.save()`, solo cuando todo se capturó.
+ */
+export async function exportMatchReportPdf(
+  matchData: MatchData,
+  options: SummaryReportOptions = {},
+): Promise<void> {
+  const report = generateMatchReport(matchData);
+  const items = buildSummaryReportItems(matchData, options);
+  const porId = new Map(items.map((it) => [it.id, it]));
+  options.onProgress?.({ phase: "layout", page: 0, total: 0 });
+
+  await runFlowDocument({
+    items,
+    bodyWidth: PAGE_WIDTH - 64,
+    fallbackBodyHeight: SUMMARY_PAGE_HEIGHT - 64 - 90 - 30,
+    renderProbe: () => (
+      <SummaryPageFrame matchData={matchData} report={report} pageNumber={1} totalPages={1}>
+        {null}
+      </SummaryPageFrame>
+    ),
+    renderDocument: (plan: FlowPlan) => (
+      <>
+        {plan.pages.map((pagina, i) => (
+          <SummaryPageFrame key={i} matchData={matchData} report={report} pageNumber={i + 1} totalPages={plan.pages.length}>
+            {pagina.map((p) => (
+              <FlowItemView key={`${p.id}-${p.from ?? ""}`} item={porId.get(p.id)!} placement={p} />
+            ))}
+          </SummaryPageFrame>
+        ))}
+      </>
+    ),
+    onReady: async (paginas) => {
+      const pdf = await capturePagesToPdf(paginas, (page, total) =>
+        options.onProgress?.({ phase: "capture", page, total }),
+      );
+      options.onProgress?.({ phase: "save", page: paginas.length, total: paginas.length });
       pdf.save(`informe_${safeName(matchData.teamName)}_${Date.now()}.pdf`);
     },
-  );
+  });
 }
 
 /**

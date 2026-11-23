@@ -20,7 +20,7 @@ import { ActionType, GameEvent, GoalieAction, MatchData, Period, Player, Role } 
 import { buildSequenceSeeds, newSetPieceSequenceId, SetPieceSequenceDraft } from "../../utils/setPieceSequence";
 import { generateMatchReport } from "../../services/matchReportService";
 import { EventsSection, SequenceQuickLines, SpecialContextsSection } from "../../services/pdfExportService";
-import { buildDossierPages } from "../../services/fullDossierPdfService";
+import { buildDossierInventory } from "../../services/fullDossierPdfService";
 import {
   GOAL_ROW_H,
   GOAL_ROW_WITH_NOTE_H,
@@ -200,12 +200,12 @@ describe("cronología y acciones relevantes en los PDF", () => {
     expect(host.textContent!.match(/Córner \(CD MURCIA\)/g)).toHaveLength(1);
   });
 
-  it("dossier: mismas páginas y mismo orden con jugadas que sin ellas", () => {
-    const claves = (md: MatchData) => buildDossierPages(md).map((p) => p.key);
+  it("dossier: mismas secciones y mismo orden con jugadas que sin ellas", () => {
+    const claves = (md: MatchData) => buildDossierInventory(md).sections.map((s) => s.id);
     const sinJugadas = base([historico, { ...cornerGol[1], metadata: { isOpponent: false } },
       { ...faltaRival[1], metadata: { isOpponent: true } }]);
     expect(claves(conJugadas)).toEqual(claves(sinJugadas));
-    expect(claves(conJugadas)).toContain("set-pieces");
+    expect(claves(conJugadas)).toContain("balon-parado");
   });
 });
 

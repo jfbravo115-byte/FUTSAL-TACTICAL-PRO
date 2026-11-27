@@ -111,7 +111,7 @@ describe("el bloque de balón parado · jugadas registradas", () => {
 
   it("las del rival, en sus propias filas y nunca sumadas a las nuestras", () => {
     expect(celdas(host, "JIMBEE|freeKick")).toEqual([
-      "JIMBEE", "Falta a favor", "1", "1", "directo 1", "Z4C 1", "1 (100%)", "1 (100%)", "0 (0%)",
+      "JIMBEE", "Falta a favor", "1", "1", "directo 1", "carril central · zona alta 1", "1 (100%)", "1 (100%)", "0 (0%)",
     ]);
     expect(celdas(host, "JIMBEE|throwIn")[8]).toBe("1 (100%)");
     expect(host.querySelector('[data-sequence-row="JIMBEE|corner"]')).toBeNull();

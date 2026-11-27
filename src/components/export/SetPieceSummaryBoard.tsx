@@ -49,6 +49,7 @@ import {
 } from "../../utils/setPieceStats";
 import { SET_PIECE_MODALITY_LABEL, SetPieceModality } from "../../utils/setPieceSequence";
 import { formatJerseyNumber } from "../../utils/jerseyNumber";
+import { describeFreeKickZone } from "../../utils/setPieceVisualZones";
 
 export type SetPieceSummary = {
   corners: { side: CornerSummary; outcome: SetPieceOutcomeSummary };
@@ -140,7 +141,7 @@ function ladoSector(tipo: keyof SideSetPieceStats, lado: SideSetPieceStats): str
   }
   if (tipo === "freeKick") {
     for (const [zona, n] of Object.entries(lado.freeKick.byZone)) {
-      if (n && zona !== "unknown") partes.push(`${zona} ${n}`);
+      if (n && zona !== "unknown") partes.push(`${describeFreeKickZone(zona) ?? zona} ${n}`);
     }
   }
   return partes.length ? partes.join(" · ") : "—";

@@ -433,7 +433,7 @@ describe("la redacción no inventa", () => {
     const ev = jugada({ root: "free_kick", isOpponent: false, modality: "direct", outcome: "shot",
       originGrid: "Z4C", shot: { finisherId: "l7" } });
     expect(describeFreeKickStats(summarizeSetPieceSequences(ev).team.freeKick, nombre).join(" | "))
-      .toContain("Zona: Z4C 1");
+      .toContain("Zona: carril central · zona alta 1");
   });
 });
 

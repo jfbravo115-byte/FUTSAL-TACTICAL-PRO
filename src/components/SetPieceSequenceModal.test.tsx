@@ -75,7 +75,7 @@ const texto = (host: HTMLElement) => (host.textContent || "").replace(/\s+/g, " 
 describe("cancelar no guarda nada", () => {
   it("ni siquiera con media jugada rellenada", () => {
     const { pulsar, onCancel, onConfirm } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-taker="l7"]');
     pulsar('[data-seq-outcome="goal"]');
     pulsar("[data-seq-cancel]");
@@ -97,7 +97,7 @@ describe("cancelar no guarda nada", () => {
 describe("córner", () => {
   it("una jugada completa sale de una sola ventana", () => {
     const { pulsar, draft, onConfirm } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-modality="prepared"]');
     pulsar('[data-seq-taker="l7"]');
     pulsar('[data-seq-outcome="goal"]');
@@ -118,7 +118,7 @@ describe("córner", () => {
 
   it("el sacador llega preseleccionado desde el radial", () => {
     const { pulsar, draft } = montar({ presetTakerId: "l10" });
-    pulsar('[data-seq-corner-side="right"]');
+    pulsar('[data-visual-corner="bottom-right"]');
     pulsar('[data-seq-outcome="keep"]');
     pulsar("[data-seq-confirm]");
     expect(draft().takerId).toBe("l10");
@@ -126,7 +126,7 @@ describe("córner", () => {
 
   it("si no se elige finalizador, remata quien saca", () => {
     const { pulsar, draft } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-taker="l7"]');
     pulsar('[data-seq-outcome="shot"]');
     pulsar("[data-seq-confirm]");
@@ -135,7 +135,7 @@ describe("córner", () => {
 
   it("el sacador puede quedar sin identificar, y no se inventa", () => {
     const { pulsar, draft } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-taker="unknown"]');
     pulsar('[data-seq-outcome="keep"]');
     pulsar("[data-seq-confirm]");
@@ -146,7 +146,7 @@ describe("córner", () => {
 describe("el equipo se corrige sin salir", () => {
   it("y al cambiarlo no se queda elegido un jugador del otro bando", () => {
     const { pulsar, draft } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-taker="l7"]');
     pulsar('[data-seq-team="opponent"]');
     pulsar('[data-seq-outcome="keep"]');
@@ -233,7 +233,7 @@ describe("falta a favor", () => {
 
   it("y con zona la guarda", () => {
     const { pulsar, draft } = montar({ root: "free_kick" });
-    pulsar('[data-seq-origin="Z4C"]');
+    pulsar('[data-visual-zone="1-3"]'); // carril central · zona alta
     pulsar('[data-seq-outcome="shot"]');
     pulsar("[data-seq-confirm]");
     expect(draft().originGrid).toBe("Z4C");
@@ -248,7 +248,7 @@ describe("falta a favor", () => {
 describe("solo se pide lo que aplica", () => {
   it("sin remate no hay sección de remate", () => {
     const { pulsar, host } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-outcome="keep"]');
     expect(host.querySelector("[data-seq-shot-section]")).toBeNull();
     expect(host.querySelector("[data-seq-loss-section]")).toBeNull();
@@ -256,7 +256,7 @@ describe("solo se pide lo que aplica", () => {
 
   it("con remate aparecen finalizador, destino y respuesta del portero", () => {
     const { pulsar, host } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-outcome="shot"]');
     const seccion = host.querySelector("[data-seq-shot-section]")!;
     expect(seccion).not.toBeNull();
@@ -267,7 +267,7 @@ describe("solo se pide lo que aplica", () => {
 
   it("los desenlaces que no crean evento lo dicen", () => {
     const { pulsar, host } = montar();
-    pulsar('[data-seq-corner-side="left"]');
+    pulsar('[data-visual-corner="top-right"]');
     pulsar('[data-seq-outcome="blocked"]');
     expect(texto(host)).toContain("No crea ningún evento aparte");
   });

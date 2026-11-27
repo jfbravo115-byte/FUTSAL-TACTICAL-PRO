@@ -81,7 +81,7 @@ describe("el apartado «Balón parado»", () => {
     expect(apartado).toContain("Sacadores: #7 Ramón 1");
     expect(apartado).toContain("Finalizadores: #10 José 1");
     expect(apartado).toContain("Sector: Z2 1");
-    expect(apartado).toContain("Zona: Z4C 1");
+    expect(apartado).toContain("Zona: carril central · zona alta 1");
   });
 
   it("recuerda que lo originado ya está en los totales y que una banda no es un tiro", () => {

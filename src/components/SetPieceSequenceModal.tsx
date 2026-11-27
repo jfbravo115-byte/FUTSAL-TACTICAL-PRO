@@ -31,8 +31,9 @@
  */
 import React, { useMemo, useState } from "react";
 import { GoalieAction, Player, Role } from "../types/futsal";
-import { CornerSide, formatCornerLabel } from "../utils/cornerModel";
-import { ZONE_12_IDS, Zone12Id } from "../utils/fieldZones";
+import { CornerSide } from "../utils/cornerModel";
+import { Zone12Id } from "../utils/fieldZones";
+import { CornerMiniPitch, FreeKickMiniPitch } from "./SetPieceMiniPitch";
 import { GOAL_OUT_ID, GOAL_ZONE_IDS } from "../utils/goalZones";
 import { GOALIE_ACTION_LABEL, GOALIE_RESPONSES } from "../utils/goalkeeperActions";
 import { playerDisplayIdentity } from "../utils/playerIdentity";
@@ -191,6 +192,39 @@ export function SetPieceSequenceModal({
     });
   };
 
+  /** Quién saca. Va antes de la ubicación en córner y falta. */
+  const sacador = (
+    <div className={panel}>
+      <div className={rotulo}>¿Quién saca? (opcional)</div>
+      <div className="grid grid-cols-4 gap-1.5">
+        {plantilla.map((p) => (
+          <button
+            key={p.id}
+            data-seq-taker={p.id}
+            onClick={() => setTakerId(takerId === p.id ? undefined : p.id)}
+            className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black leading-tight ${
+              takerId === p.id ? elegida : suelta
+            } ${p.isOnPitch ? "" : "opacity-60"}`}
+          >
+            <span className="block">{dorsalDe(p)}</span>
+            <span className="block text-[8px] font-bold truncate">{nombre(p)}</span>
+          </button>
+        ))}
+        <button
+          data-seq-taker="unknown"
+          onClick={() =>
+            setTakerId(takerId === SIN_IDENTIFICAR ? undefined : SIN_IDENTIFICAR)
+          }
+          className={`min-h-[40px] py-2 rounded-lg border text-[9px] font-black ${
+            takerId === SIN_IDENTIFICAR ? elegida : suelta
+          }`}
+        >
+          No ident.
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-3"
@@ -230,44 +264,29 @@ export function SetPieceSequenceModal({
         </div>
 
         {/* ── DÓNDE ───────────────────────────────────────────────────── */}
+        {/* Córner y falta: primero quién saca, después dónde, como se ve
+            la jugada en pista. La banda mantiene su orden. */}
+        {(esCorner || esFalta) && sacador}
+
         {esCorner && (
           <div className={panel}>
             <div className={rotulo}>¿Desde qué esquina?</div>
-            <div className="grid grid-cols-2 gap-2">
-              {(["left", "right"] as CornerSide[]).map((side) => (
-                <button
-                  key={side}
-                  data-seq-corner-side={side}
-                  onClick={() => setCornerSide(side)}
-                  className={`${opcion} ${cornerSide === side ? elegida : suelta}`}
-                >
-                  {formatCornerLabel(side)}
-                </button>
-              ))}
-            </div>
-            <p className="text-[9px] text-slate-500 leading-relaxed">
-              Izquierda y derecha se entienden desde la perspectiva del equipo que saca.
-            </p>
+            <CornerMiniPitch
+              value={cornerSide}
+              onChange={setCornerSide}
+              executingTeam={isOpponent ? opponentName : teamName}
+            />
           </div>
         )}
 
         {esFalta && (
           <div className={panel}>
             <div className={rotulo}>¿Desde dónde se saca? (opcional)</div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {ZONE_12_IDS.map((z) => (
-                <button
-                  key={z}
-                  data-seq-origin={z}
-                  onClick={() => setOriginGrid(originGrid === z ? undefined : z)}
-                  className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black ${
-                    originGrid === z ? elegida : suelta
-                  }`}
-                >
-                  {z}
-                </button>
-              ))}
-            </div>
+            <FreeKickMiniPitch
+              value={originGrid}
+              onChange={setOriginGrid}
+              executingTeam={isOpponent ? opponentName : teamName}
+            />
           </div>
         )}
 
@@ -336,36 +355,7 @@ export function SetPieceSequenceModal({
           )}
         </div>
 
-        {/* ── SACADOR ─────────────────────────────────────────────────── */}
-        <div className={panel}>
-          <div className={rotulo}>¿Quién saca? (opcional)</div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {plantilla.map((p) => (
-              <button
-                key={p.id}
-                data-seq-taker={p.id}
-                onClick={() => setTakerId(takerId === p.id ? undefined : p.id)}
-                className={`min-h-[40px] py-2 rounded-lg border text-[10px] font-black leading-tight ${
-                  takerId === p.id ? elegida : suelta
-                } ${p.isOnPitch ? "" : "opacity-60"}`}
-              >
-                <span className="block">{dorsalDe(p)}</span>
-                <span className="block text-[8px] font-bold truncate">{nombre(p)}</span>
-              </button>
-            ))}
-            <button
-              data-seq-taker="unknown"
-              onClick={() =>
-                setTakerId(takerId === SIN_IDENTIFICAR ? undefined : SIN_IDENTIFICAR)
-              }
-              className={`min-h-[40px] py-2 rounded-lg border text-[9px] font-black ${
-                takerId === SIN_IDENTIFICAR ? elegida : suelta
-              }`}
-            >
-              No ident.
-            </button>
-          </div>
-        </div>
+        {esBanda && sacador}
 
         {/* ── DESENLACE ───────────────────────────────────────────────── */}
         <div className={panel}>

@@ -538,7 +538,7 @@ describe("la jugada se presenta como una sola tarjeta", () => {
     });
     expect(rootKindOf(eventos[0])).toBe("free_kick");
     expect(describeSequence(eventos, sequenceIdOf(eventos[0])!)!.locationLabel).toBe(
-      "Falta en Z3L",
+      "Falta en banda izquierda · zona media-alta",
     );
   });
 });

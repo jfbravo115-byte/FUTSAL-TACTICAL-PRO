@@ -28,6 +28,7 @@
  * las proporciones se calculan sobre `recorded`, que es donde el dato existe.
  */
 import { ActionType, GameEvent } from "../types/futsal";
+import { describeFreeKickZone } from "./setPieceVisualZones";
 import { isCornerSide } from "./cornerModel";
 import { isZone12Id } from "./fieldZones";
 import { isGoalEvent, scoresFor } from "./goalModel";
@@ -428,7 +429,8 @@ export function describeFreeKickStats(s: FreeKickStats, nombre: PlayerNamer): st
   if (!base.length) return base;
   const zonas = Object.entries(s.byZone)
     .sort(([, a], [, b]) => b - a)
-    .map(([z, v]) => `${z === "unknown" ? "sin zona" : z} ${v}`);
+    // En palabras: el desglose interno va por código, el texto no.
+    .map(([z, v]) => `${z === "unknown" ? "sin zona" : describeFreeKickZone(z) ?? z} ${v}`);
   return [base[0], ...(zonas.length ? [`Zona: ${zonas.join(" · ")}`] : []), ...base.slice(1)];
 }
 

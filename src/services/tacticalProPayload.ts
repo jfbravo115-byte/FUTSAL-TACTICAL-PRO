@@ -208,6 +208,13 @@ export const TACTICAL_PRO_GLOSSARY: readonly string[] = [
     "'metadata.targetGoalkeeperId'). Pueden ser jugadores distintos y no se intercambian: no " +
     "atribuyas el gol al sacador ni al portero que lo recibe. Si falta, NO se identificó: dilo " +
     "así y no lo adjudiques a nadie.",
+  "JUGADA A BALÓN PARADO, ubicación en palabras: 'tacticalContext.setPieceSequences[].locationLabel' " +
+    "describe dónde se sacó tal como lo tocó el analista en la mini pista («Falta en banda " +
+    "izquierda · zona alta», «Córner izquierdo»). Es la MISMA ubicación que el código canónico " +
+    "del evento ('originGrid' Z1-Z4 con L/C/R y 'metadata.cornerSide'), dicha desde quien " +
+    "ejecuta: «zona alta» = Z4, junto a la portería rival; «zona baja» = Z1, junto a la propia; " +
+    "banda izquierda = L. Las cifras por zona ('byZone') siguen usando el código. No las " +
+    "cuentes dos veces.",
   "JUGADA A BALÓN PARADO, banda y sector: 'metadata.throwInSide' (left/right) y " +
     "'metadata.throwInSector' (Z1-Z4) están normalizados a la perspectiva del equipo que SACA, " +
     "igual que el lado del córner: izquierda es la izquierda de quien ataca. Z1 es su zona " +

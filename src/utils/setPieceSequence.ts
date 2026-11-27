@@ -43,6 +43,7 @@
  * reloj, periodo, fase, dirección de ataque, bando y jugadores en pista.
  */
 import { ActionType, GameEvent, GoalieAction } from "../types/futsal";
+import { describeFreeKickLocation } from "./setPieceVisualZones";
 import { CornerSide, cornerOriginGrid, isCornerSide } from "./cornerModel";
 import { Zone12Id, isZone12Id } from "./fieldZones";
 
@@ -584,8 +585,9 @@ export function locationLabelOf(event: GameEvent): string | null {
     return `${THROW_IN_SIDE_LABEL[lado]} · ${sector}`;
   }
   if (root === "free_kick") {
-    const zona = event.originGrid;
-    return isZone12Id(zona) ? `Falta en ${zona}` : null;
+    // En palabras, como se tocó en la mini pista: «Falta en banda izquierda
+    // · zona alta». El código canónico sigue en `originGrid`.
+    return describeFreeKickLocation(event.originGrid);
   }
   return null;
 }

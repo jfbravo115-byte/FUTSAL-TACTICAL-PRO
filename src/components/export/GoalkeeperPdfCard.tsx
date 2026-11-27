@@ -28,8 +28,15 @@ export function GoalkeeperPdfCard({
   gk,
   allEvents,
   isOnlyRelevantGoalkeeper,
+  compact = false,
 }: {
   gk: GoalkeeperReportEntry;
+  /**
+   * Variante del dossier: mismo contenido, mapa de intervención más
+   * estrecho y menos aire, para que dos fichas compartan página en vez de
+   * dejar media hoja en blanco por portero.
+   */
+  compact?: boolean;
   allEvents: GameEvent[];
   /** ¿Es este el único portero relevante de SU equipo en todo el
    *  partido? Determina el fallback legacy del mapa de origen (ver
@@ -85,6 +92,151 @@ export function GoalkeeperPdfCard({
           </span>
         ) : null}
       </div>
+      {compact ? (
+        <>
+          {/* Variante compacta: los tres mapas en una fila y las dos listas
+              debajo. El MISMO contenido que la ficha completa. */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen de los tiros · pista de 12 zonas</div>
+          {/* IMPORTANTE: el mapa de ORIGEN necesita el conjunto COMPLETO de
+              eventos del partido (matchData.events), no solo los propios
+              del portero — la lógica original (extraída de MatchTracker.tsx,
+              ver GoalkeeperMaps.tsx) también contabiliza disparos del rival
+              mientras este portero está en pista, que NO llevan su id en
+              playerIds. gk.events (filtrado a playerIds.includes) se
+              queda corto para este mapa concreto. */}
+          <GoalkeeperOriginMap goalie={{ id: gk.id, number: gk.number, name: gk.name, role: Role.GOALKEEPER, isOnPitch: gk.isOnPitch, plusMinus: 0, individualTimeSeconds: gk.totSeconds, isOpponent: gk.isOpponent, stats: { goals: 0, assists: 0, steals: 0, interceptions: 0, losses: 0, errors: 0, fouls: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOffTarget: 0, saves: gk.totalSaves, conceded: gk.conceded } }} isOpponent={gk.isOpponent} events={allEvents} isOnlyRelevantGoalkeeper={isOnlyRelevantGoalkeeper} compact theme="light" />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Destino de los tiros · portería · verde parada / rojo gol</div>
+          {/* El mapa de IMPACTO sí debe usar solo intervenciones propias
+              del portero (gk.events) — no se toca, es correcto tal cual. */}
+          <GoalkeeperImpactMap events={gk.events} />
+        </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Zonas de intervención</div>
+          <GoalkeeperInterventionMap
+            theme="light"
+            counts={gk.interventionZones}
+            accent="#2563eb"
+            maxWidth={compact ? 120 : 170}
+            hideLegend
+          />
+
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 14, borderTop: "1px solid #e5e7eb", paddingTop: 5 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Últimas intervenciones</div>
+          {gk.timeline.length === 0 ? (
+            <div style={{ fontSize: 10, color: "#9ca3af" }}>Sin datos registrados.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {gk.timeline.slice(-6).reverse().map((t, i) => (
+                <div key={i} style={{ fontSize: 10, display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f3f4f6", paddingBottom: 2 }}>
+                  <span style={{ color: "#6b7280" }}>{t.timeLabel}</span>
+                  <span style={{ fontWeight: 700 }}>{t.type}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+          <div>
+            {/* Resumen legible: el mapa muestra la distribución, esto da la
+                cifra exacta. Nunca se imprime GK1-GK5. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {GK_ZONE_IDS.map((id) => (
+                <div
+                  key={id}
+                  data-gk-zone-row={id}
+                  style={{ display: "flex", justifyContent: "space-between", fontSize: 9, gap: 8 }}
+                >
+                  <span style={{ color: "#374151" }}>
+                    {GK_ZONE_LABEL[id]} · {GK_ZONE_DESCRIPTION[id]}
+                  </span>
+                  <b>{gk.interventionZones[id]}</b>
+                </div>
+              ))}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 9,
+                  gap: 8,
+                  color: "#6b7280",
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: 2,
+                  marginTop: 2,
+                }}
+              >
+                <span>Sin ubicación registrada</span>
+                <b>{gk.interventionsUnlocated}</b>
+              </div>
+            </div>
+
+            {/* Desglose por tipo. Solo aparecen los tipos realmente
+                registrados: no se infiere el tipo de un evento histórico. */}
+            {Object.keys(gk.interventionZonesByAction).length > 0 && (
+              <table
+                style={{
+                  width: "100%",
+                  marginTop: 8,
+                  borderCollapse: "collapse",
+                  fontSize: 8,
+                }}
+              >
+                <thead>
+                  <tr style={{ color: "#6b7280" }}>
+                    <th style={{ textAlign: "left", padding: "2px 4px" }}></th>
+                    {GK_ZONE_IDS.map((id) => (
+                      <th key={id} style={{ padding: "2px 4px", textAlign: "center" }}>
+                        {GK_ZONE_LABEL[id].replace("Zona ", "Z")}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(Object.keys(gk.interventionZonesByAction) as GoalieAction[]).map((action) => (
+                    <tr key={action} style={{ borderTop: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "2px 4px", fontWeight: 700 }}>
+                        {formatGoalieAction(action)}
+                      </td>
+                      {GK_ZONE_IDS.map((id) => (
+                        <td key={id} style={{ padding: "2px 4px", textAlign: "center" }}>
+                          {gk.interventionZonesByAction[action]![id] || ""}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {gk.exits > 0 && (
+                    <>
+                      <tr style={{ borderTop: "1px solid #f1f5f9", color: "#6b7280" }}>
+                        <td style={{ padding: "2px 4px", paddingLeft: 10 }}>— con éxito</td>
+                        {GK_ZONE_IDS.map((id) => (
+                          <td key={id} style={{ padding: "2px 4px", textAlign: "center" }}>
+                            {gk.exitZonesSuccess[id] || ""}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr style={{ color: "#6b7280" }}>
+                        <td style={{ padding: "2px 4px", paddingLeft: 10 }}>— falladas</td>
+                        {GK_ZONE_IDS.map((id) => (
+                          <td key={id} style={{ padding: "2px 4px", textAlign: "center" }}>
+                            {gk.exitZonesFail[id] || ""}
+                          </td>
+                        ))}
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+          </div>
+        </>
+      ) : (
+        <>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Origen de los tiros · pista de 12 zonas</div>
@@ -130,7 +282,7 @@ export function GoalkeeperPdfCard({
           El dibujo es el MISMO componente que usa la captura
           (GoalkeeperInterventionMap), así que la geometría de las cinco zonas
           existe una sola vez en el código. */}
-      <div style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
+      <div style={{ marginTop: compact ? 4 : 10, borderTop: "1px solid #e5e7eb", paddingTop: compact ? 5 : 8 }}>
         <div
           style={{
             fontSize: 10,
@@ -143,12 +295,12 @@ export function GoalkeeperPdfCard({
           Zonas de intervención
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "170px 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: compact ? "120px 1fr" : "170px 1fr", gap: compact ? 10 : 14 }}>
           <GoalkeeperInterventionMap
             theme="light"
             counts={gk.interventionZones}
             accent="#2563eb"
-            maxWidth={170}
+            maxWidth={compact ? 120 : 170}
             hideLegend
           />
 
@@ -246,6 +398,8 @@ export function GoalkeeperPdfCard({
         </div>
       </div>
 
+        </>
+      )}
     </div>
   );
 }

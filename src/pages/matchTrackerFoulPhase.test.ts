@@ -43,8 +43,10 @@ const handleFoul = (() => {
 
 /** El cuerpo de `handleAction`, para exigir que los dos usen el MISMO patrón. */
 const handleAction = (() => {
-  const ini = fuente.indexOf("const handleAction = (");
-  const fin = fuente.indexOf("const handleFreeKickPlay = (", ini);
+  // Desde `buildActionEvent`, que es donde se construye el evento y donde
+  // vive la línea de estampado que aquí se compara.
+  const ini = fuente.indexOf("const buildActionEvent = (");
+  const fin = fuente.indexOf("const openSetPiece = (", ini);
   expect(ini).toBeGreaterThan(-1);
   expect(fin).toBeGreaterThan(ini);
   return fuente.slice(ini, fin);
@@ -280,15 +282,17 @@ const falta = (n: number, opp: boolean, extra: Partial<GameEvent> = {}): GameEve
 });
 
 /**
- * La columna "fase" se lee desde el final.
+ * La columna "fase" se lee por su POSICIÓN, la 20.
  *
- * Dejó de ser la última cuando el gol en propia añadió «gol_para» detrás: lo
- * que no cambia es que las columnas nuevas se añaden al final y las viejas no
- * se mueven, así que la fase es la penúltima.
+ * Dejó de ser la última cuando el gol en propia añadió «gol_para» detrás, y
+ * después llegaron las columnas de la jugada a balón parado: las columnas
+ * nuevas se añaden al final y las viejas no se mueven, así que leer desde el
+ * final se rompe con cada añadido y leer por posición no.
  */
+const FASE = 20;
 const columnaFase = (fila: string) => {
   const celdas = fila.split(",");
-  return celdas[celdas.length - 2].replace(/^"|"$/g, "");
+  return celdas[FASE].replace(/^"|"$/g, "");
 };
 
 describe("13-14 · la fase de la falta llega hasta el CSV", () => {
@@ -298,7 +302,7 @@ describe("13-14 · la fase de la falta llega hasta el CSV", () => {
     );
     const [cabecera, fila] = csv.replace(/^﻿/, "").split("\n");
     const columnas = cabecera.split(",").map((c) => c.replace(/^"|"$/g, ""));
-    expect(columnas[columnas.length - 2]).toBe("fase");
+    expect(columnas[FASE]).toBe("fase");
     expect(columnaFase(fila)).toBe("Defensa organizada");
   });
 

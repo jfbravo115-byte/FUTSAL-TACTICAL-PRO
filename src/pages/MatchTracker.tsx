@@ -44,6 +44,7 @@ import {
   Pencil,
   Loader2,
   Flag,
+  ArrowLeftRight,
   PlayCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -163,7 +164,22 @@ import {
   isZone12Id,
 } from "../utils/fieldZones";
 import { attackDirection } from "../utils/attackDirection";
-import { cornerOriginGrid, CornerSide, formatCornerLabel } from "../utils/cornerModel";
+import {
+  DEFLECT_OUTCOMES,
+  DEFLECT_OUTCOME_LABEL,
+  DeflectOutcome,
+  ROOT_KIND_BY_ACTION,
+  SetPieceRootKind,
+  SetPieceSequenceDraft,
+  buildSequenceSeeds,
+  deflectOutcomeLeadsToThrowIn,
+  describeSequence,
+  eventIdsToDeleteWith,
+  groupTimeline,
+  newSetPieceSequenceId,
+  throwInTakerIsOpponent,
+} from "../utils/setPieceSequence";
+import { SetPieceSequenceModal } from "../components/SetPieceSequenceModal";
 import { formatEventTypeLabel } from "../utils/eventLabels";
 import {
   applyFoulToCounters,
@@ -174,13 +190,8 @@ import {
 import {
   SET_PIECE_ORIGINS,
   SET_PIECE_RESTART_LABEL,
-  newSetPieceRestartMetadata,
   SET_PIECE_ORIGIN_LABEL,
-  SET_PIECE_OUTCOMES,
-  SET_PIECE_OUTCOME_DESCRIPTION,
-  SET_PIECE_OUTCOME_LABEL,
   SetPieceOrigin,
-  SetPieceOutcome,
   formatSetPieceOrigin,
   isRuleDeterminedOrigin,
   shouldAskOriginZone,
@@ -190,7 +201,12 @@ import { GoalkeeperInterventionMap } from "../components/field/GoalkeeperInterve
 import { GoalkeeperAnalysisPanel } from "../components/goalkeeper/GoalkeeperAnalysisPanel";
 import { GoalkeeperPdfPages } from "../components/export/GoalkeeperPdfPages";
 import { SetPieceSummaryBoard } from "../components/export/SetPieceSummaryBoard";
-import { paginateContextReport, teamReportPageCount } from "../utils/reportPagination";
+import {
+  GOAL_ROW_H,
+  GOAL_ROW_WITH_NOTE_H,
+  paginateContextReport,
+  teamReportPageCount,
+} from "../utils/reportPagination";
 import { MatchContextBoard } from "../components/export/MatchContextBoard";
 import { TacticalProBoard } from "../components/export/TacticalProBoard";
 import { capturePagesToPdf, splitTacticalProIntoPages } from "../services/pdfExportService";
@@ -226,6 +242,7 @@ const SET_PIECE_ORIGIN_ICON: Record<SetPieceOrigin, string> = {
   corner: "🚩",
   penalty: "🥅",
   double_penalty: "🔴",
+  throw_in: "↔️",
 };
 
 
@@ -1303,7 +1320,14 @@ export default function MatchTracker() {
   const pdfReport = useMemo(() => generateMatchReport(matchData), [matchData]);
   /** Reparto en páginas sin cortar ninguna tarjeta. Vacío = ninguna página. */
   const contextPages = useMemo(
-    () => paginateContextReport(pdfReport.matchContexts, pdfReport.goalSequence),
+    () =>
+      paginateContextReport(
+        pdfReport.matchContexts,
+        pdfReport.goalSequence,
+        undefined,
+        // Un gol nacido de una jugada lleva una segunda línea que lo dice.
+        (g) => (pdfReport.setPieces.sequenceNotes[g.eventId] ? GOAL_ROW_WITH_NOTE_H : GOAL_ROW_H),
+      ),
     [pdfReport],
   );
   /**
@@ -1897,15 +1921,26 @@ export default function MatchTracker() {
     eventId: string;
     isOpponent: boolean;
   } | null>(null);
-  /** Equipo seleccionado para registrar un córner, a la espera de la esquina. */
-  // El córner se captura en dos pasos: esquina y, después, cómo se ejecutó.
-  // El segundo es omitible y su ausencia es un dato válido.
-  // Ubicación OPCIONAL de una jugada de falta ya registrada. Mismo patrón que
-  // la falta: el evento existe antes de este paso y omitirlo no lo deshace.
-  const [pendingRestartLocation, setPendingRestartLocation] = useState<{ eventId: string } | null>(null);
-  const [pendingCorner, setPendingCorner] = useState<{
-    isOpponent: boolean;
-    side?: CornerSide;
+  /**
+   * Jugada a balón parado abierta en su ventana única, todavía SIN guardar.
+   *
+   * Mientras esto no es null no existe ningún evento de la jugada: se crean
+   * todos de golpe al confirmar. `token` fuerza una ventana nueva —sin
+   * restos del borrador anterior— al encadenar una banda tras otra.
+   */
+  const [pendingSetPiece, setPendingSetPiece] = useState<{
+    root: SetPieceRootKind;
+    defaultIsOpponent: boolean;
+    presetTakerId?: string;
+    fromDeflectEventId?: string;
+    fromFoulEventId?: string;
+    token: number;
+  } | null>(null);
+  /** Jugadas desplegadas en el historial. Solo presentación: no es un dato. */
+  const [expandedSequences, setExpandedSequences] = useState<Set<string>>(() => new Set());
+  /** Despeje ya registrado, a la espera de cómo siguió el balón (opcional). */
+  const [pendingDeflectOutcome, setPendingDeflectOutcome] = useState<{
+    eventId: string;
   } | null>(null);
   /** Portero que va a registrar una salida, a la espera del resultado. */
   const [pendingExit, setPendingExit] = useState<{ goalieId: string } | null>(null);
@@ -2398,14 +2433,6 @@ export default function MatchTracker() {
       try {
         await new Promise(r => setTimeout(r, 600));
 
-        const captureOpts = {
-          cacheBust: true,
-          pixelRatio: 1.5,
-        quality: 0.82,
-          backgroundColor: "#ffffff",
-          style: { opacity: "1", visibility: "visible" },
-        };
-
         const refs = [pdfPage1Ref, pdfPage2Ref, pdfPage3Ref, pdfPage4Ref, pdfPage5Ref, pdfPage6Ref, pdfPage7Ref, pdfPage8Ref, pdfPage9Ref];
         // Las de contexto táctico van al final y son tantas como haga falta:
         // cero en un partido sin situaciones especiales ni goles.
@@ -2415,28 +2442,11 @@ export default function MatchTracker() {
           // El análisis interpretativo cierra el informe.
           ...pdfTacticalRefs.current.filter(Boolean),
         ];
-        const images: string[] = [];
-
-        for (const node of nodes) {
-          const url = await toJpeg(node, { ...captureOpts, width: node.offsetWidth });
-          if (url && url.length > 1000) images.push(url);
-        }
-
-        if (images.length === 0) throw new Error("No pages generated");
-
-        const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-        const pdfW = pdf.internal.pageSize.getWidth();   // 210mm
-        const pdfH = pdf.internal.pageSize.getHeight();  // 297mm
-
-        for (let i = 0; i < images.length; i++) {
-          if (i > 0) pdf.addPage();
-          const img = new Image();
-          img.src = images[i];
-          await new Promise(r => { img.onload = r; });
-          const imgAspect = img.height / img.width;
-          const imgH = Math.min(pdfH, pdfW * imgAspect);
-          pdf.addImage(images[i], "JPEG", 0, 0, pdfW, imgH);
-        }
+        // La captura y el ensamblado son los COMPARTIDOS: fuentes reunidas una
+        // vez, manejadores de imagen antes de `src` y ninguna página
+        // deformada. Esta plantilla tenía su propia copia del bucle, que
+        // aplastaba en vertical cualquier página más alta que un A4.
+        const pdf = await capturePagesToPdf(nodes);
 
         const fileName = `informe_${matchData.teamName.replace(/\s+/g, "_")}_${Date.now()}.pdf`;
         pdf.save(fileName);
@@ -2646,6 +2656,11 @@ export default function MatchTracker() {
     // La falta YA está registrada y contabilizada. Este paso solo añade la
     // ubicación al evento existente y puede descartarse sin consecuencias.
     setPendingFoulLocation({ eventId: foulEventId, isOpponent: !isTeam });
+
+    // Y después, la reanudación: la falta a favor del OTRO equipo, en la
+    // ventana única. Se abre cuando se cierra la ubicación. Cancelarla no
+    // toca la falta, que ya está guardada y contada en el reglamentario.
+    openSetPiece("free_kick", isTeam, undefined, { fromFoulEventId: foulEventId });
   };
 
   /**
@@ -2712,36 +2727,6 @@ export default function MatchTracker() {
   };
 
   /**
-   * Registro de córner. `cornerSide` sigue siendo el dato autoritativo y
-   * `originGrid` el enlace con las 12 zonas.
-   *
-   * `outcome` es OPCIONAL y su ausencia es un dato en sí: significa que no se
-   * registró cómo se ejecutó, igual que en cualquier córner anterior a Fase
-   * 5. No se guarda ningún marcador de "desconocido" — eso obligaría a migrar.
-   *
-   * Un córner ejecutado en tiro NO crea un SHOT: si el operador quiere
-   * registrar además el tiro, lo hace como acción propia y lo declara con
-   * `setPiece: 'corner'`. Son dos declaraciones independientes.
-   */
-  const handleCorner = (
-    isOpponent: boolean,
-    side: CornerSide,
-    outcome?: SetPieceOutcome,
-  ) => {
-    if (isDataLocked || matchData.period === Period.FINISHED) return;
-    setPendingCorner(null);
-    handleAction(ActionType.CORNER, undefined, {
-      originGrid: cornerOriginGrid(side),
-      metadata: {
-        isOpponent,
-        cornerSide: side,
-        ...(outcome ? { setPieceOutcome: outcome } : {}),
-      },
-    });
-  };
-
-
-  /**
    * Cierre del registro de un tiro. ÚNICO punto por el que se materializa el
    * evento, venga el desenlace de la pantalla de destino, de la respuesta del
    * portero o del resultado de una salida.
@@ -2784,148 +2769,143 @@ export default function MatchTracker() {
     });
   };
 
-  const handleAction = (
+  /**
+   * Construye el evento de una acción SIN registrarlo.
+   *
+   * Es la mitad de `handleAction` que decide qué evento nace: portero
+   * objetivo, jugadores implicados, dirección de ataque, marcador tras el
+   * evento. Se separó para que una jugada a balón parado pueda construir
+   * varios eventos con EXACTAMENTE las mismas reglas, en vez de tener una
+   * segunda copia que algún día diría otra cosa.
+   *
+   * `eventosBase` es el historial contra el que se calcula el marcador: en
+   * una jugada de varios eventos, el gol tiene que contarse con lo que ya se
+   * construyó antes que él.
+   */
+  const buildActionEvent = (
     type: ActionType | GoalieAction,
-    playerId?: string,
-    metadata?: any,
+    playerId: string | undefined,
+    metadata: any,
+    isOpponentEvent: boolean,
+    eventosBase: GameEvent[],
+    phaseAtTap: PhaseOfPlay | undefined,
   ) => {
-    if (matchData.period === Period.FINISHED || isDataLocked) return;
-    const actingPlayer = playerId
-      ? matchData.players.find((p) => p.id === playerId)
-      : null;
-    const isOpponentEvent =
-      metadata?.metadata?.isOpponent ??
-      (actingPlayer
-        ? type === GoalieAction.GOAL_CONCEDED
-          ? !actingPlayer.isOpponent
-          : actingPlayer.isOpponent
-        : false);
+      const activeGK = matchData.players.find(
+        (p) => p.isOnPitch && p.role === Role.GOALKEEPER && !p.isOpponent,
+      );
+      const activeOppGK = matchData.players.find(
+        (p) => p.isOnPitch && p.role === Role.GOALKEEPER && p.isOpponent,
+      );
 
-    if (type === ActionType.FOUL) {
-      handleFoul(!isOpponentEvent, playerId);
-      return;
-    }
-    const isGoal =
-      type === ActionType.GOAL || type === GoalieAction.GOAL_CONCEDED;
-    
-    // Catálogo único en src/utils/fieldZones.ts. Antes esta lista estaba
-    // duplicada aquí, en el paso de origen y en el selector de "acción desde",
-    // y es por donde se colaba FOUL sin llegar nunca a pedir ubicación.
-    //
-    // Un penalti llega SIN sector a propósito, así que sin esta comprobación
-    // quedaría atrapado: la pantalla lo registraría y `handleAction` lo
-    // devolvería a pedir sector, una y otra vez.
-    const needsOrigin = shouldAskOriginZone(type, metadata?.metadata?.setPiece);
+      // Identify target goalie (Opposite of the event team)
+      const targetGoalieId = isOpponentEvent ? activeGK?.id : activeOppGK?.id;
 
-    if (needsOrigin && !metadata?.originGrid) {
-      setPendingAction({
-        type: type as any,
-        playerId,
-        isOpponent: isOpponentEvent,
-        step:
-          type === GoalieAction.GOAL_CONCEDED && !playerId
-            ? "player"
-            : isOpponentEvent
-              ? "origin"
-              : playerId
-                ? "origin"
-                : "player",
-      });
-      return;
-    }
+      const effectivePlayerId =
+        playerId ||
+        (isOpponentEvent &&
+        (type === ActionType.SHOT || type === GoalieAction.GOAL_CONCEDED)
+          ? activeGK?.id
+          : !isOpponentEvent && type === ActionType.GOAL
+            ? activeOppGK?.id
+            : undefined);
 
-    const activeGK = matchData.players.find(
-      (p) => p.isOnPitch && p.role === Role.GOALKEEPER && !p.isOpponent,
-    );
-    const activeOppGK = matchData.players.find(
-      (p) => p.isOnPitch && p.role === Role.GOALKEEPER && p.isOpponent,
-    );
+      const onPitchIds = matchData.players
+        .filter((p) => p.isOnPitch)
+        .map((p) => p.id);
 
-    // Identify target goalie (Opposite of the event team)
-    const targetGoalieId = isOpponentEvent ? activeGK?.id : activeOppGK?.id;
-
-    const effectivePlayerId =
-      playerId ||
-      (isOpponentEvent &&
-      (type === ActionType.SHOT || type === GoalieAction.GOAL_CONCEDED)
-        ? activeGK?.id
-        : !isOpponentEvent && type === ActionType.GOAL
-          ? activeOppGK?.id
-          : undefined);
-
-    const onPitchIds = matchData.players
-      .filter((p) => p.isOnPitch)
-      .map((p) => p.id);
-
-    const eventPlayerIds = [];
-    if (playerId) eventPlayerIds.push(playerId);
-    if (targetGoalieId && !eventPlayerIds.includes(targetGoalieId)) {
-      // Solo un disparo o un gol tienen "portero objetivo". Antes tambien se
-      // anadia en las paradas, y eso acreditaba la parada del portero local
-      // TAMBIEN al portero rival.
-      if (eventTargetsOpposingGoalie(type)) {
-        eventPlayerIds.push(targetGoalieId);
+      const eventPlayerIds = [];
+      if (playerId) eventPlayerIds.push(playerId);
+      if (targetGoalieId && !eventPlayerIds.includes(targetGoalieId)) {
+        // Solo un disparo o un gol tienen "portero objetivo". Antes tambien se
+        // anadia en las paradas, y eso acreditaba la parada del portero local
+        // TAMBIEN al portero rival.
+        if (eventTargetsOpposingGoalie(type)) {
+          eventPlayerIds.push(targetGoalieId);
+        }
       }
-    }
-    if (effectivePlayerId && !eventPlayerIds.includes(effectivePlayerId)) {
-      eventPlayerIds.push(effectivePlayerId);
-    }
+      if (effectivePlayerId && !eventPlayerIds.includes(effectivePlayerId)) {
+        eventPlayerIds.push(effectivePlayerId);
+      }
 
-    // El marcador YA CON este evento dentro, calculado por `utils/goalModel`:
-    // un gol en propia sube al equipo contrario del que lo mete, y eso no
-    // puede decidirlo esta pantalla por su cuenta.
-    const marcadorTrasEvento = scoreAfterAdding(matchData.events, {
-      type,
-      metadata: { isOpponent: isOpponentEvent },
-    });
+      // El marcador YA CON este evento dentro, calculado por `utils/goalModel`:
+      // un gol en propia sube al equipo contrario del que lo mete, y eso no
+      // puede decidirlo esta pantalla por su cuenta.
+      const marcadorTrasEvento = scoreAfterAdding(eventosBase, {
+        type,
+        metadata: { isOpponent: isOpponentEvent },
+      });
 
-    // ORDEN OBLIGATORIO: primero se lee la fase que había, después se crea el
-    // evento con ella, y solo al final se calcula la siguiente. Invertirlo
-    // etiquetaría cada acción con la fase que vino DESPUÉS de ella.
-    const phaseAtTap = phaseOfPlayRef.current;
+      // `phaseAtTap` llega de fuera, leída ANTES de construir nada: ver el
+      // ORDEN OBLIGATORIO en `handleAction`.
+      const newEvent: GameEvent = {
+        id: `event-action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: matchData.matchClock,
+        wallClock: Date.now(),
+        period: matchData.period,
+        playerIds: eventPlayerIds,
+        onPitchPlayerIds: onPitchIds,
+        type,
+        gameState,
+        // La fase QUE HABÍA al pulsar, leída del ref. El evento se la queda: la
+        // pérdida ocurrió mientras atacábamos, y que después pasemos a
+        // transición defensiva no cambia lo que ya pasó.
+        ...(phaseAtTap ? { phaseOfPlay: phaseAtTap } : {}),
+        // Desnormalizada en el propio evento para que sea autodescriptivo: si
+        // alguien edita despues la cabecera del partido, el evento sigue
+        // diciendo con que orientacion se registro. undefined en partidos que
+        // no tienen saque inicial registrado — nunca se elige un lado por
+        // defecto.
+        attackDirection:
+          attackDirection(matchData.teamDefendsAtKickoff, matchData.period, isOpponentEvent) ??
+          undefined,
+        ...metadata,
+        metadata: {
+          ...metadata?.metadata,
+          isOpponent: isOpponentEvent,
+          // Identidad explícita del portero que ENCARA la acción. Antes solo se
+          // podía deducir por bando desde playerIds; guardarla hace que la
+          // atribución y el borrado no dependan de esa inferencia.
+          //
+          // Se escribe con el MISMO criterio que decide si ese portero entra en
+          // `playerIds`: solo un tiro o un gol tienen portero objetivo. Un gol
+          // en propia no lo tiene —el balón entra en la portería del propio
+          // autor—, así que apuntar aquí al portero contrario guardaría un
+          // hecho falso en el evento, y ese dato viaja al análisis.
+          ...(targetGoalieId && eventTargetsOpposingGoalie(type)
+            ? { targetGoalkeeperId: targetGoalieId }
+            : {}),
+        },
+        scoreAtEvent: marcadorTrasEvento,
+      };
 
-    const newEvent: GameEvent = {
-      id: `event-action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: matchData.matchClock,
-      wallClock: Date.now(),
-      period: matchData.period,
-      playerIds: eventPlayerIds,
-      onPitchPlayerIds: onPitchIds,
-      type,
-      gameState,
-      // La fase QUE HABÍA al pulsar, leída del ref. El evento se la queda: la
-      // pérdida ocurrió mientras atacábamos, y que después pasemos a
-      // transición defensiva no cambia lo que ya pasó.
-      ...(phaseAtTap ? { phaseOfPlay: phaseAtTap } : {}),
-      // Desnormalizada en el propio evento para que sea autodescriptivo: si
-      // alguien edita despues la cabecera del partido, el evento sigue
-      // diciendo con que orientacion se registro. undefined en partidos que
-      // no tienen saque inicial registrado — nunca se elige un lado por
-      // defecto.
-      attackDirection:
-        attackDirection(matchData.teamDefendsAtKickoff, matchData.period, isOpponentEvent) ??
-        undefined,
-      ...metadata,
-      metadata: {
-        ...metadata?.metadata,
-        isOpponent: isOpponentEvent,
-        // Identidad explícita del portero que ENCARA la acción. Antes solo se
-        // podía deducir por bando desde playerIds; guardarla hace que la
-        // atribución y el borrado no dependan de esa inferencia.
-        //
-        // Se escribe con el MISMO criterio que decide si ese portero entra en
-        // `playerIds`: solo un tiro o un gol tienen portero objetivo. Un gol
-        // en propia no lo tiene —el balón entra en la portería del propio
-        // autor—, así que apuntar aquí al portero contrario guardaría un
-        // hecho falso en el evento, y ese dato viaja al análisis.
-        ...(targetGoalieId && eventTargetsOpposingGoalie(type)
-          ? { targetGoalkeeperId: targetGoalieId }
-          : {}),
-      },
-      scoreAtEvent: marcadorTrasEvento,
-    };
 
-    setMatchData((prev) => {
+    return { newEvent, effectivePlayerId, targetGoalieId };
+  };
+
+  /**
+   * Aplica al estado del partido un evento ya construido: estadísticas del
+   * actor y del portero, más/menos, tiempos muertos, y el evento al
+   * historial.
+   *
+   * Es la otra mitad de `handleAction`, separada por la misma razón: la
+   * jugada a balón parado aplica sus eventos con ESTA función, uno detrás de
+   * otro y en un solo `setMatchData`, de modo que se guarda entera o no se
+   * guarda.
+   */
+  const applyActionToState = (
+    prev: MatchData,
+    built: {
+      type: ActionType | GoalieAction;
+      playerId: string | undefined;
+      metadata: any;
+      isOpponentEvent: boolean;
+      newEvent: GameEvent;
+      effectivePlayerId: string | undefined;
+      targetGoalieId: string | undefined;
+    },
+  ): MatchData => {
+    const { type, playerId, metadata, isOpponentEvent, newEvent, effectivePlayerId, targetGoalieId } =
+      built;
       const nextPlayers = prev.players.map((p) => {
         let stats = { ...p.stats };
         let pm = p.plusMinus;
@@ -3010,7 +2990,92 @@ export default function MatchTracker() {
         players: nextPlayers,
         timeoutsUsed: nextTimeouts,
       };
-    });
+  };
+
+  const handleAction = (
+    type: ActionType | GoalieAction,
+    playerId?: string,
+    metadata?: any,
+  ) => {
+    if (matchData.period === Period.FINISHED || isDataLocked) return;
+    const actingPlayer = playerId
+      ? matchData.players.find((p) => p.id === playerId)
+      : null;
+    const isOpponentEvent =
+      metadata?.metadata?.isOpponent ??
+      (actingPlayer
+        ? type === GoalieAction.GOAL_CONCEDED
+          ? !actingPlayer.isOpponent
+          : actingPlayer.isOpponent
+        : false);
+
+    if (type === ActionType.FOUL) {
+      handleFoul(!isOpponentEvent, playerId);
+      return;
+    }
+    // Córner, falta a favor y saque de banda se registran ENTEROS en su
+    // ventana, con todo lo que pasó después. Llegue desde el radial, desde
+    // una barra o desde cualquier otro sitio, aquí se desvía: el jugador que
+    // venía en la llamada pasa a ser el sacador preseleccionado. Un evento
+    // que ya trae `sequenceId` nunca pasa por aquí: lo construye la ventana.
+    const raizDeJugada = ROOT_KIND_BY_ACTION[type];
+    if (raizDeJugada && !metadata?.metadata?.sequenceId) {
+      openSetPiece(raizDeJugada, isOpponentEvent, playerId);
+      return;
+    }
+    const isGoal =
+      type === ActionType.GOAL || type === GoalieAction.GOAL_CONCEDED;
+
+    // Catálogo único en src/utils/fieldZones.ts. Antes esta lista estaba
+    // duplicada aquí, en el paso de origen y en el selector de "acción desde",
+    // y es por donde se colaba FOUL sin llegar nunca a pedir ubicación.
+    //
+    // Un penalti llega SIN sector a propósito, así que sin esta comprobación
+    // quedaría atrapado: la pantalla lo registraría y `handleAction` lo
+    // devolvería a pedir sector, una y otra vez.
+    const needsOrigin = shouldAskOriginZone(type, metadata?.metadata?.setPiece);
+
+    if (needsOrigin && !metadata?.originGrid) {
+      setPendingAction({
+        type: type as any,
+        playerId,
+        isOpponent: isOpponentEvent,
+        step:
+          type === GoalieAction.GOAL_CONCEDED && !playerId
+            ? "player"
+            : isOpponentEvent
+              ? "origin"
+              : playerId
+                ? "origin"
+                : "player",
+      });
+      return;
+    }
+
+    // ORDEN OBLIGATORIO: primero se lee la fase que había, después se crea el
+    // evento con ella, y solo al final se calcula la siguiente. Invertirlo
+    // etiquetaría cada acción con la fase que vino DESPUÉS de ella.
+    const phaseAtTap = phaseOfPlayRef.current;
+    const { newEvent, effectivePlayerId, targetGoalieId } = buildActionEvent(
+      type,
+      playerId,
+      metadata,
+      isOpponentEvent,
+      matchData.events,
+      phaseAtTap,
+    );
+
+    setMatchData((prev) =>
+      applyActionToState(prev, {
+        type,
+        playerId,
+        metadata,
+        isOpponentEvent,
+        newEvent,
+        effectivePlayerId,
+        targetGoalieId,
+      }),
+    );
 
     // La acción YA está registrada. La zona de intervención se ofrece después
     // y es omitible; se hace aquí para que cualquier superficie de captura
@@ -3018,10 +3083,10 @@ export default function MatchTracker() {
     if (eventAcceptsGoalkeeperZone(newEvent) && !metadata?.goalkeeperZone) {
       setPendingInterventionLocation({ eventId: newEvent.id });
     }
-    // Lo mismo para la jugada de falta: la reanudación ya está registrada y la
-    // zona llega después, omitible.
-    if (newEvent.type === ActionType.SET_PIECE && !metadata?.originGrid) {
-      setPendingRestartLocation({ eventId: newEvent.id });
+    // Un despeje pregunta después cómo siguió el balón. Omitible: el despeje
+    // ya está registrado y contado, y no saberlo es un dato válido.
+    if (newEvent.type === GoalieAction.SAVE_DEFLECT) {
+      setPendingDeflectOutcome({ eventId: newEvent.id });
     }
 
     confirmRegistered(newEvent);
@@ -3033,147 +3098,290 @@ export default function MatchTracker() {
   };
 
   /**
-   * Jugada de falta: una falta a FAVOR que el equipo pone en juego en corto.
+   * Abre la ventana única de una jugada a balón parado. No guarda nada.
    *
-   * No es la infracción —esa es del rival y se registra con FALTA— ni un tiro
-   * —ese se registra como tiro y declara su procedencia—. No crea ninguno de
-   * los dos ni se enlaza con ellos: el botón ya dice qué ocurrió, así que no
-   * hay pasos intermedios y la captura es de un solo toque.
-   *
-   * `playerId` es el ejecutor cuando se registra desde un jugador; desde el
-   * control de equipo se queda sin ejecutor, que es un dato válido.
+   * `isOpponent` es el bando SUGERIDO; el operador lo corrige dentro de la
+   * ventana sin tocar la vista de pista, la formación ni la fase.
    */
-  const handleFreeKickPlay = (isOpponent: boolean, playerId?: string) => {
+  const openSetPiece = (
+    root: SetPieceRootKind,
+    isOpponent: boolean,
+    takerId?: string,
+    enlace?: { fromDeflectEventId?: string; fromFoulEventId?: string },
+  ) => {
     if (isDataLocked || matchData.period === Period.FINISHED) return;
-    handleAction(ActionType.SET_PIECE, playerId, {
-      metadata: { isOpponent, ...newSetPieceRestartMetadata() },
+    setPendingSetPiece({
+      root,
+      defaultIsOpponent: isOpponent,
+      presetTakerId: takerId,
+      ...enlace,
+      token: Date.now(),
     });
   };
 
-  /** Añade la ubicación a una jugada de falta ya registrada. */
-  const assignRestartLocation = (zoneId: string) => {
-    const pending = pendingRestartLocation;
-    setPendingRestartLocation(null);
-    if (!pending) return;
+  /** El portero que encara el remate de quien ejecuta: el del otro bando. */
+  const targetGoalkeeperIdFor = (ejecutorEsRival: boolean) =>
+    matchData.players.find(
+      (p) => p.isOnPitch && p.role === Role.GOALKEEPER && !!p.isOpponent !== ejecutorEsRival,
+    )?.id;
+
+  /**
+   * Guarda una jugada entera, de una vez.
+   *
+   * Cada evento se construye con `buildActionEvent` y se aplica con
+   * `applyActionToState`, las MISMAS funciones que usa cualquier otra acción:
+   * un gol de córner suma al goleador exactamente como cualquier gol. Lo que
+   * cambia es que todos comparten la fase leída una sola vez, el mismo
+   * instante y el mismo `sequenceId`, y se aplican dentro de un único
+   * `setMatchData`: o se guarda la jugada completa o no se guarda nada.
+   *
+   * La fase se mueve UNA vez, por el último evento —el desenlace—. Un córner
+   * que acaba en pérdida nos deja defendiendo; uno que acaba en tiro, no.
+   */
+  const commitSetPieceSequence = (draft: SetPieceSequenceDraft) => {
+    const pendiente = pendingSetPiece;
+    setPendingSetPiece(null);
+    if (isDataLocked || matchData.period === Period.FINISHED) return;
+
+    const sequenceId = newSetPieceSequenceId();
+    const semillas = buildSequenceSeeds(draft, sequenceId);
+    const phaseAtTap = phaseOfPlayRef.current;
+
+    const construidos: Parameters<typeof applyActionToState>[1][] = [];
+    let base = matchData.events;
+    let instante: number | undefined;
+    for (const semilla of semillas) {
+      const esRaiz = semilla.metadata.sequenceRole === "root";
+      const meta = {
+        ...(semilla.originGrid ? { originGrid: semilla.originGrid } : {}),
+        ...(semilla.destinationGrid ? { destinationGrid: semilla.destinationGrid } : {}),
+        metadata: {
+          ...semilla.metadata,
+          ...(esRaiz && pendiente?.fromFoulEventId
+            ? { fromFoulEventId: pendiente.fromFoulEventId }
+            : {}),
+        },
+      };
+      const { newEvent, effectivePlayerId, targetGoalieId } = buildActionEvent(
+        semilla.type,
+        semilla.playerId,
+        meta,
+        draft.isOpponent,
+        base,
+        phaseAtTap,
+      );
+      // El mismo instante para toda la jugada: el reloj del partido ya es
+      // común, y el de pared también tiene que serlo.
+      instante ??= newEvent.wallClock;
+      const evento = { ...newEvent, wallClock: instante };
+      construidos.push({
+        type: semilla.type,
+        playerId: semilla.playerId,
+        metadata: meta,
+        isOpponentEvent: draft.isOpponent,
+        newEvent: evento,
+        effectivePlayerId,
+        targetGoalieId,
+      });
+      base = [evento, ...base];
+    }
+    if (construidos.length === 0) return;
+
+    // El evento del que nace la jugada —el despeje o la falta— queda
+    // ENLAZADO, no absorbido: lleva el identificador en `linkedSequenceId`,
+    // no en `sequenceId`. Así borrar la jugada no se lleva por delante una
+    // parada del portero ni una falta del contador reglamentario.
+    const origen = pendiente?.fromDeflectEventId ?? pendiente?.fromFoulEventId;
+    setMatchData((prev) => {
+      let estado = construidos.reduce((acc, c) => applyActionToState(acc, c), prev);
+      if (origen) {
+        estado = {
+          ...estado,
+          events: estado.events.map((e) =>
+            e.id === origen
+              ? { ...e, metadata: { ...e.metadata, linkedSequenceId: sequenceId } }
+              : e,
+          ),
+        };
+      }
+      return estado;
+    });
+
+    confirmRegistered(construidos[0].newEvent);
+    const final = construidos[construidos.length - 1];
+    applyPhaseOfPlay(nextPhaseAfterEvent(final.type, draft.isOpponent, phaseAtTap));
+
+    // NUEVA BANDA: se encadena la siguiente, en una ventana limpia. Lo
+    // sugerido es el mismo bando; el operador lo corrige si no.
+    if (draft.root === "throw_in" && draft.outcome === "new_set_piece") {
+      openSetPiece("throw_in", draft.isOpponent);
+    }
+  };
+
+  /**
+   * Cómo siguió el balón tras un despeje. Solo se ESCRIBE en el despeje.
+   *
+   * Si sale de banda se propone el saque correcto, enlazado al despeje. No se
+   * crea ninguna pérdida ni ninguna recuperación: el balón cambió de manos
+   * por reglamento, no porque nadie lo perdiera o lo ganara.
+   */
+  const resolveDeflectOutcome = (outcome: DeflectOutcome | null) => {
+    const pendiente = pendingDeflectOutcome;
+    setPendingDeflectOutcome(null);
+    if (!pendiente || !outcome) return;
     setMatchData((prev) => ({
       ...prev,
-      events: withEventLocation(prev.events, pending.eventId, zoneId),
+      events: prev.events.map((e) =>
+        e.id === pendiente.eventId
+          ? { ...e, metadata: { ...e.metadata, deflectOutcome: outcome } }
+          : e,
+      ),
     }));
+    if (deflectOutcomeLeadsToThrowIn(outcome)) {
+      openSetPiece("throw_in", throwInTakerIsOpponent(outcome), undefined, {
+        fromDeflectEventId: pendiente.eventId,
+      });
+    }
   };
 
-  const handleDeleteEvent = (event: GameEvent) => {
-    if (isDataLocked) return;
-    setMatchData((prev) => {
-      const nextPlayers = prev.players.map((p) => {
-        let stats = { ...p.stats };
-        let pm = p.plusMinus;
 
-        const isEffective = event.playerIds.includes(p.id);
+  /**
+   * Quita UN evento del estado y deshace lo que sumó: estadísticas del actor
+   * y del portero, más/menos, faltas y tiempos muertos.
+   *
+   * Es el cuerpo de siempre del borrado, separado para poder aplicarlo a
+   * todos los eventos de una jugada dentro de un único `setMatchData`.
+   */
+  const revertEventFromState = (prev: MatchData, event: GameEvent): MatchData => {
+    const nextPlayers = prev.players.map((p) => {
+      let stats = { ...p.stats };
+      let pm = p.plusMinus;
 
-        if (isEffective) {
-          const isOpponentEvent = event.metadata?.isOpponent;
-          const isOpposingKeeper = p.role === Role.GOALKEEPER && (
-            (isOpponentEvent ? !p.isOpponent : p.isOpponent)
-          );
+      const isEffective = event.playerIds.includes(p.id);
 
-          // Estadisticas de portero: se deshace con la MISMA funcion con la
-          // que se registraron, sobre el portero al que el evento fue
-          // atribuido. Antes se decidia por el rol y el bando ACTUALES.
-          const gkDelta = goalieStatsDelta(event, p);
-          stats.saves = Math.max(0, stats.saves - gkDelta.saves);
-          stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
-          if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
-          if (gkDelta.exitsSuccess) {
-            stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
-          }
-
-          if (event.type === ActionType.GOAL) {
-            if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
-          }
-          if (event.type === ActionType.SHOT) {
-            if (!isOpposingKeeper) {
-              if (event.destinationGrid === "OUT") {
-                stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
-              } else {
-                stats.shots = Math.max(0, stats.shots - 1);
-              }
-            }
-          }
-          if (event.type === ActionType.ASSIST)
-            stats.assists = Math.max(0, stats.assists - 1);
-          if (event.type === ActionType.STEAL) {
-            stats.steals = Math.max(0, stats.steals - 1);
-            if (event.metadata?.subType === 'with_possession') stats.stealsWithPossession = Math.max(0, stats.stealsWithPossession - 1);
-            else if (event.metadata?.subType === 'clearance') stats.stealsClearance = Math.max(0, stats.stealsClearance - 1);
-          }
-          if (event.type === ActionType.INTERCEPTION)
-            stats.interceptions = Math.max(0, stats.interceptions - 1);
-          if (event.type === ActionType.LOSS) {
-            stats.losses = Math.max(0, stats.losses - 1);
-            if (event.metadata?.subType === 'bad_pass') stats.lossesBadPass = Math.max(0, stats.lossesBadPass - 1);
-            else if (event.metadata?.subType === 'bad_dribble') stats.lossesBadDribble = Math.max(0, stats.lossesBadDribble - 1);
-            else if (event.metadata?.subType === 'bad_control') stats.lossesBadControl = Math.max(0, stats.lossesBadControl - 1);
-          }
-          if (event.type === ActionType.UNFORCED_ERROR)
-            stats.errors = Math.max(0, stats.errors - 1);
-          if (event.type === ActionType.YELLOW_CARD) {
-            if (stats.yellowCards >= 2) {
-              stats.redCards = Math.max(0, stats.redCards - 1);
-            }
-            stats.yellowCards = Math.max(0, stats.yellowCards - 1);
-          }
-          if (event.type === ActionType.RED_CARD)
-            stats.redCards = Math.max(0, stats.redCards - 1);
-          // Registrar una falta suma en stats.fouls del jugador (ver
-          // handleFoul), pero borrarla solo devolvía el contador del equipo:
-          // la falta individual únicamente podía crecer. Registro y borrado
-          // usan ahora la MISMA función con el signo cambiado, y nunca deja
-          // el contador por debajo de cero.
-          stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
-          
-          // Las acciones de portero ya se han deshecho arriba con
-          // goalieStatsDelta; no se duplican aqui.
-        }
-
-        // Revertir el plus/minus con el MISMO criterio con el que se sumó:
-        // el beneficiario del gol, no el bando del evento.
-        if (event.onPitchPlayerIds?.includes(p.id) && isGoalEvent(event)) {
-          pm -= beneficiarySide(event) === "team" ? 1 : -1;
-        }
-
-        return { ...p, stats, plusMinus: pm };
-      });
-
-      // Contador reglamentario del equipo.
-      const nextFouls = applyFoulToCounters(prev.fouls, event, -1);
-
-      let nextTimeouts = { ...prev.timeoutsUsed };
-      if (event.type === ActionType.TIMEOUT) {
+      if (isEffective) {
         const isOpponentEvent = event.metadata?.isOpponent;
-        const teamKey = isOpponentEvent ? "opponent" : "team";
-        const periodKey =
-          event.period === Period.FIRST
-            ? "period1"
-            : event.period === Period.SECOND
-            ? "period2"
-            : null;
+        const isOpposingKeeper = p.role === Role.GOALKEEPER && (
+          (isOpponentEvent ? !p.isOpponent : p.isOpponent)
+        );
 
-        if (periodKey) {
-          nextTimeouts[teamKey] = {
-            ...nextTimeouts[teamKey],
-            [periodKey]: false,
-          };
+        // Estadisticas de portero: se deshace con la MISMA funcion con la
+        // que se registraron, sobre el portero al que el evento fue
+        // atribuido. Antes se decidia por el rol y el bando ACTUALES.
+        const gkDelta = goalieStatsDelta(event, p);
+        stats.saves = Math.max(0, stats.saves - gkDelta.saves);
+        stats.conceded = Math.max(0, stats.conceded - gkDelta.conceded);
+        if (gkDelta.exits) stats.exits = Math.max(0, (stats.exits ?? 0) - gkDelta.exits);
+        if (gkDelta.exitsSuccess) {
+          stats.exitsSuccess = Math.max(0, (stats.exitsSuccess ?? 0) - gkDelta.exitsSuccess);
         }
+
+        if (event.type === ActionType.GOAL) {
+          if (!isOpposingKeeper) stats.goals = Math.max(0, stats.goals - 1);
+        }
+        if (event.type === ActionType.SHOT) {
+          if (!isOpposingKeeper) {
+            if (event.destinationGrid === "OUT") {
+              stats.shotsOffTarget = Math.max(0, stats.shotsOffTarget - 1);
+            } else {
+              stats.shots = Math.max(0, stats.shots - 1);
+            }
+          }
+        }
+        if (event.type === ActionType.ASSIST)
+          stats.assists = Math.max(0, stats.assists - 1);
+        if (event.type === ActionType.STEAL) {
+          stats.steals = Math.max(0, stats.steals - 1);
+          if (event.metadata?.subType === 'with_possession') stats.stealsWithPossession = Math.max(0, stats.stealsWithPossession - 1);
+          else if (event.metadata?.subType === 'clearance') stats.stealsClearance = Math.max(0, stats.stealsClearance - 1);
+        }
+        if (event.type === ActionType.INTERCEPTION)
+          stats.interceptions = Math.max(0, stats.interceptions - 1);
+        if (event.type === ActionType.LOSS) {
+          stats.losses = Math.max(0, stats.losses - 1);
+          if (event.metadata?.subType === 'bad_pass') stats.lossesBadPass = Math.max(0, stats.lossesBadPass - 1);
+          else if (event.metadata?.subType === 'bad_dribble') stats.lossesBadDribble = Math.max(0, stats.lossesBadDribble - 1);
+          else if (event.metadata?.subType === 'bad_control') stats.lossesBadControl = Math.max(0, stats.lossesBadControl - 1);
+        }
+        if (event.type === ActionType.UNFORCED_ERROR)
+          stats.errors = Math.max(0, stats.errors - 1);
+        if (event.type === ActionType.YELLOW_CARD) {
+          if (stats.yellowCards >= 2) {
+            stats.redCards = Math.max(0, stats.redCards - 1);
+          }
+          stats.yellowCards = Math.max(0, stats.yellowCards - 1);
+        }
+        if (event.type === ActionType.RED_CARD)
+          stats.redCards = Math.max(0, stats.redCards - 1);
+        // Registrar una falta suma en stats.fouls del jugador (ver
+        // handleFoul), pero borrarla solo devolvía el contador del equipo:
+        // la falta individual únicamente podía crecer. Registro y borrado
+        // usan ahora la MISMA función con el signo cambiado, y nunca deja
+        // el contador por debajo de cero.
+        stats.fouls = applyFoulToPlayerStat(stats.fouls, foulStatDelta(event, p, -1));
+
+        // Las acciones de portero ya se han deshecho arriba con
+        // goalieStatsDelta; no se duplican aqui.
       }
 
-      return {
-        ...prev,
-        events: prev.events.filter((e) => e.id !== event.id),
-        players: nextPlayers,
-        fouls: nextFouls,
-        timeoutsUsed: nextTimeouts,
-      };
+      // Revertir el plus/minus con el MISMO criterio con el que se sumó:
+      // el beneficiario del gol, no el bando del evento.
+      if (event.onPitchPlayerIds?.includes(p.id) && isGoalEvent(event)) {
+        pm -= beneficiarySide(event) === "team" ? 1 : -1;
+      }
+
+      return { ...p, stats, plusMinus: pm };
     });
+
+    // Contador reglamentario del equipo.
+    const nextFouls = applyFoulToCounters(prev.fouls, event, -1);
+
+    let nextTimeouts = { ...prev.timeoutsUsed };
+    if (event.type === ActionType.TIMEOUT) {
+      const isOpponentEvent = event.metadata?.isOpponent;
+      const teamKey = isOpponentEvent ? "opponent" : "team";
+      const periodKey =
+        event.period === Period.FIRST
+          ? "period1"
+          : event.period === Period.SECOND
+          ? "period2"
+          : null;
+
+      if (periodKey) {
+        nextTimeouts[teamKey] = {
+          ...nextTimeouts[teamKey],
+          [periodKey]: false,
+        };
+      }
+    }
+
+    return {
+      ...prev,
+      events: prev.events.filter((e) => e.id !== event.id),
+      players: nextPlayers,
+      fouls: nextFouls,
+      timeoutsUsed: nextTimeouts,
+    };
+  };
+
+  /**
+   * Borrar —o deshacer— un evento.
+   *
+   * Si pertenece a una jugada a balón parado, se va la jugada ENTERA: borrar
+   * solo el gol dejaría un córner huérfano contando, y borrar solo el córner
+   * dejaría un gol sin su origen. Los eventos sin `sequenceId` —todos los de
+   * partidos anteriores— se borran solos, exactamente como antes.
+   */
+  const handleDeleteEvent = (event: GameEvent) => {
+    if (isDataLocked) return;
+    const ids = eventIdsToDeleteWith(matchData.events, event.id);
+    const aBorrar = ids.length ? ids : [event.id];
+    setMatchData((prev) =>
+      aBorrar.reduce((estado, id) => {
+        const objetivo = estado.events.find((e) => e.id === id);
+        return objetivo ? revertEventFromState(estado, objetivo) : estado;
+      }, prev),
+    );
     setDeleteConfirmEvent(null);
   };
   // La confirmación necesita poder deshacer sin depender del orden de
@@ -3914,15 +4122,17 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 2 / {totalPages}</span>
                     </div>
-                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
-                      <div key={item.label} style={{ marginBottom: 16 }}>
+                    <div data-pdf-item-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 18 }}>{ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 12, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
                         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
-                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', whiteSpace: 'nowrap' }}>#{formatJerseyNumber(p)}</div></div>); })}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 4 }}>Cada barra es un jugador, por dorsal; el nombre de cada dorsal está en la tabla de estadísticas.</div>
                     <Footer page={2} total={totalPages} />
                   </>
                 );
@@ -4063,15 +4273,17 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — comparativa por ítem</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 5 / {totalPages}</span>
                     </div>
-                    {ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
-                      <div key={item.label} style={{ marginBottom: 16 }}>
+                    <div data-pdf-item-grid style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 18 }}>{ITEMS.map(item => { const vals = team.players.map(p => item.fn(p)); const maxV = Math.max(...vals, 1); const avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1); const avgPct = Math.round((avg / maxV) * 100); return (
+                      <div key={item.label} style={{ marginBottom: 12, minWidth: 0 }}>
                         <div style={{ fontSize: 9, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{item.label}</div>
                         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52 }}>
-                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name.split(' ')[0]}</div></div>); })}
+                          {team.players.map((p, i) => { const pct = maxV > 0 ? vals[i] / maxV : 0; const h = Math.max(2, Math.round(pct * 44)); return (<div key={p.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}><div style={{ fontSize: 8, color: '#64748b' }}>{vals[i]}</div><div style={{ width: '65%', height: h, background: item.color, borderRadius: '2px 2px 0 0', opacity: vals[i] > 0 ? 0.9 : 0.15 }} /><div style={{ fontSize: 8, color: '#94a3b8', textAlign: 'center', whiteSpace: 'nowrap' }}>#{formatJerseyNumber(p)}</div></div>); })}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}><span style={{ fontSize: 8, color: '#94a3b8', width: 44 }}>Promedio</span><div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${avgPct}%`, height: '100%', background: item.color, borderRadius: 3, opacity: 0.7 }} /></div><span style={{ fontSize: 8, color: '#94a3b8', width: 24, textAlign: 'right' }}>{avg.toFixed(1)}</span></div>
                       </div>
                     );})}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 4 }}>Cada barra es un jugador, por dorsal; el nombre de cada dorsal está en la tabla de estadísticas.</div>
                     <Footer page={5} total={totalPages} />
                   </>
                 );
@@ -4086,6 +4298,12 @@ export default function MatchTracker() {
                 const maxAtkV = Math.max(...team.players.map(p => (p.stats.goals || 0) * 2 + tiros(p).shots), 1);
                 const maxDefV = Math.max(...team.players.map(p => Math.max(0, (p.stats.steals || 0) - (p.stats.losses || 0) * 0.5)), 0.1);
                 const W = 140, H = 140, cx = 70, cy = 70, R = 50;
+                // La rejilla crece en columnas, no en filas: con 14 fichas a
+                // tres columnas la página medía 1400 px y la captura la
+                // encogía. El radar conserva su geometría (viewBox) y solo
+                // cambia el tamaño impreso.
+                const radarCols = team.players.length <= 9 ? 3 : team.players.length <= 16 ? 4 : 5;
+                const radarSize = radarCols === 3 ? W : radarCols === 4 ? 112 : 96;
                 const angles = SPIDER_ITEMS.map((_, i) => (Math.PI * 2 * i / SPIDER_ITEMS.length) - Math.PI / 2);
                 const gridPts = (lv: number) => angles.map(a => `${cx + (lv / 5) * R * Math.cos(a)},${cy + (lv / 5) * R * Math.sin(a)}`).join(' ');
                 return (
@@ -4094,7 +4312,7 @@ export default function MatchTracker() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: team.accent }} /><span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{team.name} — perfil táctico</span></div>
                       <span style={{ fontSize: 8, color: '#94a3b8' }}>Página 6 / {totalPages}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${radarCols}, 1fr)`, gap: radarCols > 3 ? 8 : 12 }}>
                       {team.players.map(p => {
                         const normV = SPIDER_ITEMS.map((it, i) => Math.round((it.fn(p) / maxVals[i]) * 4) + 1);
                         const dataR = normV.map(v => (v / 5) * R);
@@ -4107,7 +4325,7 @@ export default function MatchTracker() {
                         return (
                           <div key={p.id} style={{ border: '0.5px solid #e2e8f0', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: '#0f172a', textAlign: 'center' }}><span style={{ color: team.accent, marginRight: 3 }}>#{formatJerseyNumber(p)}</span>{p.name.split(' ')[0]}<span style={{ display: 'inline-block', fontSize: 7, fontWeight: 600, padding: '1px 4px', borderRadius: 3, background: pos.bg, color: pos.color, marginLeft: 4 }}>{pos.label}</span></div>
-                            <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+                            <svg width={radarSize} height={radarSize} viewBox={`0 0 ${W} ${H}`}>
                               {[1,2,3,4,5].map(lv => (<polygon key={lv} points={gridPts(lv)} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               {angles.map((a, i) => (<line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(a)} y2={cy+R*Math.sin(a)} stroke="#e2e8f0" strokeWidth="0.5"/>))}
                               <polygon points={dataPts} fill="rgba(239,68,68,0.1)" stroke="#ef4444" strokeWidth="1.5"/>
@@ -4250,6 +4468,7 @@ export default function MatchTracker() {
                     opponentName={matchData.opponentName}
                     opensContexts={pagina.opensContexts}
                     opensGoals={pagina.opensGoals}
+                    goalNotes={pdfReport.setPieces.sequenceNotes}
                   />
                 </div>
                 <Footer page={contextPage(i)} total={totalPages} />
@@ -5118,9 +5337,8 @@ export default function MatchTracker() {
                             <div className="h-[1px] flex-1 bg-white/10" />
                           </div>
                           
-                          {periodEvents
-                            .sort((a, b) => b.timestamp - a.timestamp)
-                            .map((e) => (
+                          {(() => {
+                            const filaEvento = (e: GameEvent, interno = false) => (
                               <div
                                 key={e.id}
                                 className={`p-2 bg-white/5 border border-white/5 rounded-lg flex items-center justify-between gap-3 group transition-all hover:bg-white/10 ${
@@ -5183,15 +5401,120 @@ export default function MatchTracker() {
                                   <span className="text-[10px] font-mono font-bold text-slate-500">
                                     #{matchData.events.indexOf(e) + 1}
                                   </span>
+                                  {!interno && (
                                   <button
                                     onClick={() => setDeleteConfirmEvent(e)}
                                     className="p-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-md transition-all shadow-sm shrink-0"
                                   >
                                     <Trash2 size={16} />
                                   </button>
+                                  )}
                                 </div>
                               </div>
-                            ))}
+                            );
+                            const ordenados = [...periodEvents].sort(
+                              (a, b) => b.timestamp - a.timestamp,
+                            );
+                            // Una jugada a balón parado es UNA fila. Sus
+                            // eventos siguen existiendo —alimentan las
+                            // cifras— y se ven al desplegarla.
+                            return groupTimeline(ordenados).map((item) => {
+                              if (item.kind === "event") return filaEvento(item.event);
+                              const card = describeSequence(matchData.events, item.sequenceId);
+                              const raiz = item.events.find(
+                                (x) => x.metadata?.sequenceRole === "root",
+                              ) ?? item.events[0];
+                              const abierta = expandedSequences.has(item.sequenceId);
+                              const nombreDe = (id: string | null) => {
+                                if (!id) return "no identificado";
+                                const p = matchData.players.find((x) => x.id === id);
+                                if (!p) return "no identificado";
+                                const ident = playerDisplayIdentity(p, {
+                                  players: matchData.players,
+                                  maxCaracteres: 18,
+                                });
+                                return `#${ident.dorsal} ${
+                                  ident.kind === "nombre" ? ident.nombreCorto : ident.letra
+                                }`;
+                              };
+                              return (
+                                <div
+                                  key={item.sequenceId}
+                                  data-timeline-sequence={item.sequenceId}
+                                  className={`rounded-lg border ${
+                                    card?.outcome === "goal"
+                                      ? "border-green-500/30 bg-green-500/5"
+                                      : "border-violet-500/25 bg-violet-500/5"
+                                  }`}
+                                >
+                                  <div className="p-2 flex items-center justify-between gap-3">
+                                    <button
+                                      data-timeline-sequence-toggle
+                                      onClick={() =>
+                                        setExpandedSequences((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(item.sequenceId)) next.delete(item.sequenceId);
+                                          else next.add(item.sequenceId);
+                                          return next;
+                                        })
+                                      }
+                                      className="flex flex-col gap-1 min-w-0 text-left flex-1 min-h-[44px]"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[8px] font-mono font-black text-violet-300">
+                                          {formatTime(raiz.timestamp)}
+                                        </span>
+                                        <span
+                                          className={`text-[8px] font-black uppercase ${
+                                            card?.isOpponent ? "text-red-400" : "text-blue-400"
+                                          }`}
+                                        >
+                                          {card?.isOpponent
+                                            ? matchData.opponentName || "RIVAL"
+                                            : matchData.teamName || "LOCAL"}
+                                        </span>
+                                        <span className="text-[7px] font-black text-slate-500 uppercase">
+                                          {abierta ? "▾" : "▸"} {item.events.length} eventos
+                                        </span>
+                                      </div>
+                                      <span className="text-[9px] font-black uppercase text-white truncate">
+                                        {card?.rootLabel ?? "Balón parado"}
+                                        {card?.locationLabel ? ` · ${card.locationLabel}` : ""}
+                                        {card?.modalityLabel ? ` · ${card.modalityLabel}` : ""}
+                                      </span>
+                                      <span className="text-[8px] font-bold text-slate-400 uppercase truncate">
+                                        Saca {nombreDe(card?.takerId ?? null)}
+                                        {card?.outcome === "shot" || card?.outcome === "goal"
+                                          ? ` · remata ${nombreDe(card?.finisherId ?? null)}`
+                                          : ""}
+                                        {card?.outcomeLabel ? ` · ${card.outcomeLabel}` : ""}
+                                      </span>
+                                    </button>
+                                    <button
+                                      data-timeline-sequence-delete
+                                      onClick={() => setDeleteConfirmEvent(raiz)}
+                                      className="p-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-md transition-all shadow-sm shrink-0"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                  {abierta && (
+                                    // Sangrados y bajo un rótulo: son las piezas de
+                                    // ESTA jugada, no jugadas independientes.
+                                    <div
+                                      className="mx-2 mb-2 pl-2 border-l-2 border-violet-500/30 space-y-1 opacity-90"
+                                      data-timeline-sequence-events
+                                    >
+                                      <div className="text-[7px] font-black uppercase tracking-widest text-violet-300/70">
+                                        Eventos de la jugada
+                                      </div>
+                                      {item.events.map((x) => filaEvento(x, true))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
                       ));
                   })()}
@@ -7154,8 +7477,16 @@ export default function MatchTracker() {
                 </div>
               )}
 
-              {/* BOTTOM BAR: QUICK ACTIONS (horizontal) */}
-              <div className="w-full flex flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll">
+              {/* BOTTOM BAR: QUICK ACTIONS (horizontal)
+                  Con BANDA son ocho. En una sola fila de móvil cada botón se
+                  quedaba en 38 px de ancho, por debajo de lo que se acierta
+                  con el pulgar. En móvil van en dos filas de cuatro —cada
+                  botón el doble de ancho— y desde `sm` en una sola fila,
+                  como siempre. */}
+              <div
+                data-quick-actions-bar
+                className="w-full grid grid-cols-4 sm:flex sm:flex-row gap-1.5 p-1 bg-black/20 backdrop-blur-xl border-t border-white/10 shrink-0 allow-scroll"
+              >
 
                 {/* Match Actions */}
                 <button
@@ -7187,7 +7518,7 @@ export default function MatchTracker() {
 
                 <button
                   data-action-button="jfalta"
-                  onClick={() => handleFreeKickPlay(bandoDeAccion(), actorDeAccion())}
+                  onClick={() => openSetPiece("free_kick", bandoDeAccion(), actorDeAccion())}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-emerald-600/30 text-slate-200 hover:text-emerald-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <PlayCircle size={16} />
@@ -7196,11 +7527,20 @@ export default function MatchTracker() {
 
                 <button
                   data-action-button="corner"
-                  onClick={() => setPendingCorner({ isOpponent: bandoDeAccion() })}
+                  onClick={() => openSetPiece("corner", bandoDeAccion(), actorDeAccion())}
                   className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-violet-600/30 text-slate-200 hover:text-violet-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
                 >
                   <Flag size={16} />
                   <span className="text-[7px] uppercase">Córner</span>
+                </button>
+
+                <button
+                  data-action-button="banda"
+                  onClick={() => openSetPiece("throw_in", bandoDeAccion(), actorDeAccion())}
+                  className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 hover:bg-sky-600/30 text-slate-200 hover:text-sky-300 transition-all font-black shadow-lg bg-white/10 border border-white/20"
+                >
+                  <ArrowLeftRight size={16} />
+                  <span className="text-[7px] uppercase">Banda</span>
                 </button>
 
                 <button
@@ -7244,6 +7584,8 @@ export default function MatchTracker() {
                   { id: "gol", label: "Gol", onClick: () => setPendingAction({ type: ActionType.GOAL, step: "player", isOpponent: otroEsRival }) },
                   { id: "tiro", label: "Tiro", onClick: () => setPendingAction({ type: ActionType.SHOT, step: "player", isOpponent: otroEsRival }) },
                   { id: "falta", label: "Falta", onClick: () => handleFoul(!otroEsRival) },
+                  { id: "corner", label: "Córner", onClick: () => openSetPiece("corner", otroEsRival) },
+                  { id: "banda", label: "Banda", onClick: () => openSetPiece("throw_in", otroEsRival) },
                   { id: "perdida", label: "Pérdida", onClick: () => setPendingAction({ type: ActionType.LOSS, isOpponent: otroEsRival, step: "subtype" }) },
                   { id: "timeout", label: "T. muerto", onClick: () => handleAction(ActionType.TIMEOUT, undefined, { metadata: { isOpponent: otroEsRival } }) },
                 ];
@@ -7263,12 +7605,17 @@ export default function MatchTracker() {
                     >
                       {nombreOtro}
                     </span>
-                    {/* En móvil las cinco acciones no caben en una fila sin
-                        quedarse en botones de 49 px, que es menos de lo que
-                        se acierta con el pulgar en una banda. Se permiten dos
-                        filas: antes dos filas legibles que una sola fila que
-                        obliga a mirar. */}
-                    <div className="flex gap-1 flex-1 basis-full sm:basis-auto min-w-0 flex-wrap sm:flex-nowrap">
+                    {/* Las acciones no siempre caben en una fila sin quedarse
+                        en botones de menos de 72 px, que es menos de lo que se
+                        acierta con el pulgar en una banda. Se permiten dos
+                        filas en CUALQUIER ancho: con córner y banda son siete,
+                        y a 1024 px una sola fila escondía «T. muerto» bajo la
+                        columna derecha. Antes dos filas legibles que un botón
+                        que no se ve. */}
+                    <div
+                      data-other-team-actions
+                      className="flex gap-1 flex-1 basis-full sm:basis-auto min-w-0 flex-wrap"
+                    >
                       {acciones.map((a) => (
                         <button
                           key={a.id}
@@ -7644,83 +7991,64 @@ export default function MatchTracker() {
           </div>
         )}
 
-        {/* ── CÓRNER: solo hay que elegir la esquina ──────────────────── */}
-        {pendingCorner && (
-          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
+        {/* ── BALÓN PARADO: toda la jugada en una sola ventana ────────────
+            Espera a que se cierren los pasos que le preceden —la ubicación
+            de la falta, la zona de intervención, el desenlace del despeje—
+            para no apilar dos ventanas una encima de otra. */}
+        {pendingSetPiece &&
+          !pendingFoulLocation &&
+          !pendingInterventionLocation &&
+          !pendingDeflectOutcome && (
+            <SetPieceSequenceModal
+              key={pendingSetPiece.token}
+              root={pendingSetPiece.root}
+              teamName={matchData.teamName || "LOCAL"}
+              opponentName={matchData.opponentName || "RIVAL"}
+              players={matchData.players}
+              defaultIsOpponent={pendingSetPiece.defaultIsOpponent}
+              presetTakerId={pendingSetPiece.presetTakerId}
+              fromDeflectEventId={pendingSetPiece.fromDeflectEventId}
+              targetGoalkeeperIdFor={targetGoalkeeperIdFor}
+              onConfirm={commitSetPieceSequence}
+              onCancel={() => setPendingSetPiece(null)}
+            />
+          )}
+
+        {/* ── DESPEJE: cómo siguió el balón (opcional) ───────────────────
+            El despeje ya está registrado y contado. Esto solo lo describe,
+            y si sale de banda propone el saque correcto. */}
+        {pendingDeflectOutcome && !pendingInterventionLocation && (
+          <div
+            data-deflect-outcome-modal
+            className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
               <div className="text-center">
-                <h3 className="text-white font-black uppercase text-sm">Córner</h3>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {pendingCorner.isOpponent ? matchData.opponentName : matchData.teamName} · ¿desde qué esquina?
-                </p>
+                <h3 className="text-white font-black uppercase text-sm">Despeje</h3>
+                <p className="text-[10px] text-slate-400 mt-1">¿Cómo sigue el balón?</p>
               </div>
-              {!pendingCorner.side ? (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    {(["left", "right"] as CornerSide[]).map((side) => (
-                      <button
-                        key={side}
-                        onClick={() =>
-                          setPendingCorner({ isOpponent: pendingCorner.isOpponent, side })
-                        }
-                        className="py-6 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-2"
-                      >
-                        <Flag size={22} className="text-violet-300" />
-                        <span className="text-[11px] font-black uppercase text-white">
-                          {formatCornerLabel(side)}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
-                    Izquierda y derecha se entienden desde la perspectiva del equipo que saca,
-                    en cualquiera de las dos partes.
-                  </p>
-                </>
-              ) : (
-                /* Segundo paso: cómo se ejecutó. Omitirlo deja un córner
-                   perfectamente válido, sin desenlace registrado. */
-                <>
-                  <p className="text-[10px] text-slate-300 text-center font-black uppercase">
-                    {formatCornerLabel(pendingCorner.side)} · ¿cómo se ejecuta?
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {SET_PIECE_OUTCOMES.map((outcome) => (
-                      <button
-                        key={outcome}
-                        data-set-piece-outcome={outcome}
-                        onClick={() =>
-                          handleCorner(pendingCorner.isOpponent, pendingCorner.side!, outcome)
-                        }
-                        className="py-5 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all flex flex-col items-center gap-1"
-                      >
-                        <span className="text-[11px] font-black uppercase text-white">
-                          {SET_PIECE_OUTCOME_LABEL[outcome]}
-                        </span>
-                        <span className="text-[8px] text-slate-400 text-center px-2 leading-tight">
-                          {SET_PIECE_OUTCOME_DESCRIPTION[outcome]}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                {DEFLECT_OUTCOMES.map((o) => (
                   <button
-                    data-set-piece-outcome="none"
-                    onClick={() => handleCorner(pendingCorner.isOpponent, pendingCorner.side!)}
-                    className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-300"
+                    key={o}
+                    data-deflect-outcome={o}
+                    onClick={() => resolveDeflectOutcome(o)}
+                    className="min-h-[56px] py-3 px-2 rounded-2xl border-2 border-white/15 bg-white/5 hover:bg-violet-500/25 hover:border-violet-400 transition-all text-[10px] font-black uppercase text-white leading-tight"
                   >
-                    Sin especificar
+                    {DEFLECT_OUTCOME_LABEL[o]}
                   </button>
-                  <p className="text-[9px] text-slate-500 text-center leading-relaxed">
-                    El córner se registra igual. «Sin especificar» no inventa nada: queda
-                    como subtipo no registrado.
-                  </p>
-                </>
-              )}
+                ))}
+              </div>
+              <p className="text-[9px] text-slate-500 text-center leading-relaxed">
+                Un balón que sale de banda no es una pérdida ni una recuperación:
+                no se apunta ninguna de las dos.
+              </p>
               <button
-                onClick={() => setPendingCorner(null)}
+                data-deflect-outcome="skip"
+                onClick={() => resolveDeflectOutcome(null)}
                 className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
               >
-                Cancelar
+                Omitir
               </button>
             </div>
           </div>
@@ -7747,27 +8075,6 @@ export default function MatchTracker() {
           </div>
         )}
 
-        {/* ── JUGADA DE FALTA: ubicación OPCIONAL. La reanudación ya está
-            registrada; omitirla no la deshace. ─────────────────────────── */}
-        {pendingRestartLocation && (
-          <div className="fixed inset-0 z-[1400] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-3xl p-5 space-y-4">
-              <div className="text-center">
-                <h3 className="text-white font-black uppercase text-sm">{SET_PIECE_RESTART_LABEL}</h3>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  ¿Desde dónde se pone en juego? Es opcional: puedes omitirlo y la jugada se mantiene.
-                </p>
-              </div>
-              <PitchZones onSelect={assignRestartLocation} />
-              <button
-                onClick={() => setPendingRestartLocation(null)}
-                className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase text-slate-400"
-              >
-                Omitir ubicación
-              </button>
-            </div>
-          </div>
-        )}
 
         {pendingAction && (
           <>
@@ -8627,13 +8934,27 @@ export default function MatchTracker() {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-red-500/30 bg-red-500/20">
                 <AlertTriangle className="text-red-500" size={24} />
               </div>
-              <h3 className="mb-2 text-sm font-black uppercase text-white">
-                ¿Eliminar Acción?
-              </h3>
-              <p className="mb-6 px-2 text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400">
-                Esta acción restará las estadísticas del jugador y ajustará el
-                marcador si es necesario.
-              </p>
+              {(() => {
+                // Si la acción es parte de una jugada, se va la jugada ENTERA:
+                // hay que decirlo antes, no descubrirlo después.
+                const piezas = eventIdsToDeleteWith(matchData.events, deleteConfirmEvent.id).length;
+                const esJugada = piezas > 1;
+                return (
+                  <>
+                    <h3 className="mb-2 text-sm font-black uppercase text-white">
+                      {esJugada ? "¿Eliminar la jugada?" : "¿Eliminar Acción?"}
+                    </h3>
+                    <p
+                      data-delete-sequence-warning={esJugada ? piezas : undefined}
+                      className="mb-6 px-2 text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400"
+                    >
+                      {esJugada
+                        ? `Se eliminan los ${piezas} eventos de la jugada a la vez, con sus estadísticas y su efecto en el marcador.`
+                        : "Esta acción restará las estadísticas del jugador y ajustará el marcador si es necesario."}
+                    </p>
+                  </>
+                );
+              })()}
 
               <div className="mb-6 rounded-xl border border-white/5 bg-black/40 p-3 text-left">
                 <div className="mb-1 flex items-center justify-between">
@@ -8645,10 +8966,9 @@ export default function MatchTracker() {
                   </span>
                 </div>
                 <span className="text-[10px] font-black uppercase text-white">
-                  {deleteConfirmEvent.type.replace(/_/g, " ")} - #
-                  {matchData.players.find(
-                    (p) => p.id === deleteConfirmEvent.playerIds[0],
-                  )?.number || "--"}
+                  {/* Lo mismo que dice la confirmación al registrar: la
+                      jugada entera si lo es, el evento si no. */}
+                  {describeRegisteredAction(deleteConfirmEvent, matchData)}
                 </span>
               </div>
 

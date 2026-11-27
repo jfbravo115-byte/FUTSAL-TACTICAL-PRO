@@ -236,9 +236,10 @@ describe("filtros de la matriz", () => {
   it("expone un valor estable para cada métrica", () => {
     const zone = {
       zone: "Z1L", label: "Zona 1 · izquierda",
-      total: 9, shots: 4, recoveries: 2, losses: 1, goals: 1, fouls: 1, corners: 1,
+      total: 11, shots: 4, recoveries: 2, losses: 1, goals: 1, fouls: 1, corners: 1, throwIns: 2,
     };
-    expect(zoneMetricValue(zone, "all")).toBe(9);
+    expect(zoneMetricValue(zone, "all")).toBe(11);
+    expect(zoneMetricValue(zone, "throwIns")).toBe(2);
     expect(zoneMetricValue(zone, "shots")).toBe(4);
     expect(zoneMetricValue(zone, "recoveries")).toBe(2);
     expect(zoneMetricValue(zone, "losses")).toBe(1);

@@ -32,6 +32,20 @@ import {
   zoneMetricValue,
 } from "../services/matchZonesService";
 import { FutsalPitch } from "../components/field/FutsalPitch";
+import {
+  ThrowInFilter,
+  describeCornerStats,
+  describeFreeKickStats,
+  describeThrowInStats,
+  isThrowInMatching,
+  summarizeSetPieceSequences,
+} from "../utils/setPieceStats";
+import {
+  SEQUENCE_OUTCOMES,
+  SEQUENCE_OUTCOME_LABEL,
+  SET_PIECE_MODALITY_LABEL,
+} from "../utils/setPieceSequence";
+import { playerDisplayIdentity } from "../utils/playerIdentity";
 import { PeriodShotMapsBoard, periodLabel } from "../components/export/PeriodShotMaps";
 import { PhaseMetricRow } from "../components/export/PhaseZoneMaps";
 import {
@@ -68,6 +82,7 @@ const METRIC_LABEL: Record<ZoneMetric, string> = {
   losses: "Pérdidas",
   fouls: "Faltas",
   corners: "Córners",
+  throwIns: "Bandas",
 };
 
 /** Sustantivo con el que se redacta la lectura textual de cada métrica. */
@@ -77,6 +92,7 @@ const METRIC_NOUN: Record<Exclude<ZoneMetric, "all">, ActionType> = {
   losses: ActionType.LOSS,
   fouls: ActionType.FOUL,
   corners: ActionType.CORNER,
+  throwIns: ActionType.THROW_IN,
 };
 
 export default function MatchAnalysis() {
@@ -113,6 +129,8 @@ export default function MatchAnalysis() {
   const aiAbortRef = useRef<AbortController | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [zoneOpponent, setZoneOpponent] = useState(false);
+  /** Filtro de la métrica BANDAS. Solo presentación: no toca el partido. */
+  const [throwInFilter, setThrowInFilter] = useState<ThrowInFilter>({});
   const [zoneMetric, setZoneMetric] = useState<ZoneMetric>("all");
   // FASES DE JUEGO. Dos selectores independientes: la métrica decide QUÉ par
   // de fases se contrasta y de quién son las acciones; el periodo acota el
@@ -185,6 +203,11 @@ export default function MatchAnalysis() {
   const zones = useMemo(
     () => match ? buildZoneDashboard(match, zoneOpponent) : null,
     [match, zoneOpponent],
+  );
+  /** Balón parado de los dos bandos, del motor único. Para el resumen. */
+  const setPieceSummary = useMemo(
+    () => (match ? summarizeSetPieceSequences(match.events) : null),
+    [match],
   );
 
   // Mismo servicio y mismo protocolo que MatchTracker.
@@ -310,6 +333,28 @@ export default function MatchAnalysis() {
   const textualTop =
     textualTally && textualMetric ? describeTopZone(textualTally, ACTION_NOUN[textualMetric]!) : null;
 
+  // BANDAS. Sin filtro, la pista es la del dashboard, como cualquier otra
+  // métrica. Con filtro de modalidad o desenlace se cuenta con el predicado
+  // del motor único (`isThrowInMatching`): la pantalla no decide qué es una
+  // banda rápida ni una banda que acabó en pérdida.
+  const throwInFiltered =
+    zoneMetric === "throwIns" && (throwInFilter.modality || throwInFilter.outcome);
+  const pitchCounts: Record<string, number> =
+    match && throwInFiltered && bucket?.system === "zone12"
+      ? (tallyActionZones(match, (e) => isThrowInMatching(e, throwInFilter), zoneOpponent) as Record<
+          string,
+          number
+        >)
+      : Object.fromEntries(bucketZones.map((z) => [z.zone, zoneMetricValue(z, zoneMetric)]));
+
+  /** «#7 Ramón»: el nombre real por delante, como en el resto de la app. */
+  const nombreJugador = (id: string) => {
+    const p = match?.players.find((x) => x.id === id);
+    if (!p) return "no identificado";
+    const ident = playerDisplayIdentity(p, { players: match!.players, maxCaracteres: 18 });
+    return `#${ident.dorsal} ${ident.kind === "nombre" ? ident.nombreCorto : ident.letra}`;
+  };
+
   // Faltas RECIBIDAS por zona: las comete el rival y se espejan a la
   // perspectiva de quien las recibe. Solo presentación.
   const foulsAgainstLines =
@@ -378,6 +423,61 @@ export default function MatchAnalysis() {
           </section>
         )}
 
+        {/* ── BALÓN PARADO, de un vistazo ─────────────────────────────
+            Debajo del resumen visual y de sus destacados, sin sustituir
+            nada. Los dos bandos en filas separadas: nunca se suman. «Tiros
+            y goles originados» son los que NACIERON de una reanudación; ya
+            están dentro de los tiros y goles totales de arriba. */}
+        {setPieceSummary &&
+          (["team", "opponent"] as const).some((lado) => {
+            const sp = setPieceSummary[lado];
+            return sp.corner.total + sp.freeKick.total + sp.throwIn.total > 0;
+          }) && (
+            <section
+              data-summary-set-pieces
+              className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4"
+            >
+              <div className="text-[9px] uppercase font-black text-violet-300 mb-2">Balón parado</div>
+              <div className="space-y-2">
+                {(["team", "opponent"] as const).map((lado) => {
+                  const sp = setPieceSummary[lado];
+                  const tot = sp.corner.total + sp.freeKick.total + sp.throwIn.total;
+                  if (tot === 0) return null;
+                  const remates = sp.corner.attempts + sp.freeKick.attempts + sp.throwIn.attempts;
+                  const goles = sp.corner.goals + sp.freeKick.goals + sp.throwIn.goals;
+                  const perdidas = sp.corner.losses + sp.freeKick.losses + sp.throwIn.losses;
+                  return (
+                    <div
+                      key={lado}
+                      data-summary-set-pieces-side={lado}
+                      className="grid grid-cols-2 sm:grid-cols-7 gap-2 items-center"
+                    >
+                      <div className={`col-span-2 sm:col-span-1 text-[10px] font-black uppercase truncate ${lado === "team" ? "text-cyan-300" : "text-red-300"}`}>
+                        {lado === "team" ? match.teamName : match.opponentName}
+                      </div>
+                      {[
+                        ["Córners", sp.corner.total],
+                        ["Faltas a favor", sp.freeKick.total],
+                        ["Bandas", sp.throwIn.total],
+                        ["Tiros originados", remates],
+                        ["Goles originados", goles],
+                        ["Pérdidas tras reinicio", perdidas],
+                      ].map(([label, valor]) => (
+                        <div key={String(label)} className="rounded-xl bg-black/20 border border-white/5 px-2 py-1.5">
+                          <div className="text-lg font-black text-white leading-tight">{valor}</div>
+                          <div className="text-[8px] uppercase font-black text-slate-500 leading-tight">{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[8px] text-slate-500 mt-2">
+                Tiros y goles originados ya están dentro de los totales del partido: no se suman aparte.
+              </div>
+            </section>
+          )}
+
         <section ref={dataRef} className="scroll-mt-28 rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-5">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
             <div>
@@ -427,13 +527,46 @@ export default function MatchAnalysis() {
             ))}
           </div>
 
+          {zoneMetric === "throwIns" && (
+            <div data-throw-in-filters className="flex flex-wrap gap-1.5 mb-3">
+              {/* Lado y sector ya se ven en la pista: banda izquierda y
+                  derecha son los carriles, y Z1-Z4 las franjas. Aquí se
+                  filtra lo que la pista no puede enseñar sola. */}
+              {([undefined, "quick", "prepared"] as const).map((m) => (
+                <button
+                  key={m ?? "todas"}
+                  data-throw-in-modality={m ?? "all"}
+                  onClick={() => setThrowInFilter((f) => ({ ...f, modality: m }))}
+                  className={`min-h-[36px] px-3 rounded-xl text-[9px] font-black uppercase border ${
+                    throwInFilter.modality === m ? "bg-sky-400 text-slate-950 border-sky-400" : "bg-black/20 text-slate-400 border-white/10"
+                  }`}
+                >
+                  {m ? SET_PIECE_MODALITY_LABEL[m] : "Toda modalidad"}
+                </button>
+              ))}
+              <span className="w-px bg-white/10 mx-1" />
+              {([undefined, ...SEQUENCE_OUTCOMES] as const).map((o) => (
+                <button
+                  key={o ?? "todos"}
+                  data-throw-in-outcome={o ?? "all"}
+                  onClick={() => setThrowInFilter((f) => ({ ...f, outcome: o }))}
+                  className={`min-h-[36px] px-3 rounded-xl text-[9px] font-black uppercase border ${
+                    throwInFilter.outcome === o ? "bg-sky-400 text-slate-950 border-sky-400" : "bg-black/20 text-slate-400 border-white/10"
+                  }`}
+                >
+                  {o === undefined ? "Todo resultado" : o === "new_set_piece" ? "Nueva banda" : o === "none" ? "Sin resultado" : SEQUENCE_OUTCOME_LABEL[o]}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="grid md:grid-cols-[1fr_1fr] gap-5 items-start">
             <div>
               <div className="text-[9px] uppercase font-black text-slate-500 mb-2">Origen de acciones · {METRIC_LABEL[zoneMetric]}</div>
 
               <FutsalPitch
                 mode={bucket?.system === "legacy3x3" ? "legacy3x3" : "zone12"}
-                counts={Object.fromEntries(bucketZones.map((z) => [z.zone, zoneMetricValue(z, zoneMetric)]))}
+                counts={pitchCounts}
                 corners={zoneMetric === "all" || zoneMetric === "corners"
                   ? { left: zones.corners.left, right: zones.corners.right }
                   : undefined}
@@ -452,6 +585,13 @@ export default function MatchAnalysis() {
                   eficacia.
                 </div>
                 <div>T = tiros (incluyen los goles) · G = goles · R = recuperaciones · P = pérdidas · F = faltas cometidas · C = córners.</div>
+                {zoneMetric === "throwIns" && (
+                  <div>
+                    Bandas = saques de banda, en la celda desde donde se sacó y vistos desde quien
+                    saca: Z1 campo propio, Z4 campo rival. El tiro o la pérdida que vinieron
+                    después cuentan en su propia métrica.
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2 max-w-md mt-3">
@@ -504,27 +644,41 @@ export default function MatchAnalysis() {
               {describeCorners(zones.corners) && (
                 <div className="mt-2 text-[10px] text-violet-300 font-black">{describeCorners(zones.corners)}</div>
               )}
-              {/* Desglose por ejecución. Va DEBAJO del lado y de los mapas:
-                  añade una dimensión, no sustituye ninguna. Solo córners: una
-                  falta cometida es una infracción, no una reanudación. */}
-              {(describeSetPieceOutcomes(zones.setPieces.corners) ||
-                zones.setPieces.freeKickPlays.total > 0) && (
-                <div className="mt-2 text-[9px] text-slate-400 leading-relaxed">
-                  <div className="font-black text-slate-300 uppercase tracking-widest text-[8px]">
-                    Balón parado
-                  </div>
-                  {describeSetPieceOutcomes(zones.setPieces.corners) && (
-                    <div>Córners: {describeSetPieceOutcomes(zones.setPieces.corners)}</div>
-                  )}
-                  {zones.setPieces.freeKickPlays.total > 0 && (
-                    <div>
-                      Jugadas de falta: {zones.setPieces.freeKickPlays.total} —{" "}
-                      {zones.setPieces.freeKickPlays.located} con ubicación ·{" "}
-                      {zones.setPieces.freeKickPlays.unlocated} sin ubicación
+              {/* BALÓN PARADO de este bando, del motor único: córner, falta a
+                  favor y banda con lado o sector, modalidad, desenlace,
+                  sacadores y finalizadores. Va DEBAJO de los mapas: añade
+                  dimensiones, no sustituye ninguna. */}
+              {(() => {
+                const sp = zones.setPieces.sequences;
+                const bloques: [string, string[]][] = [
+                  ["Córners", describeCornerStats(sp.corner, nombreJugador)],
+                  ["Faltas a favor", describeFreeKickStats(sp.freeKick, nombreJugador)],
+                  ["Saques de banda", describeThrowInStats(sp.throwIn, nombreJugador)],
+                ];
+                // Un partido anterior no tiene jugadas registradas, pero sus
+                // córners sí podían declarar cómo se ejecutaron (tiro/jugada).
+                // Ese dato no se pierde: se enseña tal cual se guardó.
+                const ejecucionHistorica =
+                  sp.corner.recorded === 0 ? describeSetPieceOutcomes(zones.setPieces.corners) : null;
+                if (ejecucionHistorica) bloques[0][1].push(`Ejecución registrada: ${ejecucionHistorica}`);
+                const conDatos = bloques.filter(([, l]) => l.length > 0);
+                if (!conDatos.length) return null;
+                return (
+                  <div data-set-piece-breakdown className="mt-3 text-[9px] text-slate-400 leading-relaxed space-y-2">
+                    <div className="font-black text-slate-300 uppercase tracking-widest text-[8px]">
+                      Balón parado · {zoneOpponent ? match.opponentName : match.teamName}
                     </div>
-                  )}
-                </div>
-              )}
+                    {conDatos.map(([titulo, lineas]) => (
+                      <div key={titulo}>
+                        <div className="font-black text-slate-300">{titulo}</div>
+                        {lineas.map((l) => (
+                          <div key={l}>{l}</div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               {/* Un penalti no está sin ubicar: se lanza desde el punto de
                   penalti, que no es ninguno de los doce sectores. Se cuenta
                   aparte para que la suma cuadre a la vista. */}

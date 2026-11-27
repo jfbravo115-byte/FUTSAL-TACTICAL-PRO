@@ -17,6 +17,11 @@
  *   CÓRNERS      lado (izquierda/derecha) + cómo se ejecutó (tiro/jugada)
  *   FALTAS       COMETIDAS y recibidas, con cuántas tienen ubicación
  *   TIROS DE BP  tiros propios que declaran venir de falta o de córner
+ *   JUGADAS      córner, falta a favor y banda registrados como jugada
+ *                enlazada: cómo se sacaron, dónde, cómo acabaron y quién.
+ *                Sale del motor único `summarizeSetPieceSequences`; solo
+ *                aparece si el partido tiene alguna, así que el PDF de un
+ *                partido anterior queda exactamente como estaba.
  *
  * Una falta es una INFRACCIÓN: nunca se clasifica como "tiro" o "jugada", que
  * describiría lo que hizo el rival después. El tiro de falta se cuenta en el
@@ -36,6 +41,14 @@ import {
   summarizeSetPieceRestarts,
 } from "../../utils/setPieceModel";
 import { classifyZone } from "../../utils/legacyZoneMap";
+import {
+  PlayerTally,
+  SetPieceRootStats,
+  SideSetPieceStats,
+  summarizeSetPieceSequences,
+} from "../../utils/setPieceStats";
+import { SET_PIECE_MODALITY_LABEL, SetPieceModality } from "../../utils/setPieceSequence";
+import { formatJerseyNumber } from "../../utils/jerseyNumber";
 
 export type SetPieceSummary = {
   corners: { side: CornerSummary; outcome: SetPieceOutcomeSummary };
@@ -99,13 +112,169 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
+// ── JUGADAS REGISTRADAS ─────────────────────────────────────────────────
+
+const MODALIDAD_CORTA: Record<SetPieceModality, string> = {
+  direct: "directo",
+  prepared: "preparada",
+  quick: "rápido",
+};
+
+/** «preparada 2 · rápido 1», solo lo que tiene valor. Vacío → «—». */
+function modalidades(s: SetPieceRootStats): string {
+  const partes = (Object.keys(SET_PIECE_MODALITY_LABEL) as SetPieceModality[])
+    .filter((m) => (s.byModality[m] ?? 0) > 0)
+    .map((m) => `${MODALIDAD_CORTA[m]} ${s.byModality[m]}`);
+  return partes.length ? partes.join(" · ") : "—";
+}
+
+function ladoSector(tipo: keyof SideSetPieceStats, lado: SideSetPieceStats): string {
+  const partes: string[] = [];
+  if (tipo === "corner" || tipo === "throwIn") {
+    const l = lado[tipo].bySide;
+    if (l.left) partes.push(`izq. ${l.left}`);
+    if (l.right) partes.push(`der. ${l.right}`);
+  }
+  if (tipo === "throwIn") {
+    for (const [sector, n] of Object.entries(lado.throwIn.bySector)) if (n) partes.push(`${sector} ${n}`);
+  }
+  if (tipo === "freeKick") {
+    for (const [zona, n] of Object.entries(lado.freeKick.byZone)) {
+      if (n && zona !== "unknown") partes.push(`${zona} ${n}`);
+    }
+  }
+  return partes.length ? partes.join(" · ") : "—";
+}
+
+/**
+ * Un porcentaje solo con denominador: sin jugadas registradas no hay %. La
+ * tasa ya llega en porcentaje entero desde el motor; aquí no se recalcula.
+ */
+function conTasa(n: number, tasa: number | null): string {
+  return tasa === null ? String(n) : `${n} (${tasa}%)`;
+}
+
+const TIPOS: { key: keyof SideSetPieceStats; label: string }[] = [
+  { key: "corner", label: "Córner" },
+  { key: "freeKick", label: "Falta a favor" },
+  { key: "throwIn", label: "Banda" },
+];
+
+function hayJugadas(lado: SideSetPieceStats): boolean {
+  return lado.corner.recorded + lado.freeKick.recorded + lado.throwIn.total > 0;
+}
+
+function SequenceSection({
+  matchData,
+  includeOpponent = true,
+}: {
+  matchData: MatchData;
+  includeOpponent?: boolean;
+}) {
+  const stats = summarizeSetPieceSequences(matchData.events || []);
+  if (!hayJugadas(stats.team) && !(includeOpponent && hayJugadas(stats.opponent))) return null;
+  // El contrato de los informes: «#dorsal nombre». Sin identificar, se dice.
+  const nombre = (id: string) => {
+    const p = matchData.players.find((x) => x.id === id);
+    return p ? `#${formatJerseyNumber(p)} ${p.name}` : "no identificado";
+  };
+  const quien = (lista: PlayerTally[], sinIdentificar: number) => {
+    const partes = lista.slice(0, 3).map((t) => `${nombre(t.playerId)} ${t.count}`);
+    if (sinIdentificar) partes.push(`no identificado ${sinIdentificar}`);
+    return partes.length ? partes.join(" · ") : "—";
+  };
+  const bandos = [
+    { label: matchData.teamName, lado: stats.team },
+    ...(includeOpponent ? [{ label: matchData.opponentName, lado: stats.opponent }] : []),
+  ];
+  const filas = bandos.flatMap(({ label, lado }) =>
+    TIPOS.filter(({ key }) => lado[key].total > 0).map(({ key, label: tipo }) => ({
+      equipo: label,
+      tipo,
+      key,
+      lado,
+      s: lado[key] as SetPieceRootStats,
+    })),
+  );
+  return (
+    <Section title="Jugadas registradas · córner, falta a favor y banda">
+      <table data-sequence-table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+            <th style={{ ...head, textAlign: "left" }}>Equipo</th>
+            <th style={{ ...head, textAlign: "left" }}>Reinicio</th>
+            <th style={head}>Total</th>
+            <th style={head}>Registradas</th>
+            <th style={head}>Modalidad</th>
+            <th style={head}>Lado / sector</th>
+            <th style={head}>Remates</th>
+            <th style={head}>Goles</th>
+            <th style={head}>Pérdidas</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map(({ equipo, tipo, key, lado, s }) => (
+            <tr
+              key={`${equipo}-${key}`}
+              data-sequence-row={`${equipo}|${key}`}
+              style={{ borderBottom: "0.5px solid #f1f5f9" }}
+            >
+              <td style={rowLabel}>{equipo}</td>
+              <td style={{ ...cell, textAlign: "left" }}>{tipo}</td>
+              <td style={{ ...cell, fontWeight: 700 }}>{s.total}</td>
+              <td style={cell}>{s.recorded}</td>
+              <td style={cell}>{modalidades(s)}</td>
+              <td style={cell}>{ladoSector(key, lado)}</td>
+              <td style={cell}>{conTasa(s.attempts, s.attemptRate)}</td>
+              <td style={cell}>{conTasa(s.goals, s.goalRate)}</td>
+              <td style={cell}>{conTasa(s.losses, s.lossRate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+        {filas
+          .filter(({ s }) => s.recorded > 0)
+          .map(({ equipo, tipo, key, s }) => (
+            <div key={`${equipo}-${key}-quien`} data-sequence-people={`${equipo}|${key}`} style={{ fontSize: 9 }}>
+              <span style={{ fontWeight: 700 }}>
+                {equipo} · {tipo}
+              </span>
+              {" — "}sacadores: {quien(s.takers, s.unidentifiedTakers)}
+              {" · "}finalizadores: {quien(s.finishers, s.unidentifiedFinishers)}
+            </div>
+          ))}
+      </div>
+      <p style={{ fontSize: 8, color: "#94a3b8", marginTop: 6 }}>
+        Remates, goles y pérdidas de una jugada YA están en los tiros, el marcador y las pérdidas
+        del partido: aquí solo se dice de qué reanudación nacieron, no se suman aparte. Una banda
+        no es un tiro. Los porcentajes son sobre las registradas; sin ninguna, no hay porcentaje.
+        Lado y sector, desde la perspectiva del equipo que saca.
+      </p>
+    </Section>
+  );
+}
+
+/**
+ * `includeOpponent = false` (exportación centrada en nuestro equipo) quita
+ * las filas del rival de córners, jugadas de falta, tiros de balón parado y
+ * jugadas registradas. La tabla de FALTAS conserva los dos equipos: las
+ * recibidas son las que comete el rival, y sin ellas no se lee el contexto
+ * reglamentario del partido.
+ */
+export function SetPieceSummaryBoard({
+  matchData,
+  includeOpponent = true,
+}: {
+  matchData: MatchData;
+  includeOpponent?: boolean;
+}) {
   const events = matchData.events || [];
   const propio = buildSetPieceSummary(events, false);
   const rival = buildSetPieceSummary(events, true);
   const columnas = [
     { label: matchData.teamName, data: propio },
-    { label: matchData.opponentName, data: rival },
+    ...(includeOpponent ? [{ label: matchData.opponentName, data: rival }] : []),
   ];
 
   return (
@@ -233,6 +402,8 @@ export function SetPieceSummaryBoard({ matchData }: { matchData: MatchData }) {
           acciones distintas y no se relacionan por cercanía temporal.
         </p>
       </Section>
+
+      <SequenceSection matchData={matchData} includeOpponent={includeOpponent} />
     </div>
   );
 }

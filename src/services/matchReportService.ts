@@ -37,6 +37,21 @@ import {
 } from "../utils/matchContexts";
 import { GoalSequenceEntry, buildGoalSequence, formatMatchTime } from "../utils/goalSequence";
 import {
+  SetPieceSequenceStats,
+  describeCornerStats,
+  describeFreeKickStats,
+  describeThrowInStats,
+  summarizeSetPieceSequences,
+} from "../utils/setPieceStats";
+import {
+  describeAllSequences,
+  isSequenceRoot,
+  sequenceIdsIn,
+  sequenceOutcomeOf,
+} from "../utils/setPieceSequence";
+import { describeSequenceCard } from "../utils/actionSummary";
+import { formatJerseyNumber } from "../utils/jerseyNumber";
+import {
   describeOwnGoalActor,
   isGoalEvent as isGoalEventModel,
   isOffensiveGoal,
@@ -110,6 +125,11 @@ export type MatchReportRelevantEvent = {
   type: string;
   playerName?: string;
   isOpponent: boolean;
+  /**
+   * La jugada a balón parado de la que nació, en una frase. Solo cuando la
+   * hubo: un gol de jugada o de un partido anterior no la lleva.
+   */
+  setPieceNote?: string;
 };
 
 /**
@@ -127,6 +147,23 @@ export type MatchReportSetPieces = {
    * faltas cometidas —esas son del rival— ni tiros.
    */
   freeKickPlays: { team: SetPieceRestartSummary; opponent: SetPieceRestartSummary };
+  /** Córner, falta a favor y banda de los dos bandos, del motor único. */
+  sequences: SetPieceSequenceStats;
+  /**
+   * Las mismas cifras ya redactadas, por bando y por clase, con los
+   * jugadores nombrados. El informe, el PDF y Tactical Pro las leen tal cual.
+   */
+  sequenceLines: Record<
+    "team" | "opponent",
+    { corner: string[]; freeKick: string[]; throwIn: string[] }
+  >;
+  /**
+   * Para cada gol o tiro nacido de una jugada, la jugada en una frase. Por id
+   * de evento: la secuencia de goles y las acciones relevantes la anotan.
+   */
+  sequenceNotes: Record<string, string>;
+  /** ¿Hay al menos una jugada registrada con la ventana única? */
+  hasRecordedSequences: boolean;
 };
 
 export type MatchReport = {
@@ -494,6 +531,32 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   const goalSequence = buildGoalSequence(matchData);
   const matchContexts = buildMatchContexts(matchData);
 
+  // ── BALÓN PARADO ─────────────────────────────────────────────────────
+  // Todo del motor único: aquí no se filtra ningún evento por su cuenta.
+  const sequenceStats = summarizeSetPieceSequences(matchData.events);
+  // El contrato del informe: «#dorsal nombre», con el dorsal que respeta el
+  // «?» de uno todavía desconocido. La jerarquía nombre/dorsal es de la
+  // captura, no de aquí.
+  const nombrar = (id: string) => {
+    const p = matchData.players.find((x) => x.id === id);
+    return p ? `#${formatJerseyNumber(p)} ${p.name}` : "no identificado";
+  };
+  const lineasDe = (lado: "team" | "opponent") => ({
+    corner: describeCornerStats(sequenceStats[lado].corner, nombrar),
+    freeKick: describeFreeKickStats(sequenceStats[lado].freeKick, nombrar),
+    throwIn: describeThrowInStats(sequenceStats[lado].throwIn, nombrar),
+  });
+  const nombresEquipos = {
+    teamName: matchData.teamName || "LOCAL",
+    opponentName: matchData.opponentName || "RIVAL",
+  };
+  const sequenceNotes: Record<string, string> = {};
+  for (const card of describeAllSequences(matchData.events)) {
+    if (card.outcome !== "goal" && card.outcome !== "shot") continue;
+    const frase = describeSequenceCard(card, nombrar, nombresEquipos);
+    for (const id of card.eventIds) sequenceNotes[id] = frase;
+  }
+
   const relevantTypes = new Set<string>([
     ActionType.GOAL,
     ActionType.OWN_GOAL,
@@ -504,20 +567,35 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
   // `timestamp` colocaba un gol del minuto 1 de la segunda parte ANTES que
   // uno del minuto 19 de la primera, porque el reloj se reinicia en el
   // descanso. Ver src/utils/eventOrder.ts.
+  // Una jugada que acabó en TIRO también es relevante: entra por su raíz.
+  // La que acabó en gol no, porque ya entra por el gol y saldría dos veces.
+  const esJugadaConTiro = (e: GameEvent) =>
+    isSequenceRoot(e) && sequenceOutcomeOf(e) === "shot";
   const relevantEvents: MatchReportRelevantEvent[] = chronological(
-    matchData.events.filter((e) => relevantTypes.has(e.type)),
+    matchData.events.filter((e) => relevantTypes.has(e.type) || esJugadaConTiro(e)),
   )
     .map((e) => {
       const isOpponent = !!e.metadata?.isOpponent;
       const player = !isOpponent
         ? matchData.players.find((p) => e.playerIds.includes(p.id) && !p.isOpponent)
         : undefined;
+      const nota = sequenceNotes[e.id];
+      if (esJugadaConTiro(e)) {
+        return {
+          timeLabel: fmtMilliseconds(e.timestamp),
+          period: e.period,
+          type: "Balón parado que acaba en tiro",
+          isOpponent,
+          ...(nota ? { setPieceNote: nota } : {}),
+        };
+      }
       return {
         timeLabel: fmtMilliseconds(e.timestamp),
         period: e.period,
         type: ACTION_LABEL[e.type] || String(e.type),
         playerName: player?.name,
         isOpponent,
+        ...(nota ? { setPieceNote: nota } : {}),
       };
     });
 
@@ -551,6 +629,10 @@ export function generateMatchReport(matchData: MatchData): MatchReport {
         team: summarizeSetPieceRestarts(matchData.events, false),
         opponent: summarizeSetPieceRestarts(matchData.events, true),
       },
+      sequences: sequenceStats,
+      sequenceLines: { team: lineasDe("team"), opponent: lineasDe("opponent") },
+      sequenceNotes,
+      hasRecordedSequences: sequenceIdsIn(matchData.events).length > 0,
     },
     teamTotals,
     highlights: {
@@ -611,7 +693,13 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   // se ejecutaron, y los tiros que el propio tiro declara procedentes de una
   // falta. Las faltas cometidas/recibidas se informan aparte, arriba: son
   // infracciones, no reanudaciones.
-  const cornersTxt = describeSetPieceOutcomes(r.setPieces.corners.team);
+  // En un partido con jugadas registradas, el córner y la falta a favor se
+  // cuentan enteros en «Balón parado»: repetirlos aquí con el vocabulario
+  // antiguo diría lo mismo dos veces con palabras distintas. En un partido
+  // anterior, en cambio, estas líneas son lo ÚNICO que hay, y se quedan.
+  const cornersTxt = r.setPieces.hasRecordedSequences
+    ? null
+    : describeSetPieceOutcomes(r.setPieces.corners.team);
   if (cornersTxt) {
     lines.push(
       `Córners: **${cornersTxt}**` +
@@ -627,7 +715,10 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   }
   // Tercera lectura, separada de las otras dos: la falta a favor que se puso
   // en juego en vez de rematarse. Ni es una infracción ni es un tiro.
-  if (r.setPieces.freeKickPlays.team.total > 0 || r.setPieces.freeKickPlays.opponent.total > 0) {
+  if (
+    !r.setPieces.hasRecordedSequences &&
+    (r.setPieces.freeKickPlays.team.total > 0 || r.setPieces.freeKickPlays.opponent.total > 0)
+  ) {
     const jf = r.setPieces.freeKickPlays.team;
     lines.push(
       `Jugadas de falta — propias **${jf.total}** (${jf.located} con ubicación · ` +
@@ -647,6 +738,32 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
   if (r.goalkeeper) {
     lines.push(
       `**Portero en pista:** ${r.goalkeeper.number} ${r.goalkeeper.name} — ${r.goalkeeper.saves} paradas, ${r.goalkeeper.conceded} goles encajados`,
+    );
+    lines.push("");
+  }
+
+  // ── BALÓN PARADO ─────────────────────────────────────────────────────
+  // Un subapartado por equipo y nunca sumados: los córners del rival no son
+  // los nuestros. Las frases vienen hechas del motor único.
+  const bloquesBalonParado = (["team", "opponent"] as const)
+    .map((lado) => {
+      const l = r.setPieces.sequenceLines[lado];
+      const partes: string[] = [];
+      if (l.corner.length) partes.push(`**Córner** — ${l.corner.join(" · ")}`);
+      if (l.freeKick.length) partes.push(`**Faltas a favor** — ${l.freeKick.join(" · ")}`);
+      if (l.throwIn.length) partes.push(`**Saques de banda** — ${l.throwIn.join(" · ")}`);
+      return { lado, partes };
+    })
+    .filter((b) => b.partes.length > 0);
+  if (bloquesBalonParado.length) {
+    lines.push("## Balón parado");
+    for (const b of bloquesBalonParado) {
+      lines.push(`### ${b.lado === "team" ? r.teamName : r.opponentName}`);
+      b.partes.forEach((p) => lines.push(`- ${p}`));
+    }
+    lines.push(
+      "Los remates, goles y pérdidas de balón parado son los que NACIERON de esas jugadas y ya " +
+        "están dentro de los totales del partido: no se suman aparte. Una banda no es un tiro.",
     );
     lines.push("");
   }
@@ -742,9 +859,11 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
         );
       } else {
         const quien = g.playerName ?? equipoDe(g.scoringTeam);
+        const jugada = r.setPieces.sequenceNotes[g.eventId];
         lines.push(
           `- ${parte} ${g.matchTimeLabel} · ${g.scoreAfter.team}-${g.scoreAfter.opponent} · ` +
-            `${quien} · ${g.sourceLabel}`,
+            `${quien} · ${g.sourceLabel}` +
+            (jugada ? ` · jugada: ${jugada}` : ""),
         );
       }
       // El tiempo de respuesta es null cuando el gol anterior del otro equipo
@@ -778,7 +897,8 @@ export function formatMatchReportAsMarkdown(r: MatchReport): string {
     lines.push("## Acciones relevantes");
     r.relevantEvents.forEach((e) => {
       lines.push(
-        `- **${e.timeLabel}** (${e.isOpponent ? r.opponentName : r.teamName}) — ${e.type}${e.playerName ? ` · ${e.playerName}` : ""}`,
+        `- **${e.timeLabel}** (${e.isOpponent ? r.opponentName : r.teamName}) — ${e.type}${e.playerName ? ` · ${e.playerName}` : ""}` +
+          (e.setPieceNote ? ` · ${e.setPieceNote}` : ""),
       );
     });
     lines.push("");

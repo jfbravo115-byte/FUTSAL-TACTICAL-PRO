@@ -241,6 +241,7 @@ export const ACTION_NOUN: Partial<Record<ActionType | GoalieAction, ActionNoun>>
   [ActionType.FOUL]: { one: "falta", many: "faltas" },
   [ActionType.CORNER]: { one: "córner", many: "córners" },
   [ActionType.SET_PIECE]: { one: "jugada de falta", many: "jugadas de falta" },
+  [ActionType.THROW_IN]: { one: "saque de banda", many: "saques de banda" },
 };
 
 function plural(count: number, noun: ActionNoun): string {

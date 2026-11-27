@@ -44,6 +44,8 @@ import {
   summarizeSetPieceRestarts,
 } from "../utils/setPieceModel";
 
+import { SideSetPieceStats, summarizeSetPieceSequences } from "../utils/setPieceStats";
+
 export { GOAL_ZONE_IDS } from "../utils/goalZones";
 
 export type SpatialSystem = "zone12" | "legacy3x3";
@@ -60,6 +62,8 @@ export type ZoneStats = {
   recoveries: number;
   fouls: number;
   corners: number;
+  /** Saques de banda con origen en la celda, desde la perspectiva de quien saca. */
+  throwIns: number;
 };
 
 export type ZoneBucket = {
@@ -77,7 +81,7 @@ export type GoalZoneStats = {
   goals: number;
 };
 
-export type ZoneMetric = "all" | "shots" | "recoveries" | "losses" | "fouls" | "corners";
+export type ZoneMetric = "all" | "shots" | "recoveries" | "losses" | "fouls" | "corners" | "throwIns";
 
 export type ZoneDashboard = {
   /** Cubo del sistema nuevo. null si el partido no tiene datos de 12 zonas. */
@@ -100,6 +104,12 @@ export type ZoneDashboard = {
     corners: SetPieceOutcomeSummary;
     /** Faltas a favor puestas en juego. No son tiros ni faltas cometidas. */
     freeKickPlays: SetPieceRestartSummary;
+    /**
+     * Córner, falta a favor y banda leídos de `setPieceStats`, la fuente
+     * única de las jugadas a balón parado: lados, sectores, modalidad,
+     * desenlaces, sacadores y finalizadores de ESTE bando y ESTA parte.
+     */
+    sequences: SideSetPieceStats;
   };
   /** Acciones espaciales registradas SIN ubicación (p. ej. faltas antiguas). */
   unlocated: number;
@@ -120,6 +130,7 @@ export type ZoneDashboard = {
     losses: number;
     fouls: number;
     corners: number;
+    throwIns: number;
     conversionPct: number | null;
     accuracyPct: number | null;
   };
@@ -141,6 +152,11 @@ const isLoss = (e: GameEvent) =>
 
 const isFoul = (e: GameEvent) => e.type === ActionType.FOUL;
 const isCorner = (e: GameEvent) => e.type === ActionType.CORNER;
+/**
+ * Saque de banda: la RAÍZ de la jugada. Su desenlace —el tiro, la pérdida—
+ * es otro evento y cuenta en su propia métrica, nunca aquí.
+ */
+const isThrowIn = (e: GameEvent) => e.type === ActionType.THROW_IN;
 /** Jugada de falta: reanudación a favor puesta en juego. No es un tiro. */
 const isFreeKickPlay = (e: GameEvent) => isSetPieceRestart(e);
 
@@ -155,7 +171,7 @@ const isFreeKickPlay = (e: GameEvent) => isSetPieceRestart(e);
  */
 const isLocatable = (e: GameEvent) =>
   !hasRuleDeterminedOrigin(e) &&
-  (isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e));
+  (isShotAttempt(e) || isRecovery(e) || isLoss(e) || isFoul(e) || isCorner(e) || isFreeKickPlay(e) || isThrowIn(e));
 
 export function scopedEvents(
   matchData: MatchData,
@@ -180,6 +196,7 @@ function buildStats(zone: string, label: string, events: GameEvent[]): ZoneStats
     recoveries: events.filter(isRecovery).length,
     fouls: events.filter(isFoul).length,
     corners: events.filter(isCorner).length,
+    throwIns: events.filter(isThrowIn).length,
   };
 }
 
@@ -263,6 +280,7 @@ export type ZoneBreakdown = {
   goals: number;
   fouls: number;
   corners: number;
+  throwIns: number;
   /** Resto ubicado sin categoría propia. Cierra el total. */
   other: number;
 };
@@ -274,7 +292,8 @@ export type ZoneBreakdown = {
  * dentro de `shots`, así que restarlos otra vez inflaría el resto.
  */
 export function zoneBreakdown(zone: ZoneStats): ZoneBreakdown {
-  const categorizadas = zone.shots + zone.losses + zone.recoveries + zone.fouls + zone.corners;
+  const categorizadas =
+    zone.shots + zone.losses + zone.recoveries + zone.fouls + zone.corners + zone.throwIns;
   return {
     total: zone.total,
     losses: zone.losses,
@@ -283,6 +302,7 @@ export function zoneBreakdown(zone: ZoneStats): ZoneBreakdown {
     goals: zone.goals,
     fouls: zone.fouls,
     corners: zone.corners,
+    throwIns: zone.throwIns,
     other: Math.max(0, zone.total - categorizadas),
   };
 }
@@ -316,6 +336,9 @@ export function describeZoneBreakdown(zone: ZoneStats): ZoneBreakdownRow[] {
     { label: "Faltas cometidas", value: String(d.fouls) },
     { label: "Córners", value: String(d.corners) },
   ];
+  // Solo cuando hubo: un partido anterior no puede tener bandas, y una línea
+  // «Saques de banda 0» en cada celda diría que se registraron y no hubo.
+  if (d.throwIns > 0) filas.push({ label: "Saques de banda", value: String(d.throwIns) });
   if (d.other > 0) filas.push({ label: "Otras", value: String(d.other) });
   return filas;
 }
@@ -327,6 +350,7 @@ export function zoneMetricValue(zone: ZoneStats, metric: ZoneMetric): number {
     case "losses": return zone.losses;
     case "fouls": return zone.fouls;
     case "corners": return zone.corners;
+    case "throwIns": return zone.throwIns;
     default: return zone.total;
   }
 }
@@ -375,6 +399,7 @@ export const ZONE_PREDICATES = {
   recoveries: isRecovery,
   fouls: isFoul,
   corners: isCorner,
+  throwIns: isThrowIn,
 } as const;
 
 // ── DASHBOARD ───────────────────────────────────────────────────────────
@@ -429,6 +454,7 @@ export function buildZoneDashboard(
       opponent,
       (e) => classifyZone(e.originGrid) !== null,
     ),
+    sequences: summarizeSetPieceSequences(periodEvents)[opponent ? "opponent" : "team"],
   };
 
   return {
@@ -454,6 +480,7 @@ export function buildZoneDashboard(
       losses: events.filter(isLoss).length,
       fouls: events.filter(isFoul).length,
       corners: events.filter(isCorner).length,
+      throwIns: events.filter(isThrowIn).length,
       conversionPct: attempts.length
         ? Math.round((attempts.filter(isGoal).length / attempts.length) * 100)
         : null,

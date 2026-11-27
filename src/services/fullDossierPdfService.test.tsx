@@ -72,7 +72,6 @@ import {
   destacadoLabel,
   firmaBalance,
   golesLabel,
-  DOSSIER_TACTICAL_CHARS_PER_PAGE,
   INDEX_ROWS_PER_COLUMN,
   hasZoneData,
   DossierSourceError,
@@ -82,13 +81,12 @@ import {
   dossierFingerprint,
   TACTICAL_INCLUDED_LABEL,
   TACTICAL_MISSING_LABEL,
-  buildDossierIndex,
-  buildDossierPages,
+  buildDossierInventory,
   dossierFileName,
   exportFullMatchDossierPdf,
   hasTacticalAnalysis,
 } from "./fullDossierPdfService";
-import { exportMatchReportPdf, splitTacticalProIntoPages } from "./pdfExportService";
+import { exportMatchReportPdf } from "./pdfExportService";
 import { buildZoneDashboard, primaryBucket, zoneMetricValue } from "./matchZonesService";
 import { generateMatchReport } from "./matchReportService";
 import { buildGoalkeeperReports } from "./goalkeeperReportService";
@@ -235,7 +233,23 @@ const DENSO = "denso";
 const DENSO_IA = "denso-ia";
 const textosDe = (ns: HTMLElement[]) => ns.map((n) => n.textContent || "");
 const unirTexto = (ns: HTMLElement[]) => textosDe(ns).join("\n");
-const seccionesDe = (ns: HTMLElement[]) => ns.map((n) => n.getAttribute("data-dossier-section"));
+/** Ids de los bloques de cada página, en orden. */
+const bloquesDe = (n: HTMLElement) =>
+  Array.from(n.querySelectorAll("[data-flow-item]")).map((e) => e.getAttribute("data-flow-item") ?? "");
+/** Todos los bloques del documento. */
+const seccionesDe = (ns: HTMLElement[]) => ns.flatMap(bloquesDe);
+/** El bloque con ese id, donde esté. */
+const bloque = (ns: HTMLElement[], id: string) =>
+  ns.flatMap((n) => Array.from(n.querySelectorAll(`[data-flow-item="${id}"]`)))[0] as HTMLElement | undefined;
+/** Las páginas que contienen algún bloque de esa sección. */
+const paginasDeSeccion = (ns: HTMLElement[], seccion: string) =>
+  ns.filter((n) => n.querySelector(`[data-flow-section="${seccion}"]`));
+/** Las filas del índice de la portada, como {section, page}. */
+const indiceDe = (portada: HTMLElement) =>
+  Array.from(portada.querySelectorAll("[data-dossier-index] tr")).map((tr) => {
+    const td = tr.querySelectorAll("td");
+    return { section: td[0]?.textContent ?? "", page: Number(td[1]?.textContent) };
+  });
 
 const TIEMPO = 60_000;
 
@@ -306,11 +320,16 @@ describe("1 · 34 · dos exportaciones distintas", () => {
     const ns = await dossier(DENSO, md);
     const portada = ns[0];
     expect(portada.getAttribute("data-dossier-cover")).not.toBeNull();
-    const filas = Array.from(portada.querySelectorAll("[data-dossier-index] tr"));
-    const indice = buildDossierIndex(buildDossierPages(md));
-    expect(filas).toHaveLength(indice.length);
-    expect(filas[0].textContent).toContain(indice[0].section);
-    expect(filas[0].textContent).toContain("2");
+    const indice = indiceDe(portada);
+    const secciones = buildDossierInventory(md).sections;
+    // Una entrada por sección del inventario, en su orden…
+    expect(indice.map((r) => r.section)).toEqual(secciones.map((s) => s.title));
+    // …y cada número es la página donde de verdad empieza esa sección.
+    for (const [i, s] of secciones.entries()) {
+      const primera = ns.findIndex((n) => n.querySelector(`[data-flow-section="${s.id}"]`));
+      expect(indice[i].page, s.title).toBe(primera + 1);
+    }
+    expect(indice[0]).toEqual({ section: "Resumen visual y claves", page: 2 });
   }, TIEMPO);
 
   it("el pie lleva el partido, el resultado y la sección", async () => {
@@ -322,10 +341,17 @@ describe("1 · 34 · dos exportaciones distintas", () => {
     }
   }, TIEMPO);
 
-  it("buildDossierPages describe exactamente el documento", async () => {
+  it("el inventario describe exactamente el documento: todos sus bloques, una vez", async () => {
     const md = partidoDenso();
     const ns = await dossier(DENSO, md);
-    expect(ns).toHaveLength(buildDossierPages(md).length + 1);
+    const { items } = buildDossierInventory(md);
+    const pintados = seccionesDe(ns);
+    for (const it of items) {
+      const veces = pintados.filter((id) => id === it.id).length;
+      if (it.rows) expect(veces, it.id).toBeGreaterThanOrEqual(1);
+      else expect(veces, it.id).toBe(1);
+    }
+    expect(new Set(pintados)).toEqual(new Set(items.map((it) => it.id)));
     expect(generateMatchReport(md).score).toEqual({ team: 3, opponent: 1 });
   }, TIEMPO);
 });
@@ -341,9 +367,7 @@ describe("2 · 14-17-29-30 · Tactical Pro", () => {
 
   it("17-30 · el análisis entra ENTERO, sin perder ni duplicar texto", async () => {
     const ns = await dossier(DENSO_IA, partidoDenso({ tacticalAnalysis: IA_LARGO }));
-    const iaPaginas = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("tactical-"),
-    );
+    const iaPaginas = paginasDeSeccion(ns, "tactical-pro");
     expect(iaPaginas.length).toBeGreaterThan(1); // de verdad se dividió
     const texto = unirTexto(ns);
     for (let i = 1; i <= 40; i++) {
@@ -367,10 +391,7 @@ describe("2 · 14-17-29-30 · Tactical Pro", () => {
 
   it("29 · sin análisis no se crea ninguna página vacía, y la portada lo declara", async () => {
     const ns = await dossier(DENSO, partidoDenso({ tacticalAnalysis: undefined }));
-    const iaPaginas = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("tactical-"),
-    );
-    expect(iaPaginas).toHaveLength(0);
+    expect(paginasDeSeccion(ns, "tactical-pro")).toHaveLength(0);
     expect(textosDe(ns)[0]).toContain(TACTICAL_MISSING_LABEL);
   }, TIEMPO);
 
@@ -438,17 +459,17 @@ describe("3 · 18-23 · todos los mapas", () => {
 
   it("20 · mapas de tiros por parte para los dos equipos", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    expect(seccionesDe(ns)).toContain("shots-periods-team");
-    expect(seccionesDe(ns)).toContain("shots-periods-rival");
+    expect(seccionesDe(ns)).toContain("tiros-parte-team");
+    expect(seccionesDe(ns)).toContain("tiros-parte-rival");
   }, TIEMPO);
 
   it("21 · pérdidas, recuperaciones y tiros por periodo, también del rival", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    expect(seccionesDe(ns)).toContain("periods-team");
-    expect(seccionesDe(ns)).toContain("periods-rival");
-    const periodos = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("periods-"),
-    );
+    // Los dos equipos en columnas comparables dentro del MISMO bloque.
+    const caja = bloque(ns, "periodos")!;
+    expect(caja).toBeTruthy();
+    const periodos = Array.from(caja.querySelectorAll<HTMLElement>("[data-dossier-periods]"));
+    expect(periodos.map((p) => p.getAttribute("data-dossier-periods"))).toEqual(["team", "rival"]);
     for (const p of periodos) {
       const t = p.textContent || "";
       expect(t).toContain("Pérdidas");
@@ -459,24 +480,28 @@ describe("3 · 18-23 · todos los mapas", () => {
 
   it("22 · mapas por fase: total del partido y cada parte", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    const fases = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("phase-"),
-    );
-    expect(fases).toHaveLength(4); // pérdidas, recuperaciones, tiros, tiros rivales
-    for (const p of fases) {
-      const t = p.textContent || "";
+    // pérdidas, recuperaciones, tiros, tiros rivales: total y cada parte
+    for (const metrica of ["losses", "recoveries", "shots", "rivalShots"]) {
+      const caja = bloque(ns, `fase-${metrica}`);
+      expect(caja, metrica).toBeTruthy();
+      // Un bloque por métrica con el partido completo y cada parte: nunca
+      // se parte (es un mapa) y sus tres celdas van juntas.
+      expect(caja!.getAttribute("data-flow-kind")).toBe("map");
+      const celdas = Array.from(caja!.querySelectorAll("[data-dossier-phase-cell]")).map((c) => c.getAttribute("data-dossier-phase-cell"));
+      expect(celdas).toEqual(["total", String(Period.FIRST), String(Period.SECOND)]);
+      const t = caja!.textContent ?? "";
       expect(t).toContain("Partido completo");
       expect(t).toContain("1ª parte");
       expect(t).toContain("2ª parte");
       expect(t).toContain("Cobertura de fase");
-      expect(t).toContain("La fase es SIEMPRE la de CD MURCIA");
     }
+    expect(bloque(ns, "fases-nota")!.textContent).toContain("La fase es SIEMPRE la de CD MURCIA");
   }, TIEMPO);
 
   it("23 · destinos de tiro de los dos equipos, con su explicación", async () => {
     const md = partidoDenso();
     const ns = await dossier(DENSO, md);
-    const pagina = ns.find((n) => n.getAttribute("data-dossier-section") === "destinations")!;
+    const pagina = bloque(ns, "destinos")!;
     expect(pagina).toBeTruthy();
     expect(pagina.querySelector('[data-dossier-destination="team"]')).not.toBeNull();
     expect(pagina.querySelector('[data-dossier-destination="rival"]')).not.toBeNull();
@@ -499,20 +524,23 @@ describe("4 · 16-24-25 · informe, porteros y gol en propia", () => {
     // una por una las cifras de la portada y se quitó por eso.
     expect(t).toContain("Resumen");
     expect(t).toContain("Resultado");
-    expect(t).toContain("Jugadores utilizados y rotaciones");
+    expect(t).toContain("Jugadores, tiempos y rotaciones");
+    expect(t).toContain("Rotaciones totales registradas");
     expect(t).toContain("Balón parado");
-    expect(t).toContain("Acciones relevantes");
-    expect(t).toContain("Contextos");
+    expect(t).toContain("Eventos relevantes");
+    expect(t).toContain("Contextos y secuencia de goles");
   }, TIEMPO);
 
-  it("24 · una página por portero relevante, de los dos equipos", async () => {
+  it("24 · una ficha por portero relevante, de los dos equipos, agrupadas", async () => {
     const md = partidoDenso();
     const ns = await dossier(DENSO, md);
     const porteros = buildGoalkeeperReports(md);
     expect(porteros.length).toBeGreaterThanOrEqual(2);
     for (const gk of porteros) {
-      expect(seccionesDe(ns), gk.id).toContain(`gk-${gk.id}`);
+      expect(seccionesDe(ns), gk.id).toContain(`portero-${gk.id}`);
     }
+    // Ya no es una página casi vacía por portero: comparten hoja si caben.
+    expect(paginasDeSeccion(ns, "porteros").length).toBeLessThan(porteros.length);
   }, TIEMPO);
 
   it("25 · el gol en propia no contamina tiros, goleadores ni mapas ofensivos", async () => {
@@ -554,10 +582,7 @@ describe("5 · 28 · partidos antiguos y casos límite", () => {
       }),
     });
     const ns = await dossier("sin-fase", sinFase);
-    const fases = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("phase-"),
-    );
-    expect(fases).toHaveLength(0);
+    expect(seccionesDe(ns).filter((id) => id.startsWith("fase"))).toHaveLength(0);
   }, TIEMPO);
 
   it("un partido con rejilla histórica no inventa la perspectiva", async () => {
@@ -605,8 +630,8 @@ describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
   it("el índice se reparte en dos columnas cuando hay muchas secciones", async () => {
     const md = partidoDenso({ tacticalAnalysis: IA_LARGO });
     const ns = await dossier(DENSO_IA, md);
-    const indice = buildDossierIndex(buildDossierPages(md));
-    expect(indice.length).toBeGreaterThan(INDEX_ROWS_PER_COLUMN);
+    const indice = indiceDe(ns[0]);
+    expect(indice.length).toBe(buildDossierInventory(md).sections.length);
     const caja = ns[0].querySelector("[data-dossier-index-columns]");
     expect(caja?.getAttribute("data-dossier-index-columns")).toBe("2");
     // Y no se pierde ni se duplica ninguna entrada al repartirlas.
@@ -617,51 +642,52 @@ describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
     });
   }, TIEMPO);
 
-  it("y en una sola columna cuando caben", async () => {
+  it("el índice compacto va en dos columnas también en un partido vacío", async () => {
     const ns = await dossier("vacio-indice", partidoDenso({ events: [], players: [] }));
-    const indice = buildDossierIndex(buildDossierPages(partidoDenso({ events: [], players: [] })));
+    const indice = indiceDe(ns[0]);
     expect(indice.length).toBeLessThanOrEqual(INDEX_ROWS_PER_COLUMN);
+    expect(indice.length).toBeGreaterThan(0);
     expect(
       ns[0].querySelector("[data-dossier-index-columns]")?.getAttribute("data-dossier-index-columns"),
-    ).toBe("1");
+    ).toBe("2");
   }, TIEMPO);
 
-  it("el bloque de zonas tiene su propia página, sin nada más", async () => {
+  it("el detalle por zonas no repite el mapa ni el destino que ya están arriba", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    const zonas = ns.find((n) => n.getAttribute("data-dossier-section") === "report-zones");
+    const zonas = bloque(ns, "zonas-detalle");
     expect(zonas).toBeDefined();
-    expect(zonas!.textContent).toContain("Mapas / Zonas");
-    expect(zonas!.textContent).not.toContain("Resultado");
+    expect(zonas!.textContent).toContain("Detalle por zonas · CD MURCIA");
+    expect(zonas!.textContent).not.toContain("Destino de tiro (portería)");
+    expect(zonas!.querySelector("[data-pitch-mode]")).toBeNull();
   }, TIEMPO);
 
   it("y la antigua hoja «datos clave» ya no existe: la portada ya la daba", () => {
     // Era `SummaryKpis` + `FoulsByPeriod`, y `SummaryKpis` ya incluye el
     // desglose de faltas: la portada imprimía exactamente lo mismo.
     expect(seccionesDe([]).length).toBe(0);
-    const secciones = buildDossierPages(partidoDenso()).map((p) => p.key);
-    expect(secciones).not.toContain("report-key");
-    expect(secciones[0]).toBe("visual-summary");
+    const { items } = buildDossierInventory(partidoDenso());
+    expect(items.map((it) => it.id)).not.toContain("report-key");
+    // El resumen visual abre el cuerpo y las claves van con él.
+    expect(items[0].id).toBe("resumen-visual");
+    expect(items[1].id).toBe("resumen-claves");
   });
 
   it("y sin zonas que contar no se crea la página de zonas", async () => {
     const md = partidoDenso({ events: [], players: [] });
     expect(hasZoneData(buildZoneDashboard(md, false))).toBe(false);
     const ns = await dossier("vacio-indice", md);
-    expect(seccionesDe(ns)).not.toContain("report-zones");
+    expect(seccionesDe(ns)).not.toContain("zonas-detalle");
   }, TIEMPO);
 
-  it("el análisis se parte en páginas más cortas que en el informe resumido", async () => {
-    expect(DOSSIER_TACTICAL_CHARS_PER_PAGE).toBeLessThan(3200);
-    const trozos = splitTacticalProIntoPages(IA_LARGO, DOSSIER_TACTICAL_CHARS_PER_PAGE);
-    trozos.forEach((t, i) => {
-      expect(t.length, `trozo ${i + 1}`).toBeLessThanOrEqual(DOSSIER_TACTICAL_CHARS_PER_PAGE);
-    });
-    // Y el dossier usa ESE presupuesto, no el del informe resumido.
+  it("el análisis se reparte por unidades con sentido, y ningún apartado queda solo al pie", async () => {
     const ns = await dossier(DENSO_IA, partidoDenso({ tacticalAnalysis: IA_LARGO }));
-    const paginasIa = ns.filter((n) =>
-      (n.getAttribute("data-dossier-section") || "").startsWith("tactical-"),
-    );
-    expect(paginasIa).toHaveLength(trozos.length);
+    const paginasIa = paginasDeSeccion(ns, "tactical-pro");
+    expect(paginasIa.length).toBeGreaterThan(1);
+    paginasIa.slice(0, -1).forEach((p, i) => {
+      const unidades = Array.from(p.querySelectorAll('[data-flow-section="tactical-pro"]'));
+      const ultima = unidades[unidades.length - 1];
+      expect(ultima.getAttribute("data-flow-kind"), `página IA ${i + 1}`).not.toBe("heading");
+    });
   }, TIEMPO);
 });
 
@@ -674,21 +700,20 @@ describe("5 bis bis · desbordamientos: lo que no cabe no se pierde", () => {
 // enseñar un hueco, un NaN o un jugador inventado.
 
 describe("5 quinquies · resumen visual", () => {
-  const resumenDe = (ns: HTMLElement[]) =>
-    ns.find((n) => n.getAttribute("data-dossier-section") === "visual-summary")!;
+  const resumenDe = (ns: HTMLElement[]) => bloque(ns, "resumen-visual")!;
 
   it("es la página 2, justo detrás de la portada", async () => {
     const ns = await dossier(DENSO, partidoDenso());
-    expect(ns[1].getAttribute("data-dossier-section")).toBe("visual-summary");
+    expect(bloquesDe(ns[1])[0]).toBe("resumen-visual");
     expect(ns[1].textContent).toContain("Página 2 de");
   }, TIEMPO);
 
   it("el índice y los pies cuentan con ella", async () => {
     const md = partidoDenso();
     const ns = await dossier(DENSO, md);
-    const indice = buildDossierIndex(buildDossierPages(md));
-    expect(indice[0]).toEqual({ section: "Resumen visual", page: 2 });
-    expect(ns[0].textContent).toContain("Resumen visual");
+    const indice = indiceDe(ns[0]);
+    expect(indice[0]).toEqual({ section: "Resumen visual y claves", page: 2 });
+    expect(ns[0].textContent).toContain("Resumen visual y claves");
     textosDe(ns).forEach((t, i) => {
       expect(t, `página ${i + 1}`).toContain(`Página ${i + 1} de ${ns.length}`);
     });
@@ -838,8 +863,8 @@ describe("5 bis · 34 · dos botones distintos en el modal de exportación", () 
   });
 
   it("cada botón llama a SU exportador, no al mismo con una bandera", () => {
-    expect(modal).toContain("exportFullMatchDossierPdf(matchData)");
-    expect(modal).toContain("exportMatchReportPdf(matchData)");
+    expect(modal).toContain("exportFullMatchDossierPdf(matchData, { includeOpponent");
+    expect(modal).toContain("exportMatchReportPdf(matchData, { includeOpponent");
   });
 
   it("y el modal no sabe nada de IA", () => {
@@ -911,8 +936,8 @@ describe("5 ter · el dossier solo puede salir del partido recibido", () => {
     expect(codigo).not.toContain("new Map(");
     expect(codigo).not.toContain("WeakMap");
     // Y el partido entra por parámetro, no se busca.
-    expect(codigo).toContain("export async function exportFullMatchDossierPdf(match: MatchData)");
-    expect(codigo).toContain("export function buildDossierPages(matchData: MatchData)");
+    expect(codigo).toMatch(/export async function exportFullMatchDossierPdf\(\s*match: MatchData,/);
+    expect(codigo).toMatch(/export function buildDossierInventory\(\s*matchData: MatchData,/);
   });
 
   it("6 · dos partidos seguidos SIN recargar: B no lleva nada de A", async () => {

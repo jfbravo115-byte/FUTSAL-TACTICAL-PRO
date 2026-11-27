@@ -67,6 +67,12 @@ export const CONTEXT_CARD_H = 118;
 /** Alto de una fila de la secuencia de goles. */
 export const GOAL_ROW_H = 28;
 
+/**
+ * Alto de una fila de gol que además dice de qué jugada a balón parado
+ * nació: la nota va en una segunda línea y puede partirse en dos.
+ */
+export const GOAL_ROW_WITH_NOTE_H = 52;
+
 /** Título de sección más su línea de contexto. */
 export const CONTEXT_SECTION_HEADER_H = 40;
 
@@ -96,6 +102,11 @@ export function paginateContextReport<C, G>(
   contexts: readonly C[],
   goals: readonly G[],
   contentHeight = CONTEXT_PAGE_CONTENT_H,
+  /**
+   * Alto de cada fila de gol. Por defecto todas miden `GOAL_ROW_H`, así que
+   * un partido sin goles de jugada reparte exactamente igual que antes.
+   */
+  goalRowHeight: (goal: G) => number = () => GOAL_ROW_H,
 ): ContextReportPage<C, G>[] {
   const pages: ContextReportPage<C, G>[] = [];
   let actual: ContextReportPage<C, G> | null = null;
@@ -130,7 +141,8 @@ export function paginateContextReport<C, G>(
   let abreGoles = goals.length > 0;
   for (const g of goals) {
     const cabecera = abreGoles ? CONTEXT_SECTION_HEADER_H : 0;
-    if (!actual || libre < cabecera + GOAL_ROW_H) {
+    const alto = goalRowHeight(g);
+    if (!actual || libre < cabecera + alto) {
       nuevaPagina();
       actual!.opensGoals = true;
       libre -= CONTEXT_SECTION_HEADER_H;
@@ -139,7 +151,7 @@ export function paginateContextReport<C, G>(
       libre -= CONTEXT_SECTION_HEADER_H;
     }
     actual!.goals.push(g);
-    libre -= GOAL_ROW_H;
+    libre -= alto;
     abreGoles = false;
   }
 

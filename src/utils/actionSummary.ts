@@ -18,7 +18,7 @@
  * directo hay acciones que no se pueden atribuir y decirlo es más barato que
  * arreglarlo después.
  */
-import { ActionType, GameEvent, MatchData, PhaseOfPlay } from "../types/futsal";
+import { ActionType, GameEvent, MatchData, PhaseOfPlay, Player } from "../types/futsal";
 import { formatEventTypeLabel } from "./eventLabels";
 import { PHASE_LABEL } from "./phaseModel";
 import {
@@ -30,6 +30,8 @@ import {
 } from "./goalModel";
 import { formatZoneLabel } from "./fieldZones";
 import { eventActor } from "./eventActor";
+import { playerDisplayIdentity } from "./playerIdentity";
+import { SequenceCard, describeSequence, sequenceIdOf } from "./setPieceSequence";
 
 export type ActionSummaryNames = { teamName: string; opponentName: string };
 
@@ -54,12 +56,23 @@ export function describeActor(
  */
 export function describeRegisteredAction(
   event: GameEvent,
-  matchData: Pick<MatchData, "players" | "teamName" | "opponentName">,
+  matchData: Pick<MatchData, "players" | "teamName" | "opponentName"> & {
+    events?: GameEvent[];
+  },
 ): string {
   const nombres: ActionSummaryNames = {
     teamName: matchData.teamName || "LOCAL",
     opponentName: matchData.opponentName || "RIVAL",
   };
+
+  // Una jugada a balón parado se confirma ENTERA: tipo, equipo, dónde,
+  // cómo, quién saca, quién remata y en qué acabó. Confirmar solo el córner
+  // dejaría al operador sin saber si el gol que acaba de anotar se guardó.
+  const secuencia = sequenceIdOf(event);
+  if (secuencia && matchData.events) {
+    const card = describeSequence(matchData.events, secuencia);
+    if (card) return describeSequenceCard(card, captureNamer(matchData.players), nombres);
+  }
   const equipoAutor = sideName(actorSide(event), nombres);
   const quien = describeActor(event, matchData.players);
 
@@ -104,4 +117,47 @@ export function deservesConfirmation(event: GameEvent): boolean {
     event.type !== ActionType.FORMATION_CHANGE &&
     event.type !== ActionType.SUBSTITUTION
   );
+}
+
+/**
+ * Una jugada, en una línea.
+ *
+ * Sacador y finalizador se nombran por separado aunque sean el mismo
+ * jugador: decir «saca y remata #7» es un dato, no una redundancia.
+ *
+ * Quién NOMBRA lo decide quien llama: la captura usa la jerarquía nombre /
+ * dorsal de `playerDisplayIdentity`, y el informe y las exportaciones su
+ * contrato de siempre, «#dorsal nombre». La frase es la misma.
+ */
+export function describeSequenceCard(
+  card: SequenceCard,
+  nombrar: (playerId: string) => string,
+  nombres: ActionSummaryNames,
+): string {
+  const etiqueta = (id: string | null) => (id ? nombrar(id) : "no identificado");
+  const partes = [
+    `${card.rootLabel} (${card.isOpponent ? nombres.opponentName : nombres.teamName})`,
+  ];
+  if (card.locationLabel) partes.push(card.locationLabel);
+  if (card.modalityLabel) partes.push(card.modalityLabel);
+  partes.push(`saca ${etiqueta(card.takerId)}`);
+  if (card.outcome === "shot" || card.outcome === "goal" || card.outcome === "loss") {
+    partes.push(
+      `${card.outcome === "loss" ? "pierde" : "remata"} ${etiqueta(card.finisherId)}`,
+    );
+  }
+  if (card.outcomeLabel) partes.push(card.outcomeLabel);
+  return partes.join(" · ");
+}
+
+/** El nombre de la captura: la jerarquía nombre / dorsal. */
+export function captureNamer(players: Player[]): (playerId: string) => string {
+  return (id) => {
+    const p = players.find((x) => x.id === id);
+    if (!p) return "no identificado";
+    const ident = playerDisplayIdentity(p, { players, maxCaracteres: 22 });
+    return ident.kind === "nombre"
+      ? `#${ident.dorsal} ${ident.nombreCompleto}`
+      : `#${ident.dorsal} ${ident.etiquetaProvisional}`;
+  };
 }

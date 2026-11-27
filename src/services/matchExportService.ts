@@ -1,5 +1,5 @@
 import { formatJerseyNumber } from "../utils/jerseyNumber";
-import { MatchData, Period, ActionType } from "../types/futsal";
+import { MatchData, Period, ActionType, GameEvent, Player } from "../types/futsal";
 import { formatAnyZoneLabel } from "../utils/legacyZoneMap";
 import { formatDestinationLabel } from "../utils/goalZones";
 import { EXIT_OUTCOME_LABEL, formatDeclaredResponse, isExitOutcome } from "../utils/goalkeeperActions";
@@ -18,6 +18,23 @@ import { phaseCsvLabel } from "../utils/phaseModel";
 import { beneficiarySide, isGoalEvent } from "../utils/goalModel";
 import { eventActor } from "../utils/eventActor";
 import { generateMatchReport } from "./matchReportService";
+import {
+  DEFLECT_OUTCOME_LABEL,
+  SET_PIECE_MODALITY_LABEL,
+  SET_PIECE_ROOT_LABEL,
+  SEQUENCE_OUTCOME_LABEL,
+  THROW_IN_SIDE_LABEL,
+  finisherIdOf,
+  isDeflectOutcome,
+  modalityOf,
+  rootKindOf,
+  rootOfSequence,
+  sequenceIdOf,
+  sequenceOutcomeOf,
+  takerIdOf,
+  throwInSectorOf,
+  throwInSideOf,
+} from "../utils/setPieceSequence";
 
 const PERIOD_LABEL: Record<number, string> = {
   [Period.FIRST]: "1P",
@@ -45,12 +62,96 @@ function cornerSideLabel(e: { metadata?: Record<string, any>; originGrid?: strin
   return side ? formatCornerSideLabel(side) : "";
 }
 
+/** Columnas de la jugada a balón parado, en el orden en que se exportan. */
+export const SEQUENCE_CSV_COLUMNS = [
+  "secuencia",
+  "accion_raiz",
+  "modalidad_reinicio",
+  "sacador",
+  "finalizador",
+  "lado_reinicio",
+  "sector_reinicio",
+  "desenlace_secuencia",
+  "origen_despeje",
+] as const;
+
+/**
+ * Las nueve columnas de la jugada para UNA fila del CSV.
+ *
+ * Todas las filas de una jugada —la reanudación y su desenlace— llevan los
+ * mismos valores: así se puede filtrar «tiros nacidos de un córner» sin
+ * cruzar filas. Lo que distingue la reanudación del remate sigue siendo
+ * `tipo_accion`; contar córneres es contar filas CORNER, nunca filas con
+ * `accion_raiz` = Córner (cada jugada con desenlace tiene dos).
+ *
+ * El despeje o la falta de los que nace una jugada NO son parte de ella
+ * —están enlazados, no absorbidos—: comparten `secuencia` para poder
+ * seguirles el rastro, pero el resto de columnas quedan vacías.
+ *
+ * Vacío = no registrado. Un evento de un partido anterior deja las nueve
+ * columnas vacías: no se deduce ninguna jugada a posteriori.
+ */
+function sequenceCsvCells(e: GameEvent, events: GameEvent[], players: Player[]): string[] {
+  const vacio = SEQUENCE_CSV_COLUMNS.map(() => "");
+  const propia = sequenceIdOf(e);
+  if (!propia) {
+    const enlazada = e.metadata?.linkedSequenceId;
+    if (typeof enlazada === "string" && enlazada) vacio[0] = enlazada;
+    return vacio;
+  }
+  const raiz = rootOfSequence(events, propia);
+  if (!raiz) return [propia, ...vacio.slice(1)];
+  const nombre = (id: string | null) => (id ? players.find((p) => p.id === id)?.name ?? "" : "");
+  const raizKind = rootKindOf(raiz);
+  const modalidad = modalityOf(raiz);
+  const desenlace = sequenceOutcomeOf(raiz);
+  const lado =
+    raizKind === "corner"
+      ? cornerSideLabel(raiz)
+      : raizKind === "throw_in"
+        ? (() => {
+            const l = throwInSideOf(raiz);
+            return l ? THROW_IN_SIDE_LABEL[l] : "";
+          })()
+        : "";
+  const sector =
+    raizKind === "throw_in"
+      ? throwInSectorOf(raiz) ?? ""
+      : raizKind === "free_kick"
+        ? raiz.originGrid ?? ""
+        : "";
+  const despejeId = raiz.metadata?.fromDeflectEventId;
+  const despeje = despejeId ? events.find((x) => x.id === despejeId) : undefined;
+  const origenDespeje = despejeId
+    ? isDeflectOutcome(despeje?.metadata?.deflectOutcome)
+      ? `Despeje del portero · ${DEFLECT_OUTCOME_LABEL[despeje!.metadata!.deflectOutcome]}`
+      : "Despeje del portero"
+    : "";
+  return [
+    propia,
+    raizKind ? SET_PIECE_ROOT_LABEL[raizKind] : "",
+    modalidad ? SET_PIECE_MODALITY_LABEL[modalidad] : "",
+    // El sacador sale de la raíz y el finalizador del desenlace: pueden ser
+    // jugadores distintos y nunca se intercambian. El portero que recibe el
+    // remate no es el finalizador (ver `finisherIdOf`).
+    nombre(takerIdOf(raiz)),
+    nombre(finisherIdOf(events, propia)),
+    lado,
+    sector,
+    desenlace ? SEQUENCE_OUTCOME_LABEL[desenlace] : "",
+    origenDespeje,
+  ];
+}
+
 export function buildActionsCsv(matchData: MatchData): string {
   // "zona" y "destino" conservan el identificador interno para poder cruzar
   // datos; "zona_texto" y "destino_texto" son los legibles.
   // "fase" se añade AL FINAL para no mover ninguna columna existente: una
   // hoja o un script que leyera por posición sigue funcionando igual.
-  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase", "gol_para"];
+  const header = ["fecha", "periodo", "tiempo", "equipo", "jugador", "tipo_accion", "accion_texto", "resultado", "x", "y", "zona", "zona_texto", "destino", "destino_texto", "zona_portero", "respuesta_portero", "resultado_salida", "lado_corner", "desenlace_balon_parado", "accion_desde", "fase", "gol_para",
+    // La jugada a balón parado, también AL FINAL: ninguna columna anterior
+    // cambia de posición.
+    ...SEQUENCE_CSV_COLUMNS];
   const rows = matchData.events
     .slice()
     .sort((a, b) => a.wallClock - b.wallClock)
@@ -107,6 +208,7 @@ export function buildActionsCsv(matchData: MatchData): string {
             ? matchData.teamName
             : matchData.opponentName
           : "",
+        ...sequenceCsvCells(e, matchData.events, matchData.players),
       ].map(csvCell).join(",");
     });
   return "\uFEFF" + [header.map(csvCell).join(","), ...rows].join("\n");

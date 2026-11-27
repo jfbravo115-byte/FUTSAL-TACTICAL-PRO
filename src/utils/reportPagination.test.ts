@@ -110,7 +110,8 @@ describe("la plantilla no vuelve a fijar el denominador", () => {
     // siempre y nadie se enteraría hasta entregárselo al cuerpo técnico.
     expect(PLANTILLA).toContain("...pdfContextRefs.current.filter(Boolean),");
     expect(PLANTILLA).toMatch(/const nodes: HTMLDivElement\[\] = \[/);
-    expect(PLANTILLA).toContain("for (const node of nodes) {");
+    // Y se capturan con el ensamblado COMPARTIDO, que no deforma páginas.
+    expect(PLANTILLA).toContain("const pdf = await capturePagesToPdf(nodes);");
   });
 
   it("las páginas del análisis se montan y se CAPTURAN al final", () => {
@@ -227,5 +228,34 @@ describe("reparto de las páginas de contexto táctico", () => {
 
   it("un número absurdo de páginas de contexto no resta", () => {
     expect(teamReportPageCount(2, -5)).toBe(9);
+  });
+});
+
+// ── PÁGINAS DE JUGADORES QUE SE APLASTABAN ──────────────────────────────
+//
+// La «comparativa por ítem» apilaba catorce gráficas una debajo de otra y la
+// página medía 1585 px; el perfil táctico del rival, con catorce fichas a
+// tres columnas, 1400. La captura las encogía para meterlas en un A4.
+
+describe("las páginas de jugadores del PDF de MatchTracker caben en un A4", () => {
+  it("la comparativa por ítem va en DOS columnas, en las dos páginas de equipo", () => {
+    expect(PLANTILLA.match(/<div data-pdf-item-grid style=\{\{ display: 'grid', gridTemplateColumns: '1fr 1fr'/g)).toHaveLength(2);
+  });
+
+  it("cada barra se rotula con el dorsal (siempre cabe) y el nombre está en la tabla", () => {
+    expect(PLANTILLA).not.toContain("{p.name.split(' ')[0]}</div>); })}");
+    expect(PLANTILLA).toContain("Cada barra es un jugador, por dorsal");
+  });
+
+  it("el perfil táctico crece en columnas, no en filas, según el número de fichas", () => {
+    expect(PLANTILLA).toContain("const radarCols = team.players.length <= 9 ? 3 : team.players.length <= 16 ? 4 : 5;");
+    expect(PLANTILLA).toContain("gridTemplateColumns: `repeat(${radarCols}, 1fr)`");
+    // El radar conserva su geometría: solo cambia el tamaño impreso.
+    expect(PLANTILLA).toContain("<svg width={radarSize} height={radarSize} viewBox={`0 0 ${W} ${H}`}>");
+  });
+
+  it("y se captura con el ensamblado compartido, que nunca deforma una página", () => {
+    expect(PLANTILLA).toContain("const pdf = await capturePagesToPdf(nodes);");
+    expect(PLANTILLA).not.toContain("const imgH = Math.min(pdfH, pdfW * imgAspect);");
   });
 });
